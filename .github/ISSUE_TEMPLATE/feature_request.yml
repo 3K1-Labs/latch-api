@@ -1,0 +1,73 @@
+name: Feature request
+description: Propose a feature, improvement, or product change
+title: '[Feature]: '
+labels: ['feature']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or business problem are we solving?
+      placeholder: Users cannot delete their account or revoke all sessions at once.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the change you want.
+      placeholder: Add DELETE /v1/account that revokes all refresh tokens, deletes the credential backup, and removes the user row.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the concrete outcomes that define done.
+      placeholder: |
+        - All refresh tokens for the user are revoked
+        - Credential backup is deleted
+        - Subsequent auth attempts return 401
+        - Audit log entry recorded
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0
+        - P1
+        - P2
+        - P3
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Authentication
+        - Backup & Encryption
+        - Recovery
+        - Prices
+        - Transaction History
+        - Stellar / Soroban
+        - Security
+        - DevEx / CI
+        - Database
+        - API Contract
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies or blockers
+      description: Link related issues, mobile client work, migrations, or security requirements.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I linked or described related work where possible
+          required: true

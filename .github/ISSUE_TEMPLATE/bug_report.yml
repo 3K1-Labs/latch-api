@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a defect, regression, or unexpected behavior
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please include enough detail for someone else on the team to reproduce it.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+      placeholder: POST /v1/auth/verify returns 500 instead of 401 when OTP is expired...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Authentication
+        - Backup & Encryption
+        - Recovery
+        - Prices
+        - Transaction History
+        - Rate Limiting
+        - Database / Migrations
+        - Email
+        - CI/CD
+        - Security
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment environment, endpoint, and branch/commit if known
+      placeholder: Render production / POST /v1/auth/register / master @ abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. POST /v1/auth/register with { "email": "test@example.com" }
+        2. Wait for OTP TTL to expire (10 min)
+        3. POST /v1/auth/verify with the expired OTP
+        4. Observe 500 instead of 401
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: User impact
+      description: Who is affected and how severe is it?
+      placeholder: Blocks all logins when OTP expires — affects all users.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, request/response, or screenshots
+      description: Paste any relevant evidence here. Redact all tokens, OTPs, and credentials.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I confirmed this report does not include secrets, tokens, OTPs, private keys, or credentials
+          required: true
+        - label: I searched for an existing issue first
+          required: true
