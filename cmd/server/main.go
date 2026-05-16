@@ -95,19 +95,22 @@ func main() {
 	r.Use(timeoutMiddleware(30 * time.Second))
 	r.Use(generalLimiter)
 
-	// Serve the swagger spec with host/scheme derived from the incoming request
-	// so the "Try it out" button works on both localhost and production.
-	r.GET("/swagger/doc.json", func(c *gin.Context) {
-		docs.SwaggerInfo.Host = c.Request.Host
-		if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
-			docs.SwaggerInfo.Schemes = []string{"https"}
-		} else {
-			docs.SwaggerInfo.Schemes = []string{"http"}
+	// Intercept doc.json inside the wildcard to inject the correct host/scheme
+	// from the incoming request, so "Try it out" works on both localhost and production.
+	r.GET("/swagger/*any", func(c *gin.Context) {
+		if c.Param("any") == "/doc.json" {
+			docs.SwaggerInfo.Host = c.Request.Host
+			if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
+				docs.SwaggerInfo.Schemes = []string{"https"}
+			} else {
+				docs.SwaggerInfo.Schemes = []string{"http"}
+			}
+			c.Header("Content-Type", "application/json")
+			c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
+			return
 		}
-		c.Header("Content-Type", "application/json")
-		c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
+		ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
 	})
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := db.Ping(c.Request.Context()); err != nil {
