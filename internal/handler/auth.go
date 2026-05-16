@@ -14,6 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 )
@@ -54,14 +55,14 @@ func NewAuthHandler(
 // @Accept       json
 // @Produce      json
 // @Param        body body registerRequest true "Email address"
-// @Success      200 {object} messageResponse
-// @Failure      400 {object} errorResponse
-// @Failure      500 {object} errorResponse
+// @Success      200 {object} messageDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      500 {object} apiErrorResponse
 // @Router       /v1/auth/register [post]
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "email is required")
 		return
 	}
 
@@ -72,13 +73,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		RETURNING id
 	`, req.Email).Scan(&userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
 	otp, err := h.otpSvc.Generate(c.Request.Context(), req.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
@@ -90,7 +91,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRegister), c.ClientIP(), c.Request.UserAgent(), nil)
 
-	c.JSON(http.StatusOK, gin.H{"message": "OTP sent"})
+	httpx.Success(c, http.StatusOK, gin.H{"message": "OTP sent"})
 }
 
 // Verify godoc
@@ -100,25 +101,25 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body body verifyRequest true "Email and OTP"
-// @Success      200 {object} tokenResponse
-// @Failure      400 {object} errorResponse
-// @Failure      401 {object} errorResponse
-// @Failure      500 {object} errorResponse
+// @Success      200 {object} tokenDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      401 {object} apiErrorResponse
+// @Failure      500 {object} apiErrorResponse
 // @Router       /v1/auth/verify [post]
 func (h *AuthHandler) Verify(c *gin.Context) {
 	var req verifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email and otp are required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "email and otp are required")
 		return
 	}
 
 	ok, err := h.otpSvc.Verify(c.Request.Context(), req.Email, req.OTP)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired OTP"})
+		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired OTP")
 		return
 	}
 
@@ -129,25 +130,25 @@ func (h *AuthHandler) Verify(c *gin.Context) {
 		RETURNING id
 	`, req.Email).Scan(&userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
 	accessToken, err := h.issueAccessToken(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
 	refreshToken, err := h.issueRefreshToken(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionEmailVerified), c.ClientIP(), c.Request.UserAgent(), nil)
 
-	c.JSON(http.StatusOK, gin.H{
+	httpx.Success(c, http.StatusOK, gin.H{
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 		"expires_in":    int(h.accessTTL.Seconds()),
@@ -161,15 +162,15 @@ func (h *AuthHandler) Verify(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body body refreshRequest true "Refresh token"
-// @Success      200 {object} tokenResponse
-// @Failure      400 {object} errorResponse
-// @Failure      401 {object} errorResponse
-// @Failure      500 {object} errorResponse
+// @Success      200 {object} tokenDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      401 {object} apiErrorResponse
+// @Failure      500 {object} apiErrorResponse
 // @Router       /v1/auth/refresh [post]
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req refreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token is required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "refresh_token is required")
 		return
 	}
 
@@ -183,7 +184,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		WHERE token_hash = $1
 	`, tokenHash).Scan(&userID, &expiresAt, &revoked)
 	if err != nil || revoked || time.Now().After(expiresAt) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired refresh token")
 		return
 	}
 
@@ -193,17 +194,17 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	accessToken, err := h.issueAccessToken(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
 	newRefreshToken, err := h.issueRefreshToken(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	httpx.Success(c, http.StatusOK, gin.H{
 		"access_token":  accessToken,
 		"refresh_token": newRefreshToken,
 		"expires_in":    int(h.accessTTL.Seconds()),
@@ -217,15 +218,15 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body body logoutRequest true "Refresh token to revoke"
-// @Success      200 {object} messageResponse
-// @Failure      400 {object} errorResponse
-// @Failure      401 {object} errorResponse
+// @Success      200 {object} messageDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      401 {object} apiErrorResponse
 // @Security     BearerAuth
 // @Router       /v1/auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req logoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token is required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "refresh_token is required")
 		return
 	}
 
@@ -237,7 +238,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionLogout), c.ClientIP(), c.Request.UserAgent(), nil)
 
-	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+	httpx.Success(c, http.StatusOK, gin.H{"message": "logged out"})
 }
 
 func (h *AuthHandler) issueAccessToken(userID string) (string, error) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
 
@@ -22,8 +23,8 @@ func NewPricesHandler(priceSvc *service.PriceService) *PricesHandler {
 // @Tags         market
 // @Produce      json
 // @Param        tokens query string false "Comma-separated token symbols" example(native,xlm)
-// @Success      200 {object} map[string]float64
-// @Failure      400 {object} errorResponse
+// @Success      200 {object} pricesDataResponse
+// @Failure      400 {object} apiErrorResponse
 // @Router       /v1/prices [get]
 func (h *PricesHandler) GetPrices(c *gin.Context) {
 	raw := c.Query("tokens")
@@ -38,10 +39,10 @@ func (h *PricesHandler) GetPrices(c *gin.Context) {
 		}
 	}
 	if len(tokens) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tokens param is required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "tokens param is required")
 		return
 	}
 
 	prices := h.priceSvc.GetPrices(c.Request.Context(), tokens)
-	c.JSON(http.StatusOK, prices)
+	httpx.Success(c, http.StatusOK, prices)
 }

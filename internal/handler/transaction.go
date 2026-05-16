@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
 
@@ -36,15 +37,15 @@ type simulateResponse struct {
 // @Accept       json
 // @Produce      json
 // @Param        body body simulateRequest true "XDR-encoded transaction envelope and optional network"
-// @Success      200 {object} simulateResponse
-// @Failure      400 {object} errorResponse
-// @Failure      422 {object} simulateResponse "Simulation returned an error"
-// @Failure      502 {object} errorResponse
+// @Success      200 {object} simulateDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      422 {object} simulateDataResponse "Simulation returned an error from the RPC"
+// @Failure      502 {object} apiErrorResponse
 // @Router       /api/transaction/simulate [post]
 func (h *TransactionHandler) Simulate(c *gin.Context) {
 	var req simulateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "xdr is required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "xdr is required")
 		return
 	}
 
@@ -55,16 +56,18 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 
 	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "simulation failed: " + err.Error()})
+		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "simulation failed: "+err.Error())
 		return
 	}
 
 	if result.Error != "" {
-		c.JSON(http.StatusUnprocessableEntity, simulateResponse{Error: result.Error})
+		// RPC simulation errors are wrapped in data, not in the error envelope,
+		// because they are structured RPC-level results, not API errors.
+		httpx.Success(c, http.StatusUnprocessableEntity, simulateResponse{Error: result.Error})
 		return
 	}
 
-	c.JSON(http.StatusOK, simulateResponse{
+	httpx.Success(c, http.StatusOK, simulateResponse{
 		MinResourceFee:  result.MinResourceFee,
 		TransactionData: result.TransactionData,
 		Results:         result.Results,

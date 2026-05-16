@@ -26,11 +26,35 @@ definitions:
       version:
         type: string
     type: object
+  internal_handler.apiErrorBody:
+    properties:
+      code:
+        example: INTERNAL_ERROR
+        type: string
+      message:
+        example: internal error
+        type: string
+    type: object
+  internal_handler.apiErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/internal_handler.apiErrorBody'
+    type: object
+  internal_handler.backupExistsDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.backupExistsResponse'
+    type: object
   internal_handler.backupExistsResponse:
     properties:
       exists:
         example: true
         type: boolean
+    type: object
+  internal_handler.blobDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.blobResponse'
     type: object
   internal_handler.blobResponse:
     properties:
@@ -38,11 +62,21 @@ definitions:
         additionalProperties: {}
         type: object
     type: object
-  internal_handler.errorResponse:
+  internal_handler.historyDataInner:
     properties:
-      error:
-        example: internal error
+      network:
+        example: testnet
         type: string
+      transactions:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+    type: object
+  internal_handler.historyDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.historyDataInner'
     type: object
   internal_handler.initiateRecoveryRequest:
     properties:
@@ -59,11 +93,29 @@ definitions:
     required:
     - refresh_token
     type: object
+  internal_handler.messageDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.messageResponse'
+    type: object
   internal_handler.messageResponse:
     properties:
       message:
         example: OTP sent
         type: string
+    type: object
+  internal_handler.pricesDataResponse:
+    properties:
+      data:
+        additionalProperties:
+          format: float64
+          type: number
+        type: object
+    type: object
+  internal_handler.recoveryTokenDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.recoveryTokenResponse'
     type: object
   internal_handler.recoveryTokenResponse:
     properties:
@@ -87,6 +139,11 @@ definitions:
         type: string
     required:
     - email
+    type: object
+  internal_handler.simulateDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.simulateResponse'
     type: object
   internal_handler.simulateRequest:
     properties:
@@ -116,6 +173,11 @@ definitions:
         $ref: '#/definitions/internal_handler.CredentialBlob'
       smart_account_address:
         type: string
+    type: object
+  internal_handler.tokenDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.tokenResponse'
     type: object
   internal_handler.tokenResponse:
     properties:
@@ -178,19 +240,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.simulateResponse'
+            $ref: '#/definitions/internal_handler.simulateDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "422":
-          description: Simulation returned an error
+          description: Simulation returned an error from the RPC
           schema:
-            $ref: '#/definitions/internal_handler.simulateResponse'
+            $ref: '#/definitions/internal_handler.simulateDataResponse'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Simulate Soroban transaction
       tags:
       - transaction
@@ -212,15 +274,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.messageResponse'
+            $ref: '#/definitions/internal_handler.messageDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
       summary: Logout
@@ -245,19 +307,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.tokenResponse'
+            $ref: '#/definitions/internal_handler.tokenDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Rotate refresh token
       tags:
       - auth
@@ -280,15 +342,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.messageResponse'
+            $ref: '#/definitions/internal_handler.messageDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Register / resend OTP
       tags:
       - auth
@@ -311,19 +373,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.tokenResponse'
+            $ref: '#/definitions/internal_handler.tokenDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Verify OTP → tokens
       tags:
       - auth
@@ -337,15 +399,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.backupExistsResponse'
+            $ref: '#/definitions/internal_handler.backupExistsDataResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
       summary: Check backup exists
@@ -369,19 +431,19 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_handler.messageResponse'
+            $ref: '#/definitions/internal_handler.messageDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
       summary: Store encrypted backup
@@ -405,19 +467,19 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_handler.messageResponse'
+            $ref: '#/definitions/internal_handler.messageDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
       summary: Store encrypted backup
@@ -425,7 +487,7 @@ paths:
       - backup
   /v1/history:
     get:
-      description: Returns the transaction history for the given Stellar account address.
+      description: Returns the transaction history for the given Stellar account.
         Combines Horizon payments and Soroban SAC events.
       parameters:
       - description: Classic Stellar address (G…)
@@ -455,20 +517,19 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_handler.historyDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
       summary: Transaction history
@@ -490,40 +551,37 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              format: float64
-              type: number
-            type: object
+            $ref: '#/definitions/internal_handler.pricesDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Live USD prices
       tags:
       - market
   /v1/recovery/blob:
     get:
       description: Decrypts and returns the credential blob. Requires a recovery-scoped
-        JWT (from /v1/recovery/verify).
+        JWT (from POST /v1/recovery/verify).
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.blobResponse'
+            $ref: '#/definitions/internal_handler.blobDataResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - RecoveryAuth: []
       summary: Fetch decrypted credential blob
@@ -548,11 +606,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.messageResponse'
+            $ref: '#/definitions/internal_handler.messageDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Initiate account recovery
       tags:
       - recovery
@@ -575,19 +633,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler.recoveryTokenResponse'
+            $ref: '#/definitions/internal_handler.recoveryTokenDataResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/internal_handler.errorResponse'
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Verify recovery OTP
       tags:
       - recovery

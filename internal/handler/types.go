@@ -28,7 +28,7 @@ type verifyRecoveryRequest struct {
 	OTP   string `json:"otp"   binding:"required"      example:"123456"`
 }
 
-// ── Response types ────────────────────────────────────────────────────────────
+// ── Inner data types (what goes inside {"data": ...}) ─────────────────────────
 
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -53,6 +53,52 @@ type blobResponse struct {
 	Blob map[string]any `json:"blob"`
 }
 
-type errorResponse struct {
-	Error string `json:"error" example:"internal error"`
+// ── Success envelope wrappers for Swagger ─────────────────────────────────────
+
+type tokenDataResponse struct {
+	Data tokenResponse `json:"data"`
+}
+
+type recoveryTokenDataResponse struct {
+	Data recoveryTokenResponse `json:"data"`
+}
+
+type messageDataResponse struct {
+	Data messageResponse `json:"data"`
+}
+
+type backupExistsDataResponse struct {
+	Data backupExistsResponse `json:"data"`
+}
+
+type blobDataResponse struct {
+	Data blobResponse `json:"data"`
+}
+
+type pricesDataResponse struct {
+	Data map[string]float64 `json:"data"`
+}
+
+type historyDataInner struct {
+	Transactions []map[string]any `json:"transactions"`
+	Network      string           `json:"network" example:"testnet"`
+}
+
+type historyDataResponse struct {
+	Data historyDataInner `json:"data"`
+}
+
+type simulateDataResponse struct {
+	Data simulateResponse `json:"data"`
+}
+
+// ── Error envelope ────────────────────────────────────────────────────────────
+
+type apiErrorBody struct {
+	Code    string `json:"code"    example:"INTERNAL_ERROR"`
+	Message string `json:"message" example:"internal error"`
+}
+
+type apiErrorResponse struct {
+	Error apiErrorBody `json:"error"`
 }

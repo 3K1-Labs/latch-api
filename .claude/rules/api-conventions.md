@@ -4,23 +4,26 @@ These rules apply to every handler, route, and middleware change. Follow them wi
 
 ## Response shape
 
-All responses — success and error — are JSON with `Content-Type: application/json`.
+All responses are JSON with `Content-Type: application/json`. Use the helpers in `internal/httpx` — never call `c.JSON` directly in handlers.
 
-**Error body** (always use this exact key):
+**Success** — `httpx.Success(c, status, data)`:
 ```json
-{ "error": "descriptive message" }
+{ "data": { "access_token": "...", "refresh_token": "...", "expires_in": 900 } }
+{ "data": { "message": "backup stored" } }
+{ "data": { "exists": true } }
 ```
 
-**Success body** (use the most specific shape for the endpoint, not a generic wrapper):
+**Error** — `httpx.Fail(c, status, httpx.ErrXxx, "message")`:
 ```json
-{ "access_token": "...", "refresh_token": "...", "expires_in": 900 }
-{ "message": "backup stored" }
-{ "exists": true }
+{ "error": { "code": "VALIDATION_ERROR", "message": "email is required" } }
+{ "error": { "code": "UNAUTHORIZED",     "message": "invalid or expired OTP" } }
+{ "error": { "code": "INTERNAL_ERROR",   "message": "internal error" } }
+{ "error": { "code": "RATE_LIMITED",     "message": "too many requests, please try again later" } }
 ```
 
-Never wrap success data in a generic `{ "data": ... }` envelope — the existing endpoints do not use one.
+**Middleware** — use `httpx.AbortFail(c, status, code, message)` when you need to abort the chain.
 
-Use `c.JSON(status, v)` for every response. Never write raw bytes, call `json.NewEncoder` directly, or use the old `writeJSON` helper (it has been removed).
+Error codes live in `internal/httpx/errors.go`. Never use raw strings for codes — always use the typed constants. Never rename or remove a code once shipped; clients branch on them.
 
 ## Status codes
 
@@ -157,8 +160,8 @@ Affected endpoints: `/v1/backup` (POST and PUT both upsert).
 
 Before adding any new endpoint:
 1. Route uses `/v1/` prefix, lowercase kebab-case, noun/verb pattern
-2. Uses `c.JSON(status, v)` for all responses
-3. Error body uses `{"error": "..."}` key; internal errors return `"internal error"`
+2. Uses `httpx.Success` / `httpx.Fail` / `httpx.AbortFail` — never `c.JSON` directly
+3. Error body uses `{"error": {"code": "...", "message": "..."}}` with a typed `httpx.ErrXxx` constant
 4. Status codes match the table above (400 for validation, not 422)
 5. Input bound with `c.ShouldBindJSON` and validated at handler boundary before any service call
 6. `c.Request.Context()` passed to all service and store calls
