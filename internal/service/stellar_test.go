@@ -198,9 +198,9 @@ func TestDecodeI128Amount(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		stroops  uint64
-		wantAmt  string
+		name    string
+		stroops uint64
+		wantAmt string
 	}{
 		{"zero", 0, "0.0000000"},
 		{"one stroop", 1, "0.0000001"},

@@ -28,7 +28,7 @@ func sorobanRPCHandler(t *testing.T, results map[string]any) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      1,
 			"result":  result,
@@ -90,7 +90,7 @@ func TestSorobanService_SimulateTransaction_SimError(t *testing.T) {
 func TestSorobanService_SimulateTransaction_RPCError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      1,
 			"error": map[string]any{

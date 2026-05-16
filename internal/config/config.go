@@ -46,22 +46,22 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:                getEnv("PORT", "8080"),
-		DatabaseURL:         requireEnv("DATABASE_URL"),
-		RedisURL:            requireEnv("REDIS_URL"),
-		JWTSecret:           requireEnv("JWT_SECRET"),
-		ResendAPIKey:  requireEnv("RESEND_API_KEY"),
-		EmailFromName: getEnv("EMAIL_FROM_NAME", "Latch"),
-		EmailFromAddr: getEnv("EMAIL_FROM_ADDR", "noreply@yourdomain.com"),
-		ServerPepper: getEnv("SERVER_PEPPER", ""),
-		AppEnv:              getEnv("APP_ENV", "development"),
+		Port:                 getEnv("PORT", "8080"),
+		DatabaseURL:          requireEnv("DATABASE_URL"),
+		RedisURL:             requireEnv("REDIS_URL"),
+		JWTSecret:            requireEnv("JWT_SECRET"),
+		ResendAPIKey:         requireEnv("RESEND_API_KEY"),
+		EmailFromName:        getEnv("EMAIL_FROM_NAME", "Latch"),
+		EmailFromAddr:        getEnv("EMAIL_FROM_ADDR", "noreply@yourdomain.com"),
+		ServerPepper:         getEnv("SERVER_PEPPER", ""),
+		AppEnv:               getEnv("APP_ENV", "development"),
 		SorobanRPCURLTestnet: getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org"),
 		SorobanRPCURLMainnet: getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com"),
 		HorizonURLTestnet:    getEnv("HORIZON_URL_TESTNET", "https://horizon-testnet.stellar.org"),
 		HorizonURLMainnet:    getEnv("HORIZON_URL_MAINNET", "https://horizon.stellar.org"),
 		NativeSACIDTestnet:   getEnv("NATIVE_SAC_ID_TESTNET", ""),
 		NativeSACIDMainnet:   getEnv("NATIVE_SAC_ID_MAINNET", ""),
-		CoinGeckoAPIKey: getEnv("COINGECKO_API_KEY", ""),
+		CoinGeckoAPIKey:      getEnv("COINGECKO_API_KEY", ""),
 	}
 
 	var err error

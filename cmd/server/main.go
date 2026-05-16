@@ -26,12 +26,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/docs"
 	"github.com/latch/backend/internal/config"
 	"github.com/latch/backend/internal/handler"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/store"
-	"github.com/latch/backend/docs"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -179,7 +179,9 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
 }
 
 // timeoutMiddleware propagates a request-scoped deadline so that service and

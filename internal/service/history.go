@@ -16,15 +16,15 @@ const historyCacheTTL = 30 * time.Second
 
 // Transaction is the unified history record returned to the mobile client.
 type Transaction struct {
-	ID          string    `json:"id"`
-	Hash        string    `json:"hash"`
-	Type        string    `json:"type"`
-	From        string    `json:"from,omitempty"`
-	To          string    `json:"to,omitempty"`
-	Amount      string    `json:"amount,omitempty"`
-	Asset       string    `json:"asset,omitempty"` // "native" or "CODE:issuer"
-	Status      string    `json:"status"`          // "success" | "failed"
-	CreatedAt   time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+	Hash      string    `json:"hash"`
+	Type      string    `json:"type"`
+	From      string    `json:"from,omitempty"`
+	To        string    `json:"to,omitempty"`
+	Amount    string    `json:"amount,omitempty"`
+	Asset     string    `json:"asset,omitempty"` // "native" or "CODE:issuer"
+	Status    string    `json:"status"`          // "success" | "failed"
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // HistoryService aggregates Horizon operations and Soroban SAC events.
@@ -40,13 +40,13 @@ func NewHistoryService(soroban *SorobanService, horizon *HorizonService, redisCl
 
 // HistoryParams controls what to fetch and from which network.
 type HistoryParams struct {
-	GAddress     string // classic G-address for Horizon
-	CAddress     string // smart contract C-address for Soroban events
-	Network      string // "testnet" | "mainnet"
+	GAddress      string // classic G-address for Horizon
+	CAddress      string // smart contract C-address for Soroban events
+	Network       string // "testnet" | "mainnet"
 	SorobanRPCURL string
-	HorizonURL   string
-	NativeSACID  string // native SAC contract ID for this network
-	Limit        int
+	HorizonURL    string
+	NativeSACID   string // native SAC contract ID for this network
+	Limit         int
 }
 
 // GetHistory returns a merged, deduplicated, time-sorted list of transactions.

@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	otpTTL          = 10 * time.Minute
-	otpMaxAttempts  = 5
-	otpLength       = 6
+	otpTTL         = 10 * time.Minute
+	otpMaxAttempts = 5
+	otpLength      = 6
 )
 
 type OTPService struct {

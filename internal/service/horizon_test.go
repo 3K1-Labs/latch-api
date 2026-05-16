@@ -26,19 +26,19 @@ func TestHorizonService_GetAccountOperations_Payment(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"_embedded": map[string]any{
 				"records": []map[string]any{
 					{
-						"id":                      "op-1",
-						"transaction_hash":        "txhash1",
-						"transaction_successful":  true,
-						"type":                    "payment",
-						"created_at":              "2024-06-01T12:00:00Z",
-						"from":                    "GFROM",
-						"to":                      "GTO",
-						"amount":                  "50.0000000",
-						"asset_type":              "native",
+						"id":                     "op-1",
+						"transaction_hash":       "txhash1",
+						"transaction_successful": true,
+						"type":                   "payment",
+						"created_at":             "2024-06-01T12:00:00Z",
+						"from":                   "GFROM",
+						"to":                     "GTO",
+						"amount":                 "50.0000000",
+						"asset_type":             "native",
 					},
 				},
 			},
@@ -106,7 +106,7 @@ func TestHorizonService_GetAccountOperations_LimitCapped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedLimit = r.URL.Query().Get("limit")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"_embedded": map[string]any{"records": []any{}},
 		})
 	}))
@@ -124,7 +124,7 @@ func TestHorizonService_GetAccountOperations_LimitCapped(t *testing.T) {
 func TestHorizonService_GetAccountOperations_CreateAccount(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"_embedded": map[string]any{
 				"records": []map[string]any{
 					{

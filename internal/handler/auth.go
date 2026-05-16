@@ -187,7 +187,9 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	h.db.Exec(c.Request.Context(), `UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1`, tokenHash)
+	if _, err := h.db.Exec(c.Request.Context(), `UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1`, tokenHash); err != nil {
+		log.Printf("revoke old refresh token: %v", err)
+	}
 
 	accessToken, err := h.issueAccessToken(userID)
 	if err != nil {
@@ -228,7 +230,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	tokenHash := hashToken(req.RefreshToken)
-	h.db.Exec(c.Request.Context(), `UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1`, tokenHash)
+	if _, err := h.db.Exec(c.Request.Context(), `UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1`, tokenHash); err != nil {
+		log.Printf("revoke refresh token on logout: %v", err)
+	}
 
 	userID := middleware.UserIDFromContext(c.Request.Context())
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionLogout), c.ClientIP(), c.Request.UserAgent(), nil)

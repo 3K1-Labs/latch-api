@@ -107,7 +107,7 @@ install-tools:
 	go install github.com/air-verse/air@latest
 	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 	go install github.com/swaggo/swag/cmd/swag@latest
-	@echo "Install golangci-lint separately: brew install golangci-lint"
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 ## clean: Remove build artefacts
 clean:

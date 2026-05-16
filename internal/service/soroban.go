@@ -30,11 +30,6 @@ type rpcRequest struct {
 	Params  any    `json:"params"`
 }
 
-type rpcResponse[T any] struct {
-	Result *T        `json:"result"`
-	Error  *rpcError `json:"error"`
-}
-
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -76,11 +71,11 @@ func (s *SorobanService) call(ctx context.Context, rpcURL, method string, params
 // ── simulateTransaction ──────────────────────────────────────────────────────
 
 type SimulateResult struct {
-	MinResourceFee  string            `json:"minResourceFee"`
-	TransactionData string            `json:"transactionData"` // base64 XDR SorobanTransactionData
-	Results         []SimResultEntry  `json:"results,omitempty"`
-	LatestLedger    int64             `json:"latestLedger"`
-	Error           string            `json:"error,omitempty"`
+	MinResourceFee  string           `json:"minResourceFee"`
+	TransactionData string           `json:"transactionData"` // base64 XDR SorobanTransactionData
+	Results         []SimResultEntry `json:"results,omitempty"`
+	LatestLedger    int64            `json:"latestLedger"`
+	Error           string           `json:"error,omitempty"`
 }
 
 type SimResultEntry struct {
@@ -123,9 +118,9 @@ type GetEventsParams struct {
 }
 
 type EventFilter struct {
-	Type        string     `json:"type"`       // "contract"
+	Type        string     `json:"type"` // "contract"
 	ContractIDs []string   `json:"contractIds"`
-	Topics      [][]string `json:"topics"`     // each row is a topic matcher; rows are OR'd
+	Topics      [][]string `json:"topics"` // each row is a topic matcher; rows are OR'd
 }
 
 type eventPagination struct {
