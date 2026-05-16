@@ -11,11 +11,11 @@ import (
 )
 
 type HistoryHandler struct {
-	historySvc *service.HistoryService
+	historySvc historyService
 	cfg        *config.Config
 }
 
-func NewHistoryHandler(historySvc *service.HistoryService, cfg *config.Config) *HistoryHandler {
+func NewHistoryHandler(historySvc historyService, cfg *config.Config) *HistoryHandler {
 	return &HistoryHandler{historySvc: historySvc, cfg: cfg}
 }
 

@@ -11,17 +11,17 @@ import (
 )
 
 type AuthHandler struct {
-	authSvc  *service.AuthService
-	otpSvc   *service.OTPService
-	emailSvc *service.EmailService
-	auditSvc *service.AuditService
+	authSvc  authService
+	otpSvc   otpService
+	emailSvc emailService
+	auditSvc auditService
 }
 
 func NewAuthHandler(
-	authSvc *service.AuthService,
-	otpSvc *service.OTPService,
-	emailSvc *service.EmailService,
-	auditSvc *service.AuditService,
+	authSvc authService,
+	otpSvc otpService,
+	emailSvc emailService,
+	auditSvc auditService,
 ) *AuthHandler {
 	return &AuthHandler{
 		authSvc:  authSvc,

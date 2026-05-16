@@ -15,11 +15,15 @@ import (
 
 const pricesCacheTTL = 60 * time.Second
 
-// tokenToCoinGeckoID maps Stellar token identifiers to CoinGecko IDs.
-// "native" and "XLM" both map to "stellar".
+// tokenToCoinGeckoID maps Stellar token identifiers (lowercased) to CoinGecko IDs.
+// Both the asset code and common aliases are listed so callers can use either form.
 var tokenToCoinGeckoID = map[string]string{
 	"native": "stellar",
 	"xlm":    "stellar",
+	"btc":    "bitcoin",
+	"usdt":   "tether",
+	"usdc":   "usd-coin",
+	"eth":    "ethereum",
 }
 
 // PriceData holds the current price and 24-hour change for a token.
