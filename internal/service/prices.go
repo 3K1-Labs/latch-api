@@ -15,15 +15,57 @@ import (
 
 const pricesCacheTTL = 60 * time.Second
 
-// tokenToCoinGeckoID maps Stellar token identifiers (lowercased) to CoinGecko IDs.
-// Both the asset code and common aliases are listed so callers can use either form.
+// tokenToCoinGeckoID maps Stellar token asset codes (lowercased) to CoinGecko IDs.
+// Sources: latch-mobile UI, freighter-mobile, Stellar Expert top-50, LOBSTR curated list.
+// Yield tokens (yXLM, yBTC, …) report the price of their underlying asset.
 var tokenToCoinGeckoID = map[string]string{
-	"native": "stellar",
-	"xlm":    "stellar",
+	// Stellar native — all common aliases
+	"native":  "stellar",
+	"xlm":     "stellar",
+	"stellar": "stellar",
+	"yxlm":    "stellar", // Ultra Capital yield XLM
+
+	// USD stablecoins
+	"usdc":  "usd-coin",
+	"yusdc": "usd-coin", // Ultra Capital yield USDC
+	"usdt":  "tether",
+	"pyusd": "paypal-usd",  // PayPal USD (paxos.com)
+	"usdy":  "ondo-us-dollar-yield", // Ondo Finance
+	"usdm":  "mountain-protocol-usdm",
+
+	// EUR stablecoins
+	"eurc": "euro-coin", // Circle EURC (circle.com + mykobo.co on Stellar)
+
+	// Bitcoin & wrapped BTC
 	"btc":    "bitcoin",
-	"usdt":   "tether",
-	"usdc":   "usd-coin",
-	"eth":    "ethereum",
+	"bitcoin": "bitcoin",
+	"ybtc":   "bitcoin", // Ultra Capital yield BTC
+	"btcln":  "bitcoin", // Bitcoin Lightning token on Stellar
+
+	// Ethereum & wrapped ETH
+	"eth":      "ethereum",
+	"ethereum": "ethereum",
+	"yeth":     "ethereum", // Ultra Capital yield ETH
+
+	// Other major L1s wrapped on Stellar
+	"sol":    "solana",
+	"solana": "solana",
+	"dot":    "polkadot",
+	"xrp":    "ripple",
+	"ripple": "ripple",
+	"doge":   "dogecoin",
+	"ltc":    "litecoin",
+	"bnb":    "binancecoin",
+	"ada":    "cardano",
+	"avax":   "avalanche-2",
+	"matic":  "matic-network",
+	"pol":    "matic-network",
+
+	// Stellar-native ecosystem tokens
+	"aqua": "aquarius-2",       // Aquarius AMM governance token
+	"shx":  "stronghold-token", // Stronghold
+	"velo": "velo",             // Velo Protocol
+	"tft":  "threefold-token",  // ThreeFold
 }
 
 // PriceData holds the current price and 24-hour change for a token.
