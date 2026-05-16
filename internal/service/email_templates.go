@@ -24,20 +24,10 @@ const otpTemplate = `<!DOCTYPE html>
               <!-- Logo: icon + wordmark -->
               <table cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
-                  <!-- Lock mark -->
-                  <td style="width:40px;height:40px;background:#7C5CFC;border-radius:10px;text-align:center;vertical-align:middle;">
-                    <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 auto;">
-                      <tr>
-                        <td align="center">
-                          <!-- Shackle -->
-                          <div style="width:14px;height:7px;border:2.5px solid #fff;border-bottom:none;border-radius:7px 7px 0 0;margin:0 auto;"></div>
-                          <!-- Body -->
-                          <div style="width:20px;height:13px;background:#fff;border-radius:3px;margin-top:0;position:relative;text-align:center;line-height:13px;">
-                            <span style="display:inline-block;width:4px;height:4px;background:#7C5CFC;border-radius:50%;margin-top:4px;"></span>
-                          </div>
-                        </td>
-                      </tr>
-                    </table>
+                  <!-- Logo image -->
+                  <td style="vertical-align:middle;">
+                    <img src="https://res.cloudinary.com/dqm97vrty/image/upload/v1778953244/logoLoading_gcurdp.png"
+                         width="48" height="40" alt="Latch" style="display:block;border:0;">
                   </td>
                   <!-- Wordmark -->
                   <td style="padding-left:14px;vertical-align:middle;">
@@ -136,17 +126,9 @@ const recoveryTemplate = `<!DOCTYPE html>
             <td bgcolor="#0B0B14" style="padding:32px 40px 28px;">
               <table cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
-                  <td style="width:40px;height:40px;background:#7C5CFC;border-radius:10px;text-align:center;vertical-align:middle;">
-                    <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 auto;">
-                      <tr>
-                        <td align="center">
-                          <div style="width:14px;height:7px;border:2.5px solid #fff;border-bottom:none;border-radius:7px 7px 0 0;margin:0 auto;"></div>
-                          <div style="width:20px;height:13px;background:#fff;border-radius:3px;margin-top:0;position:relative;text-align:center;line-height:13px;">
-                            <span style="display:inline-block;width:4px;height:4px;background:#7C5CFC;border-radius:50%;margin-top:4px;"></span>
-                          </div>
-                        </td>
-                      </tr>
-                    </table>
+                  <td style="vertical-align:middle;">
+                    <img src="https://res.cloudinary.com/dqm97vrty/image/upload/v1778953244/logoLoading_gcurdp.png"
+                         width="48" height="40" alt="Latch" style="display:block;border:0;">
                   </td>
                   <td style="padding-left:14px;vertical-align:middle;">
                     <span style="color:#FFFFFF;font-size:22px;font-weight:800;letter-spacing:4px;display:block;line-height:1;">LATCH</span>
@@ -166,7 +148,7 @@ const recoveryTemplate = `<!DOCTYPE html>
           <tr>
             <td bgcolor="#FFFBF2" style="padding:16px 40px;border-bottom:1px solid #FDE8BB;">
               <p style="margin:0;font-size:13px;color:#8B6200;line-height:1.5;">
-                ⚠️&nbsp;&nbsp;<strong>Security alert:</strong> A recovery was requested for your account.
+                &#9888;&#65039;&nbsp;&nbsp;<strong>Security alert:</strong> A recovery was requested for your account.
                 If this wasn't you, secure your email immediately.
               </p>
             </td>
