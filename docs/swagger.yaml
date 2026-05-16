@@ -1,0 +1,605 @@
+basePath: /
+definitions:
+  github_com_latch_backend_internal_service.SimResultEntry:
+    properties:
+      auth:
+        description: base64 XDR auth entries
+        items:
+          type: string
+        type: array
+      xdr:
+        description: base64 XDR return value
+        type: string
+    type: object
+  internal_handler.CredentialBlob:
+    properties:
+      credential_id:
+        type: string
+      key_data_hex:
+        type: string
+      mnemonic:
+        type: string
+      passkey_private_key:
+        type: string
+      smart_account:
+        type: string
+      version:
+        type: string
+    type: object
+  internal_handler.backupExistsResponse:
+    properties:
+      exists:
+        example: true
+        type: boolean
+    type: object
+  internal_handler.blobResponse:
+    properties:
+      blob:
+        additionalProperties: {}
+        type: object
+    type: object
+  internal_handler.errorResponse:
+    properties:
+      error:
+        example: internal error
+        type: string
+    type: object
+  internal_handler.initiateRecoveryRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    required:
+    - email
+    type: object
+  internal_handler.logoutRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  internal_handler.messageResponse:
+    properties:
+      message:
+        example: OTP sent
+        type: string
+    type: object
+  internal_handler.recoveryTokenResponse:
+    properties:
+      expires_in:
+        example: 900
+        type: integer
+      recovery_token:
+        type: string
+    type: object
+  internal_handler.refreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  internal_handler.registerRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    required:
+    - email
+    type: object
+  internal_handler.simulateRequest:
+    properties:
+      network:
+        type: string
+      xdr:
+        type: string
+    required:
+    - xdr
+    type: object
+  internal_handler.simulateResponse:
+    properties:
+      error:
+        type: string
+      min_resource_fee:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/github_com_latch_backend_internal_service.SimResultEntry'
+        type: array
+      transaction_data:
+        type: string
+    type: object
+  internal_handler.storeBackupRequest:
+    properties:
+      blob:
+        $ref: '#/definitions/internal_handler.CredentialBlob'
+      smart_account_address:
+        type: string
+    type: object
+  internal_handler.tokenResponse:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        example: 900
+        type: integer
+      refresh_token:
+        type: string
+    type: object
+  internal_handler.verifyRecoveryRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      otp:
+        example: "123456"
+        type: string
+    required:
+    - email
+    - otp
+    type: object
+  internal_handler.verifyRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      otp:
+        example: "123456"
+        type: string
+    required:
+    - email
+    - otp
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Stellar wallet backend — auth, encrypted credential backup, and account
+    recovery.
+  title: Latch API
+  version: "1.0"
+paths:
+  /api/transaction/simulate:
+    post:
+      consumes:
+      - application/json
+      description: Simulates a Soroban transaction via the RPC and returns min resource
+        fee, transaction data, and results.
+      parameters:
+      - description: XDR-encoded transaction envelope and optional network
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.simulateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.simulateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "422":
+          description: Simulation returned an error
+          schema:
+            $ref: '#/definitions/internal_handler.simulateResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Simulate Soroban transaction
+      tags:
+      - transaction
+  /v1/auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Revokes the provided refresh token. Requires a valid access token.
+      parameters:
+      - description: Refresh token to revoke
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.logoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Logout
+      tags:
+      - auth
+  /v1/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Revokes the provided refresh token and issues a new access + refresh
+        token pair.
+      parameters:
+      - description: Refresh token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.tokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Rotate refresh token
+      tags:
+      - auth
+  /v1/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Upserts a user by email and sends a 6-digit OTP. Always returns
+        200 to prevent email enumeration.
+      parameters:
+      - description: Email address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.registerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Register / resend OTP
+      tags:
+      - auth
+  /v1/auth/verify:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the OTP and returns a JWT access token plus a refresh
+        token.
+      parameters:
+      - description: Email and OTP
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.verifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.tokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Verify OTP → tokens
+      tags:
+      - auth
+  /v1/backup:
+    get:
+      description: Returns whether the authenticated user has a stored credential
+        backup.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.backupExistsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Check backup exists
+      tags:
+      - backup
+    post:
+      consumes:
+      - application/json
+      description: Encrypts the credential blob server-side and upserts it. POST and
+        PUT are identical — both upsert.
+      parameters:
+      - description: Credential blob and smart account address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.storeBackupRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Store encrypted backup
+      tags:
+      - backup
+    put:
+      consumes:
+      - application/json
+      description: Encrypts the credential blob server-side and upserts it. POST and
+        PUT are identical — both upsert.
+      parameters:
+      - description: Credential blob and smart account address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.storeBackupRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Store encrypted backup
+      tags:
+      - backup
+  /v1/history:
+    get:
+      description: Returns the transaction history for the given Stellar account address.
+        Combines Horizon payments and Soroban SAC events.
+      parameters:
+      - description: Classic Stellar address (G…)
+        in: query
+        name: g_address
+        type: string
+      - description: Soroban contract address (C…)
+        in: query
+        name: c_address
+        type: string
+      - default: testnet
+        description: 'Network: testnet or mainnet'
+        enum:
+        - testnet
+        - mainnet
+        in: query
+        name: network
+        type: string
+      - default: 50
+        description: Max results
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Transaction history
+      tags:
+      - wallet
+  /v1/prices:
+    get:
+      description: Returns the current USD price for each requested Stellar asset.
+        Results are Redis-cached for 60 seconds.
+      parameters:
+      - description: Comma-separated token symbols
+        example: native,xlm
+        in: query
+        name: tokens
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              format: float64
+              type: number
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Live USD prices
+      tags:
+      - market
+  /v1/recovery/blob:
+    get:
+      description: Decrypts and returns the credential blob. Requires a recovery-scoped
+        JWT (from /v1/recovery/verify).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.blobResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      security:
+      - RecoveryAuth: []
+      summary: Fetch decrypted credential blob
+      tags:
+      - recovery
+  /v1/recovery/initiate:
+    post:
+      consumes:
+      - application/json
+      description: Sends a recovery OTP to the email if a verified account exists.
+        Always returns 200 to prevent enumeration.
+      parameters:
+      - description: Email address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.initiateRecoveryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Initiate account recovery
+      tags:
+      - recovery
+  /v1/recovery/verify:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the recovery OTP and returns a short-lived recovery-scoped
+        JWT.
+      parameters:
+      - description: Email and OTP
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.verifyRecoveryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.recoveryTokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.errorResponse'
+      summary: Verify recovery OTP
+      tags:
+      - recovery
+securityDefinitions:
+  BearerAuth:
+    description: 'Enter: Bearer <access_token>'
+    in: header
+    name: Authorization
+    type: apiKey
+  RecoveryAuth:
+    description: 'Enter: Bearer <recovery_token>  (obtained from POST /v1/recovery/verify)'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

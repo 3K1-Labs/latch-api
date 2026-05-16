@@ -1,0 +1,45 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build the server binary into tmp/
+  cmd = "go build -o ./tmp/main ./cmd/server"
+  bin = "./tmp/main"
+
+  # Debounce — wait 500ms after the last file change before rebuilding
+  delay = 500
+
+  # Don't watch these
+  exclude_dir  = ["tmp", "vendor", "migrations", "internal/db/generated"]
+  exclude_file = []
+  exclude_regex = ["_test\\.go$"]
+
+  # Trigger rebuild on changes to these extensions
+  include_ext = ["go", "toml", "env"]
+
+  # Kill the running process before restarting
+  kill_delay  = "200ms"
+  send_interrupt = true
+
+  # Log the build command
+  log = "build-errors.log"
+
+  # Pass args to the binary (useful for feature flags)
+  args_bin = []
+
+[log]
+  time      = true
+  main_only = false
+
+[color]
+  main    = "magenta"
+  watcher = "cyan"
+  build   = "yellow"
+  runner  = "green"
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll      = true
+
+[misc]
+  clean_on_exit = true
