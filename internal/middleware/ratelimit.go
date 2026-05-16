@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/httpx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -57,7 +58,7 @@ func newRateLimiter(redisClient *redis.Client, limit int, window time.Duration, 
 			return
 		}
 		if !allowed {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "too many requests, please try again later"})
+			httpx.AbortFail(c, http.StatusTooManyRequests, httpx.ErrRateLimited, "too many requests, please try again later")
 			return
 		}
 		c.Next()

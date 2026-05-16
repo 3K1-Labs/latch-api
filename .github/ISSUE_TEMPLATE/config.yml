@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security disclosures
+    url: https://github.com/3000-Labs/latch-backend/security/policy
+    about: Please do not file public issues for security vulnerabilities.

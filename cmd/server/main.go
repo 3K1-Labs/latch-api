@@ -26,12 +26,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/latch/backend/docs"
 	"github.com/latch/backend/internal/config"
+	db "github.com/latch/backend/internal/db/generated"
 	"github.com/latch/backend/internal/handler"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/store"
-	"github.com/latch/backend/docs"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -50,11 +52,11 @@ func main() {
 	defer stop()
 
 	// Infrastructure
-	db, err := store.NewPostgresPool(ctx, cfg.DatabaseURL)
+	pool, err := store.NewPostgresPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("postgres: %v", err)
 	}
-	defer db.Close()
+	defer pool.Close()
 
 	redisClient, err := store.NewRedisClient(ctx, cfg.RedisURL)
 	if err != nil {
@@ -62,21 +64,27 @@ func main() {
 	}
 	defer redisClient.Close()
 
+	// Store layer — wrap the pgx pool with a database/sql adapter for sqlc
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer sqlDB.Close()
+	queries := db.New(sqlDB)
+
 	// Services
+	authSvc := service.NewAuthService(queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
 	otpSvc := service.NewOTPService(redisClient)
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
-	auditSvc := service.NewAuditService(db)
-	encSvc := service.NewEncryptionService(db, cfg.ServerPepper)
+	auditSvc := service.NewAuditService(queries)
+	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
+	backupSvc := service.NewBackupService(queries, encSvc)
 	sorobanSvc := service.NewSorobanService()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
 
 	// Handlers
-	authHandler := handler.NewAuthHandler(db, otpSvc, emailSvc, auditSvc,
-		cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
-	backupHandler := handler.NewBackupHandler(db, encSvc, auditSvc)
-	recoveryHandler := handler.NewRecoveryHandler(db, otpSvc, emailSvc, encSvc, auditSvc,
+	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
+	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
+	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
 	historyHandler := handler.NewHistoryHandler(historySvc, cfg)
@@ -113,7 +121,7 @@ func main() {
 	})
 
 	r.GET("/health", func(c *gin.Context) {
-		if err := db.Ping(c.Request.Context()); err != nil {
+		if err := pool.Ping(c.Request.Context()); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "error": "database unreachable"})
 			return
 		}
@@ -179,7 +187,9 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
 }
 
 // timeoutMiddleware propagates a request-scoped deadline so that service and

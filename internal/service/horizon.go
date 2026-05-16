@@ -26,9 +26,9 @@ func NewHorizonService() *HorizonService {
 type HorizonOperation struct {
 	ID                    string `json:"id"`
 	TransactionHash       string `json:"transaction_hash"`
-	TransactionSuccessful  bool   `json:"transaction_successful"`
-	Type                   string `json:"type"`
-	CreatedAt              string `json:"created_at"`
+	TransactionSuccessful bool   `json:"transaction_successful"`
+	Type                  string `json:"type"`
+	CreatedAt             string `json:"created_at"`
 
 	// payment / path_payment fields
 	From        string `json:"from,omitempty"`
@@ -42,7 +42,6 @@ type HorizonOperation struct {
 	Account         string `json:"account,omitempty"`
 	Funder          string `json:"funder,omitempty"`
 	StartingBalance string `json:"starting_balance,omitempty"`
-
 }
 
 type horizonOperationsResponse struct {

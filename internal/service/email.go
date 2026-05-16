@@ -7,9 +7,9 @@ import (
 )
 
 type EmailService struct {
-	client    *resend.Client
-	fromName  string
-	fromAddr  string
+	client   *resend.Client
+	fromName string
+	fromAddr string
 }
 
 func NewEmailService(apiKey, fromName, fromAddr string) *EmailService {

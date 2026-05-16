@@ -5,7 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
+	db "github.com/latch/backend/internal/db/generated"
 )
 
 const (
@@ -17,31 +18,32 @@ const (
 // in encryption.go. It knows about the DB (for Phase 1 key lookup) and the server
 // pepper (for Phase 2 derivation).
 type EncryptionService struct {
-	db           *pgxpool.Pool
+	q            *db.Queries
 	serverPepper string
 }
 
-func NewEncryptionService(db *pgxpool.Pool, serverPepper string) *EncryptionService {
-	return &EncryptionService{db: db, serverPepper: serverPepper}
+func NewEncryptionService(q *db.Queries, serverPepper string) *EncryptionService {
+	return &EncryptionService{q: q, serverPepper: serverPepper}
 }
 
 // KeyForUser retrieves or generates the per-user AES-256 key for Phase 1 encryption.
 // Uses an upsert that always returns the canonical stored key, so concurrent calls
 // cannot produce diverging keys.
 func (s *EncryptionService) KeyForUser(ctx context.Context, userID string) ([]byte, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("parse user id: %w", err)
+	}
+
 	newKeyHex, err := GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate encryption key: %w", err)
 	}
 
-	// Insert the newly generated key, but if one already exists keep it and
-	// return it. The SET clause is a no-op that forces RETURNING to fire on conflict.
-	var storedKeyHex string
-	err = s.db.QueryRow(ctx, `
-		INSERT INTO user_encryption_keys (user_id, key_hex) VALUES ($1, $2)
-		ON CONFLICT (user_id) DO UPDATE SET key_hex = user_encryption_keys.key_hex
-		RETURNING key_hex
-	`, userID, newKeyHex).Scan(&storedKeyHex)
+	storedKeyHex, err := s.q.UpsertEncryptionKey(ctx, db.UpsertEncryptionKeyParams{
+		UserID: uid,
+		KeyHex: newKeyHex,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("upsert encryption key: %w", err)
 	}
@@ -49,9 +51,7 @@ func (s *EncryptionService) KeyForUser(ctx context.Context, userID string) ([]by
 	return KeyFromHex(storedKeyHex)
 }
 
-// EncryptBackup encrypts a plaintext credential blob for the given user using
-// the Phase 1 backend-controlled key strategy. Returns the encrypted blob and
-// the encryption version to store alongside it.
+// EncryptBackup encrypts a plaintext credential blob for the given user.
 func (s *EncryptionService) EncryptBackup(ctx context.Context, userID string, plaintext []byte) (*EncryptedBlob, int, error) {
 	key, err := s.KeyForUser(ctx, userID)
 	if err != nil {
@@ -64,8 +64,7 @@ func (s *EncryptionService) EncryptBackup(ctx context.Context, userID string, pl
 	return blob, EncVersionBackendKey, nil
 }
 
-// DecryptBackup decrypts a credential backup using the appropriate strategy
-// based on the encryption_version stored with the backup.
+// DecryptBackup decrypts a credential backup using the strategy indicated by version.
 func (s *EncryptionService) DecryptBackup(ctx context.Context, userID string, blob *EncryptedBlob, version int) ([]byte, error) {
 	switch version {
 	case EncVersionBackendKey:
@@ -79,16 +78,18 @@ func (s *EncryptionService) DecryptBackup(ctx context.Context, userID string, bl
 		if s.serverPepper == "" {
 			return nil, fmt.Errorf("server pepper not configured for PBKDF2 decryption")
 		}
-		// Salt is the user UUID bytes
-		salt, err := hex.DecodeString(userID)
+		uid, err := uuid.Parse(userID)
 		if err != nil {
-			// UUID contains hyphens — strip them first
-			salt = []byte(userID)
+			return nil, fmt.Errorf("parse user id: %w", err)
 		}
-		var email string
-		err = s.db.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email)
+		email, err := s.q.GetUserEmailByID(ctx, uid)
 		if err != nil {
 			return nil, fmt.Errorf("get user email: %w", err)
+		}
+		// Salt is the raw UUID bytes; use the string form as fallback.
+		salt, err := hex.DecodeString(userID)
+		if err != nil {
+			salt = []byte(userID)
 		}
 		key := DeriveKeyPBKDF2(email, s.serverPepper, salt)
 		return Decrypt(blob, key)

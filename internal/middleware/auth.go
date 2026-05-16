@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/latch/backend/internal/httpx"
 )
 
 type contextKey string
@@ -18,7 +19,7 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid authorization header"})
+			httpx.AbortFail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "missing or invalid authorization header")
 			return
 		}
 
@@ -32,13 +33,13 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 			return []byte(jwtSecret), nil
 		})
 		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+			httpx.AbortFail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired token")
 			return
 		}
 
 		userID, ok := claims["sub"].(string)
 		if !ok || userID == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
+			httpx.AbortFail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid token claims")
 			return
 		}
 

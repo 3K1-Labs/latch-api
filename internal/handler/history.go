@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
 
@@ -20,17 +21,17 @@ func NewHistoryHandler(historySvc *service.HistoryService, cfg *config.Config) *
 
 // GetHistory godoc
 // @Summary      Transaction history
-// @Description  Returns the transaction history for the given Stellar account address. Combines Horizon payments and Soroban SAC events.
+// @Description  Returns the transaction history for the given Stellar account. Combines Horizon payments and Soroban SAC events.
 // @Tags         wallet
 // @Produce      json
 // @Param        g_address query string false "Classic Stellar address (G…)"
 // @Param        c_address query string false "Soroban contract address (C…)"
 // @Param        network   query string false "Network: testnet or mainnet" Enums(testnet, mainnet) default(testnet)
 // @Param        limit     query int    false "Max results" default(50)
-// @Success      200 {object} map[string]any
-// @Failure      400 {object} errorResponse
-// @Failure      401 {object} errorResponse
-// @Failure      500 {object} errorResponse
+// @Success      200 {object} historyDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      401 {object} apiErrorResponse
+// @Failure      500 {object} apiErrorResponse
 // @Security     BearerAuth
 // @Router       /v1/history [get]
 func (h *HistoryHandler) GetHistory(c *gin.Context) {
@@ -38,7 +39,7 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 	cAddress := c.Query("c_address")
 
 	if gAddress == "" && cAddress == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "g_address or c_address is required"})
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "g_address or c_address is required")
 		return
 	}
 
@@ -66,11 +67,11 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		Limit:         limit,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	httpx.Success(c, http.StatusOK, gin.H{
 		"transactions": txs,
 		"network":      network,
 	})

@@ -50,7 +50,7 @@ func TestPriceService_NativeToken_FetchesFromCoinGecko(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"stellar": map[string]any{
 				"usd":            0.123456,
 				"usd_24h_change": -2.5,
@@ -62,8 +62,8 @@ func TestPriceService_NativeToken_FetchesFromCoinGecko(t *testing.T) {
 	// Redirect CoinGecko calls to the test server by replacing the httpClient
 	// with one whose transport rewrites the host.
 	transport := &rewriteHostTransport{
-		base:        ts.Client().Transport,
-		targetHost:  ts.Listener.Addr().String(),
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
 		targetScheme: "http",
 	}
 	client := &http.Client{Transport: transport}
@@ -91,7 +91,7 @@ func TestPriceService_XLMAliasMapsToStellar(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedIDs = r.URL.Query().Get("ids")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"stellar": map[string]any{"usd": 0.1, "usd_24h_change": 0.0},
 		})
 	}))
