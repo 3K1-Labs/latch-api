@@ -27,7 +27,7 @@ const otpTemplate = `<!DOCTYPE html>
                   <!-- Logo image -->
                   <td style="vertical-align:middle;">
                     <img src="https://res.cloudinary.com/dqm97vrty/image/upload/v1778953244/logoLoading_gcurdp.png"
-                         width="48" height="40" alt="Latch" style="display:block;border:0;">
+                         width="48" height="40" alt="Latch" style="display:block;border:0;object-fit: contain;">
                   </td>
                   <!-- Wordmark -->
                   <td style="padding-left:14px;vertical-align:middle;">
@@ -128,7 +128,7 @@ const recoveryTemplate = `<!DOCTYPE html>
                 <tr>
                   <td style="vertical-align:middle;">
                     <img src="https://res.cloudinary.com/dqm97vrty/image/upload/v1778953244/logoLoading_gcurdp.png"
-                         width="48" height="40" alt="Latch" style="display:block;border:0;">
+                         width="48" height="40" alt="Latch" style="display:block;border:0;object-fit: contain;">
                   </td>
                   <td style="padding-left:14px;vertical-align:middle;">
                     <span style="color:#FFFFFF;font-size:22px;font-weight:800;letter-spacing:4px;display:block;line-height:1;">LATCH</span>
