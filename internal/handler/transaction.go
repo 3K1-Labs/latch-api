@@ -10,11 +10,11 @@ import (
 )
 
 type TransactionHandler struct {
-	sorobanSvc *service.SorobanService
+	sorobanSvc sorobanService
 	cfg        *config.Config
 }
 
-func NewTransactionHandler(sorobanSvc *service.SorobanService, cfg *config.Config) *TransactionHandler {
+func NewTransactionHandler(sorobanSvc sorobanService, cfg *config.Config) *TransactionHandler {
 	return &TransactionHandler{sorobanSvc: sorobanSvc, cfg: cfg}
 }
 

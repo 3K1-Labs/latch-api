@@ -14,21 +14,21 @@ import (
 )
 
 type RecoveryHandler struct {
-	authSvc     *service.AuthService
-	backupSvc   *service.BackupService
-	otpSvc      *service.OTPService
-	emailSvc    *service.EmailService
-	auditSvc    *service.AuditService
+	authSvc     authService
+	backupSvc   backupService
+	otpSvc      otpService
+	emailSvc    emailService
+	auditSvc    auditService
 	jwtSecret   string
 	recoveryTTL time.Duration
 }
 
 func NewRecoveryHandler(
-	authSvc *service.AuthService,
-	backupSvc *service.BackupService,
-	otpSvc *service.OTPService,
-	emailSvc *service.EmailService,
-	auditSvc *service.AuditService,
+	authSvc authService,
+	backupSvc backupService,
+	otpSvc otpService,
+	emailSvc emailService,
+	auditSvc auditService,
 	jwtSecret string,
 	recoveryTTLMin int,
 ) *RecoveryHandler {

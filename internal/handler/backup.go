@@ -12,11 +12,11 @@ import (
 )
 
 type BackupHandler struct {
-	backupSvc *service.BackupService
-	auditSvc  *service.AuditService
+	backupSvc backupService
+	auditSvc  auditService
 }
 
-func NewBackupHandler(backupSvc *service.BackupService, auditSvc *service.AuditService) *BackupHandler {
+func NewBackupHandler(backupSvc backupService, auditSvc auditService) *BackupHandler {
 	return &BackupHandler{backupSvc: backupSvc, auditSvc: auditSvc}
 }
 
