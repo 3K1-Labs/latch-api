@@ -42,6 +42,10 @@ type Config struct {
 
 	// Prices
 	CoinGeckoAPIKey string
+
+	// PublicHost is the externally reachable hostname used by Swagger UI.
+	// Defaults to localhost:PORT for local development.
+	PublicHost string
 }
 
 func Load() (*Config, error) {
@@ -67,7 +71,11 @@ func Load() (*Config, error) {
 		HorizonURLMainnet:    getEnv("HORIZON_URL_MAINNET", "https://horizon.stellar.org"),
 		NativeSACIDTestnet:   getEnv("NATIVE_SAC_ID_TESTNET", ""),
 		NativeSACIDMainnet:   getEnv("NATIVE_SAC_ID_MAINNET", ""),
-		CoinGeckoAPIKey:      getEnv("COINGECKO_API_KEY", ""),
+		CoinGeckoAPIKey: getEnv("COINGECKO_API_KEY", ""),
+	}
+
+	if cfg.PublicHost = getEnv("PUBLIC_HOST", ""); cfg.PublicHost == "" {
+		cfg.PublicHost = "localhost:" + cfg.Port
 	}
 
 	var err error

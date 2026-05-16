@@ -31,7 +31,7 @@ import (
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/store"
-	_ "github.com/latch/backend/docs"
+	"github.com/latch/backend/docs"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -44,6 +44,11 @@ func main() {
 
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
+		docs.SwaggerInfo.Host = cfg.PublicHost
+		docs.SwaggerInfo.Schemes = []string{"https"}
+	} else {
+		docs.SwaggerInfo.Host = cfg.PublicHost
+		docs.SwaggerInfo.Schemes = []string{"http"}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
