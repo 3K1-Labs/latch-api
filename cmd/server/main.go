@@ -44,11 +44,6 @@ func main() {
 
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
-		docs.SwaggerInfo.Host = cfg.PublicHost
-		docs.SwaggerInfo.Schemes = []string{"https"}
-	} else {
-		docs.SwaggerInfo.Host = cfg.PublicHost
-		docs.SwaggerInfo.Schemes = []string{"http"}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -100,6 +95,18 @@ func main() {
 	r.Use(timeoutMiddleware(30 * time.Second))
 	r.Use(generalLimiter)
 
+	// Serve the swagger spec with host/scheme derived from the incoming request
+	// so the "Try it out" button works on both localhost and production.
+	r.GET("/swagger/doc.json", func(c *gin.Context) {
+		docs.SwaggerInfo.Host = c.Request.Host
+		if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
+			docs.SwaggerInfo.Schemes = []string{"https"}
+		} else {
+			docs.SwaggerInfo.Schemes = []string{"http"}
+		}
+		c.Header("Content-Type", "application/json")
+		c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
+	})
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	r.GET("/health", func(c *gin.Context) {
