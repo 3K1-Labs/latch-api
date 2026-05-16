@@ -64,7 +64,7 @@ func main() {
 
 	// Services
 	otpSvc := service.NewOTPService(redisClient)
-	emailSvc := service.NewEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.EmailFromName, cfg.EmailFromAddr)
+	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(db)
 	encSvc := service.NewEncryptionService(db, cfg.ServerPepper)
 	sorobanSvc := service.NewSorobanService()

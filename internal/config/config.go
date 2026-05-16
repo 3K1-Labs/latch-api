@@ -20,10 +20,7 @@ type Config struct {
 	RefreshTokenTTLDay  int // days
 	RecoveryTokenTTLMin int // minutes
 
-	SMTPHost     string
-	SMTPPort     string
-	SMTPUser     string
-	SMTPPassword string
+	ResendAPIKey  string
 	EmailFromName string
 	EmailFromAddr string
 
@@ -53,12 +50,9 @@ func Load() (*Config, error) {
 		DatabaseURL:         requireEnv("DATABASE_URL"),
 		RedisURL:            requireEnv("REDIS_URL"),
 		JWTSecret:           requireEnv("JWT_SECRET"),
-		SMTPHost:      getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:      getEnv("SMTP_PORT", "587"),
-		SMTPUser:      requireEnv("SMTP_USER"),
-		SMTPPassword:  requireEnv("SMTP_PASSWORD"),
+		ResendAPIKey:  requireEnv("RESEND_API_KEY"),
 		EmailFromName: getEnv("EMAIL_FROM_NAME", "Latch"),
-		EmailFromAddr: getEnv("EMAIL_FROM_ADDR", ""),
+		EmailFromAddr: getEnv("EMAIL_FROM_ADDR", "noreply@yourdomain.com"),
 		ServerPepper: getEnv("SERVER_PEPPER", ""),
 		AppEnv:              getEnv("APP_ENV", "development"),
 		SorobanRPCURLTestnet: getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org"),
