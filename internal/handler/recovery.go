@@ -1,43 +1,42 @@
 package handler
 
 import (
-	"encoding/json"
-	"log"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
 
 type RecoveryHandler struct {
-	db          *pgxpool.Pool
+	authSvc     *service.AuthService
+	backupSvc   *service.BackupService
 	otpSvc      *service.OTPService
 	emailSvc    *service.EmailService
-	encSvc      *service.EncryptionService
 	auditSvc    *service.AuditService
 	jwtSecret   string
 	recoveryTTL time.Duration
 }
 
 func NewRecoveryHandler(
-	db *pgxpool.Pool,
+	authSvc *service.AuthService,
+	backupSvc *service.BackupService,
 	otpSvc *service.OTPService,
 	emailSvc *service.EmailService,
-	encSvc *service.EncryptionService,
 	auditSvc *service.AuditService,
 	jwtSecret string,
 	recoveryTTLMin int,
 ) *RecoveryHandler {
 	return &RecoveryHandler{
-		db:          db,
+		authSvc:     authSvc,
+		backupSvc:   backupSvc,
 		otpSvc:      otpSvc,
 		emailSvc:    emailSvc,
-		encSvc:      encSvc,
 		auditSvc:    auditSvc,
 		jwtSecret:   jwtSecret,
 		recoveryTTL: time.Duration(recoveryTTLMin) * time.Minute,
@@ -61,15 +60,19 @@ func (h *RecoveryHandler) Initiate(c *gin.Context) {
 		return
 	}
 
-	var userID string
-	_ = h.db.QueryRow(c.Request.Context(), `SELECT id FROM users WHERE email = $1 AND email_verified = TRUE`, req.Email).Scan(&userID)
+	userID, _ := h.authSvc.GetVerifiedUserByEmail(c.Request.Context(), req.Email)
 
 	if userID != "" {
 		otp, err := h.otpSvc.Generate(c.Request.Context(), "recovery:"+req.Email)
 		if err == nil {
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("panic in recovery OTP send", "email", req.Email, "panic", r)
+					}
+				}()
 				if err := h.emailSvc.SendRecoveryOTP(req.Email, otp); err != nil {
-					log.Printf("[email] SendRecoveryOTP to %s failed: %v", req.Email, err)
+					slog.Error("send recovery OTP", "email", req.Email, "err", err)
 				}
 			}()
 			h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRecoveryInitiated), c.ClientIP(), c.Request.UserAgent(), nil)
@@ -100,6 +103,7 @@ func (h *RecoveryHandler) Verify(c *gin.Context) {
 
 	ok, err := h.otpSvc.Verify(c.Request.Context(), "recovery:"+req.Email, req.OTP)
 	if err != nil {
+		slog.Error("verify recovery otp", "email", req.Email, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
@@ -108,22 +112,15 @@ func (h *RecoveryHandler) Verify(c *gin.Context) {
 		return
 	}
 
-	var userID string
-	err = h.db.QueryRow(c.Request.Context(), `SELECT id FROM users WHERE email = $1`, req.Email).Scan(&userID)
-	if err != nil {
+	userID, _ := h.authSvc.GetUserByEmail(c.Request.Context(), req.Email)
+	if userID == "" {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired OTP")
 		return
 	}
 
-	claims := jwt.MapClaims{
-		"sub":   userID,
-		"scope": "recovery",
-		"exp":   time.Now().Add(h.recoveryTTL).Unix(),
-		"iat":   time.Now().Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	recoveryToken, err := token.SignedString([]byte(h.jwtSecret))
+	recoveryToken, err := h.authSvc.IssueRecoveryToken(userID, h.recoveryTTL)
 	if err != nil {
+		slog.Error("issue recovery token", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
@@ -152,29 +149,13 @@ func (h *RecoveryHandler) GetBlob(c *gin.Context) {
 		return
 	}
 
-	var encBlob, iv, authTag []byte
-	var encVersion int
-	err = h.db.QueryRow(c.Request.Context(), `
-		SELECT encrypted_blob, iv, auth_tag, encryption_version
-		FROM credential_backups WHERE user_id = $1
-	`, userID).Scan(&encBlob, &iv, &authTag, &encVersion)
+	blob, err := h.backupSvc.GetDecrypted(c.Request.Context(), userID)
 	if err != nil {
-		httpx.Fail(c, http.StatusNotFound, httpx.ErrNotFound, "no backup found for this account")
-		return
-	}
-
-	plaintext, err := h.encSvc.DecryptBackup(c.Request.Context(), userID, &service.EncryptedBlob{
-		Ciphertext: encBlob,
-		IV:         iv,
-		AuthTag:    authTag,
-	}, encVersion)
-	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
-		return
-	}
-
-	var blob map[string]any
-	if err := json.Unmarshal(plaintext, &blob); err != nil {
+		if errors.Is(err, service.ErrNoBackup) {
+			httpx.Fail(c, http.StatusNotFound, httpx.ErrNotFound, "no backup found for this account")
+			return
+		}
+		slog.Error("get decrypted backup", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}

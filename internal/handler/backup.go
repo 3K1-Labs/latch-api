@@ -2,24 +2,22 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 )
 
 type BackupHandler struct {
-	db       *pgxpool.Pool
-	encSvc   *service.EncryptionService
-	auditSvc *service.AuditService
+	backupSvc *service.BackupService
+	auditSvc  *service.AuditService
 }
 
-func NewBackupHandler(db *pgxpool.Pool, encSvc *service.EncryptionService, auditSvc *service.AuditService) *BackupHandler {
-	return &BackupHandler{db: db, encSvc: encSvc, auditSvc: auditSvc}
+func NewBackupHandler(backupSvc *service.BackupService, auditSvc *service.AuditService) *BackupHandler {
+	return &BackupHandler{backupSvc: backupSvc, auditSvc: auditSvc}
 }
 
 // CredentialBlob is the plaintext shape of the backup sent by the mobile app.
@@ -71,29 +69,13 @@ func (h *BackupHandler) Store(c *gin.Context) {
 
 	plaintext, err := json.Marshal(req.Blob)
 	if err != nil {
+		slog.Error("marshal backup blob", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	encBlob, encVersion, err := h.encSvc.EncryptBackup(c.Request.Context(), userID, plaintext)
-	if err != nil {
-		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
-		return
-	}
-
-	_, err = h.db.Exec(c.Request.Context(), `
-		INSERT INTO credential_backups
-			(id, user_id, encrypted_blob, iv, auth_tag, encryption_version, smart_account_address)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (user_id) DO UPDATE SET
-			encrypted_blob        = EXCLUDED.encrypted_blob,
-			iv                    = EXCLUDED.iv,
-			auth_tag              = EXCLUDED.auth_tag,
-			encryption_version    = EXCLUDED.encryption_version,
-			smart_account_address = EXCLUDED.smart_account_address,
-			updated_at            = NOW()
-	`, uuid.New(), userID, encBlob.Ciphertext, encBlob.IV, encBlob.AuthTag, encVersion, smartAccount)
-	if err != nil {
+	if err := h.backupSvc.Store(c.Request.Context(), userID, plaintext, smartAccount); err != nil {
+		slog.Error("store backup", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
@@ -118,14 +100,12 @@ func (h *BackupHandler) Store(c *gin.Context) {
 func (h *BackupHandler) Exists(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
 
-	var count int
-	err := h.db.QueryRow(c.Request.Context(), `
-		SELECT COUNT(*) FROM credential_backups WHERE user_id = $1
-	`, userID).Scan(&count)
+	exists, err := h.backupSvc.Exists(c.Request.Context(), userID)
 	if err != nil {
+		slog.Error("check backup exists", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	httpx.Success(c, http.StatusOK, gin.H{"exists": count > 0})
+	httpx.Success(c, http.StatusOK, gin.H{"exists": exists})
 }
