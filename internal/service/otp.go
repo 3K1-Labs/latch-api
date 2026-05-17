@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -61,16 +62,20 @@ func (s *OTPService) Verify(ctx context.Context, email, code string) (bool, erro
 		return false, fmt.Errorf("get OTP: %w", err)
 	}
 
-	// Increment attempt counter
-	attempts, err := s.redis.Incr(ctx, attemptsKey).Result()
-	if err != nil {
+	// Atomically increment the attempt counter and set its TTL in one pipeline.
+	pipe := s.redis.Pipeline()
+	incrCmd := pipe.Incr(ctx, attemptsKey)
+	pipe.Expire(ctx, attemptsKey, otpTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
 		return false, fmt.Errorf("increment attempts: %w", err)
 	}
-	s.redis.Expire(ctx, attemptsKey, otpTTL)
+	attempts := incrCmd.Val()
 
 	if attempts > otpMaxAttempts {
-		// Invalidate OTP after too many failures
-		s.redis.Del(ctx, key, attemptsKey)
+		// Invalidate OTP after too many failures.
+		if err := s.redis.Del(ctx, key, attemptsKey).Err(); err != nil {
+			return false, fmt.Errorf("invalidate OTP: %w", err)
+		}
 		return false, nil
 	}
 
@@ -79,17 +84,25 @@ func (s *OTPService) Verify(ctx context.Context, email, code string) (bool, erro
 		return false, nil
 	}
 
-	// Success — delete OTP so it cannot be reused
-	s.redis.Del(ctx, key, attemptsKey)
+	// Success — delete OTP atomically so it cannot be reused.
+	if err := s.redis.Del(ctx, key, attemptsKey).Err(); err != nil {
+		return false, fmt.Errorf("delete OTP after verify: %w", err)
+	}
 	return true, nil
 }
 
+// NormalizeEmail lowercases an email address so Redis keys are consistent
+// regardless of the case the client sends.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(email)
+}
+
 func otpKey(email string) string {
-	return fmt.Sprintf("otp:%s", email)
+	return fmt.Sprintf("otp:%s", NormalizeEmail(email))
 }
 
 func otpAttemptsKey(email string) string {
-	return fmt.Sprintf("otp:attempts:%s", email)
+	return fmt.Sprintf("otp:attempts:%s", NormalizeEmail(email))
 }
 
 func generateNumericOTP(length int) (string, error) {

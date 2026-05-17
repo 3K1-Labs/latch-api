@@ -17,7 +17,9 @@ type AuditAction string
 const (
 	ActionRegister          AuditAction = "register"
 	ActionEmailVerified     AuditAction = "email_verified"
+	ActionTokenRotated      AuditAction = "token_rotated"
 	ActionBackupStored      AuditAction = "backup_stored"
+	ActionBackupUpdated     AuditAction = "backup_updated"
 	ActionRecoveryInitiated AuditAction = "recovery_initiated"
 	ActionRecoveryCompleted AuditAction = "recovery_completed"
 	ActionLogout            AuditAction = "logout"

@@ -51,6 +51,9 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 	limit := 50
 	if l := c.Query("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			if n > 100 {
+				n = 100
+			}
 			limit = n
 		}
 	}

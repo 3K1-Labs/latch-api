@@ -112,7 +112,7 @@ func (h *RecoveryHandler) Verify(c *gin.Context) {
 		return
 	}
 
-	userID, _ := h.authSvc.GetUserByEmail(c.Request.Context(), req.Email)
+	userID, _ := h.authSvc.GetVerifiedUserByEmail(c.Request.Context(), req.Email)
 	if userID == "" {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired OTP")
 		return

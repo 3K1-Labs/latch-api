@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -56,7 +57,8 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 
 	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR)
 	if err != nil {
-		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "simulation failed: "+err.Error())
+		slog.Error("simulate transaction", "network", req.Network, "err", err)
+		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "simulation failed")
 		return
 	}
 

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -86,11 +85,8 @@ func (s *EncryptionService) DecryptBackup(ctx context.Context, userID string, bl
 		if err != nil {
 			return nil, fmt.Errorf("get user email: %w", err)
 		}
-		// Salt is the raw UUID bytes; use the string form as fallback.
-		salt, err := hex.DecodeString(userID)
-		if err != nil {
-			salt = []byte(userID)
-		}
+		// Salt is the raw 16-byte UUID, not the hyphenated ASCII string.
+		salt := uid[:]
 		key := DeriveKeyPBKDF2(email, s.serverPepper, salt)
 		return Decrypt(blob, key)
 

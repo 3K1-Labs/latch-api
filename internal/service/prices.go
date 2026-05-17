@@ -29,7 +29,7 @@ var tokenToCoinGeckoID = map[string]string{
 	"usdc":  "usd-coin",
 	"yusdc": "usd-coin", // Ultra Capital yield USDC
 	"usdt":  "tether",
-	"pyusd": "paypal-usd",  // PayPal USD (paxos.com)
+	"pyusd": "paypal-usd",           // PayPal USD (paxos.com)
 	"usdy":  "ondo-us-dollar-yield", // Ondo Finance
 	"usdm":  "mountain-protocol-usdm",
 
@@ -37,10 +37,10 @@ var tokenToCoinGeckoID = map[string]string{
 	"eurc": "euro-coin", // Circle EURC (circle.com + mykobo.co on Stellar)
 
 	// Bitcoin & wrapped BTC
-	"btc":    "bitcoin",
+	"btc":     "bitcoin",
 	"bitcoin": "bitcoin",
-	"ybtc":   "bitcoin", // Ultra Capital yield BTC
-	"btcln":  "bitcoin", // Bitcoin Lightning token on Stellar
+	"ybtc":    "bitcoin", // Ultra Capital yield BTC
+	"btcln":   "bitcoin", // Bitcoin Lightning token on Stellar
 
 	// Ethereum & wrapped ETH
 	"eth":      "ethereum",
