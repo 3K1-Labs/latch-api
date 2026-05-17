@@ -29,7 +29,7 @@ var tokenToCoinGeckoID = map[string]string{
 	"usdc":  "usd-coin",
 	"yusdc": "usd-coin", // Ultra Capital yield USDC
 	"usdt":  "tether",
-	"pyusd": "paypal-usd",  // PayPal USD (paxos.com)
+	"pyusd": "paypal-usd",           // PayPal USD (paxos.com)
 	"usdy":  "ondo-us-dollar-yield", // Ondo Finance
 	"usdm":  "mountain-protocol-usdm",
 
