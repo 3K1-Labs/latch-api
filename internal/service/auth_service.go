@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -14,14 +15,16 @@ import (
 )
 
 type AuthService struct {
+	db         *sql.DB
 	q          *db.Queries
 	jwtSecret  string
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
 
-func NewAuthService(q *db.Queries, jwtSecret string, accessTTLMin, refreshTTLDay int) *AuthService {
+func NewAuthService(sqlDB *sql.DB, q *db.Queries, jwtSecret string, accessTTLMin, refreshTTLDay int) *AuthService {
 	return &AuthService{
+		db:         sqlDB,
 		q:          q,
 		jwtSecret:  jwtSecret,
 		accessTTL:  time.Duration(accessTTLMin) * time.Minute,
@@ -82,12 +85,21 @@ func (s *AuthService) IssueTokenPair(ctx context.Context, userID string) (access
 	return accessToken, refreshToken, nil
 }
 
-// RotateRefreshToken validates the raw token, revokes it, and issues a new pair.
+// RotateRefreshToken validates the raw token, revokes it, and issues a new pair
+// inside a single transaction to prevent concurrent reuse of the same token.
 // Returns ErrInvalidRefreshToken when the token is absent, expired, or already revoked.
 func (s *AuthService) RotateRefreshToken(ctx context.Context, rawToken string) (userID, accessToken, refreshToken string, err error) {
 	tokenHash := HashToken(rawToken)
 
-	row, err := s.q.GetRefreshToken(ctx, tokenHash)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback on any non-commit path is intentional
+
+	qtx := s.q.WithTx(tx)
+
+	row, err := qtx.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		return "", "", "", ErrInvalidRefreshToken
 	}
@@ -95,16 +107,40 @@ func (s *AuthService) RotateRefreshToken(ctx context.Context, rawToken string) (
 		return "", "", "", ErrInvalidRefreshToken
 	}
 
-	if err := s.q.RevokeRefreshToken(ctx, tokenHash); err != nil {
+	if err := qtx.RevokeRefreshToken(ctx, tokenHash); err != nil {
 		return "", "", "", fmt.Errorf("revoke old refresh token: %w", err)
 	}
 
 	uid := row.UserID.String()
-	access, refresh, err := s.IssueTokenPair(ctx, uid)
-	if err != nil {
-		return "", "", "", err
+	// Issue new raw refresh token and insert it within the same transaction.
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", "", fmt.Errorf("generate random bytes: %w", err)
 	}
-	return uid, access, refresh, nil
+	newRawToken := hex.EncodeToString(raw)
+
+	parsedUID, err := uuid.Parse(uid)
+	if err != nil {
+		return "", "", "", fmt.Errorf("parse user id: %w", err)
+	}
+	if err := qtx.InsertRefreshToken(ctx, db.InsertRefreshTokenParams{
+		ID:        uuid.New(),
+		UserID:    parsedUID,
+		TokenHash: HashToken(newRawToken),
+		ExpiresAt: time.Now().Add(s.refreshTTL),
+	}); err != nil {
+		return "", "", "", fmt.Errorf("insert new refresh token: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", "", "", fmt.Errorf("commit: %w", err)
+	}
+
+	accessToken, err = s.issueAccessToken(uid)
+	if err != nil {
+		return "", "", "", fmt.Errorf("issue access token: %w", err)
+	}
+	return uid, accessToken, newRawToken, nil
 }
 
 // RevokeRefreshToken revokes a single refresh token by its raw value.

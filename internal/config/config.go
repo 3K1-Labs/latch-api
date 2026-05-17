@@ -27,6 +27,9 @@ type Config struct {
 	// Phase 2: PBKDF2 server pepper
 	ServerPepper string
 
+	// Encryption master key (KEK for per-user AES keys — Phase 2 prerequisite)
+	EncryptionMasterKey string
+
 	AppEnv string
 
 	// Stellar network endpoints
@@ -54,6 +57,7 @@ func Load() (*Config, error) {
 		EmailFromName:        getEnv("EMAIL_FROM_NAME", "Latch"),
 		EmailFromAddr:        getEnv("EMAIL_FROM_ADDR", "noreply@yourdomain.com"),
 		ServerPepper:         getEnv("SERVER_PEPPER", ""),
+		EncryptionMasterKey:  getEnv("ENCRYPTION_MASTER_KEY", ""),
 		AppEnv:               getEnv("APP_ENV", "development"),
 		SorobanRPCURLTestnet: getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org"),
 		SorobanRPCURLMainnet: getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com"),
@@ -76,6 +80,16 @@ func Load() (*Config, error) {
 	cfg.RecoveryTokenTTLMin, err = strconv.Atoi(getEnv("RECOVERY_TOKEN_TTL_MIN", "15"))
 	if err != nil {
 		return nil, fmt.Errorf("RECOVERY_TOKEN_TTL_MIN must be an integer: %w", err)
+	}
+
+	if len(cfg.JWTSecret) < 32 {
+		return nil, fmt.Errorf("JWT_SECRET must be at least 32 bytes")
+	}
+	if cfg.ServerPepper != "" && len(cfg.ServerPepper) < 32 {
+		return nil, fmt.Errorf("SERVER_PEPPER must be at least 32 bytes when set")
+	}
+	if cfg.EncryptionMasterKey != "" && len(cfg.EncryptionMasterKey) < 32 {
+		return nil, fmt.Errorf("ENCRYPTION_MASTER_KEY must be at least 32 bytes when set")
 	}
 
 	return cfg, nil

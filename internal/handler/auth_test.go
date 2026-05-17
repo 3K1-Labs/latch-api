@@ -217,13 +217,12 @@ func TestLogout_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestLogout_RevokeError_StillSucceeds(t *testing.T) {
+func TestLogout_RevokeError(t *testing.T) {
 	h := newAuthHandler(&stubAuth{revokeErr: errGeneric}, &stubOTP{}, nil, nil)
 	r := gin.New()
 	r.POST("/logout", h.Logout)
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, makeLogoutRequest("uid", map[string]any{"refresh_token": "rt"}))
-	// revoke errors are logged but do not fail the logout response
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

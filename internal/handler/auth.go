@@ -151,11 +151,13 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	_, accessToken, refreshToken, err := h.authSvc.RotateRefreshToken(c.Request.Context(), req.RefreshToken)
+	userID, accessToken, refreshToken, err := h.authSvc.RotateRefreshToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired refresh token")
 		return
 	}
+
+	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionTokenRotated), c.ClientIP(), c.Request.UserAgent(), nil)
 
 	httpx.Success(c, http.StatusOK, gin.H{
 		"access_token":  accessToken,
@@ -185,6 +187,8 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	if err := h.authSvc.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
 		slog.Error("revoke refresh token", "err", err)
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
+		return
 	}
 
 	userID := middleware.UserIDFromContext(c.Request.Context())

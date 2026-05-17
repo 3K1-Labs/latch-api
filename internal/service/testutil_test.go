@@ -16,3 +16,11 @@ func errorQueries() *db.Queries {
 	sqlDB.Close()
 	return db.New(sqlDB)
 }
+
+// errorDB returns a closed *sql.DB for testing error paths that require the
+// raw *sql.DB (e.g. BeginTx).
+func errorDB() *sql.DB {
+	sqlDB, _ := sql.Open("pgx", "postgres://x:x@localhost:54999/x")
+	sqlDB.Close()
+	return sqlDB
+}

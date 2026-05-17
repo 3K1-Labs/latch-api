@@ -5,7 +5,7 @@
 ##
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test lint sqlc swag tidy \
+.PHONY: help run build test coverage lint sqlc swag tidy \
         migrate-up migrate-down migrate-version migrate-force migrate-create \
         docker-up docker-down docker-logs docker-build \
         install-tools clean
@@ -36,6 +36,17 @@ build:
 ## test: Run all tests with race detection
 test:
 	go test ./... -race -count=1 -timeout 60s
+
+## coverage: Run tests with coverage report (opens in browser)
+coverage:
+	$(eval COVERPKGS := $(shell go list ./internal/... | grep -v -E '/db/generated$$|/store$$' | tr '\n' ',' | sed 's/,$$//'))
+	go test -race -count=1 -timeout 60s \
+		-coverprofile=coverage.out \
+		-covermode=atomic \
+		-coverpkg="$(COVERPKGS)" \
+		./...
+	go tool cover -func=coverage.out | tail -1
+	go tool cover -html=coverage.out
 
 ## lint: Run golangci-lint (install separately: brew install golangci-lint)
 lint:

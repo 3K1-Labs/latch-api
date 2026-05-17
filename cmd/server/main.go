@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,7 +46,8 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	if cfg.AppEnv == "production" {
+	isProd := strings.EqualFold(cfg.AppEnv, "production")
+	if isProd {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -70,7 +73,7 @@ func main() {
 	queries := db.New(sqlDB)
 
 	// Services
-	authSvc := service.NewAuthService(queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
+	authSvc := service.NewAuthService(sqlDB, queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
 	otpSvc := service.NewOTPService(redisClient)
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
@@ -99,26 +102,37 @@ func main() {
 	r := gin.New()
 	r.Use(middleware.CORS())
 	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
+	if isProd {
+		r.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+			slog.Error("panic recovered", "panic", err)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{"code": "INTERNAL_ERROR", "message": "internal error"},
+			})
+		}))
+	} else {
+		r.Use(gin.Recovery())
+	}
 	r.Use(timeoutMiddleware(30 * time.Second))
+	r.Use(middleware.MaxBodySize(256 * 1024)) // 256 KB global cap; backup endpoint is the largest payload
 	r.Use(generalLimiter)
 
-	// Intercept doc.json inside the wildcard to inject the correct host/scheme
-	// from the incoming request, so "Try it out" works on both localhost and production.
-	r.GET("/swagger/*any", func(c *gin.Context) {
-		if c.Param("any") == "/doc.json" {
-			docs.SwaggerInfo.Host = c.Request.Host
-			if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
-				docs.SwaggerInfo.Schemes = []string{"https"}
-			} else {
-				docs.SwaggerInfo.Schemes = []string{"http"}
+	// Swagger UI is only available in non-production environments.
+	if !isProd {
+		r.GET("/swagger/*any", func(c *gin.Context) {
+			if c.Param("any") == "/doc.json" {
+				docs.SwaggerInfo.Host = c.Request.Host
+				if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
+					docs.SwaggerInfo.Schemes = []string{"https"}
+				} else {
+					docs.SwaggerInfo.Schemes = []string{"http"}
+				}
+				c.Header("Content-Type", "application/json")
+				c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
+				return
 			}
-			c.Header("Content-Type", "application/json")
-			c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
-			return
-		}
-		ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
-	})
+			ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+		})
+	}
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := pool.Ping(c.Request.Context()); err != nil {

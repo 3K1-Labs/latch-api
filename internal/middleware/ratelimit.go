@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,7 +41,7 @@ func NewEmailRateLimiter(redisClient *redis.Client, limit int, window time.Durat
 				Email string `json:"email"`
 			}
 			if json.Unmarshal(body, &payload) == nil && payload.Email != "" {
-				return fmt.Sprintf("rl:email:%s", payload.Email)
+				return fmt.Sprintf("rl:email:%s", strings.ToLower(payload.Email))
 			}
 		}
 		return fmt.Sprintf("rl:ip:%s", c.ClientIP())

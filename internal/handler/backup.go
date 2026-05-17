@@ -80,7 +80,11 @@ func (h *BackupHandler) Store(c *gin.Context) {
 		return
 	}
 
-	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionBackupStored), c.ClientIP(), c.Request.UserAgent(), map[string]any{
+	action := service.ActionBackupStored
+	if c.Request.Method == "PUT" {
+		action = service.ActionBackupUpdated
+	}
+	h.auditSvc.Log(c.Request.Context(), userID, string(action), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"smart_account": smartAccount,
 	})
 
