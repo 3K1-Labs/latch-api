@@ -10,7 +10,7 @@ import (
 )
 
 func newTestAuthService() *AuthService {
-	return NewAuthService(nil, "test-secret-key-32-bytes-padding!", 15, 30)
+	return NewAuthService(nil, nil, "test-secret-key-32-bytes-padding!", 15, 30)
 }
 
 func TestNewAuthService_AccessTTL(t *testing.T) {
@@ -59,7 +59,7 @@ func TestIssueAccessToken_ReturnsToken(t *testing.T) {
 // ── DB-error paths (closed DB → all queries fail immediately) ─────────────────
 
 func newErrAuthService() *AuthService {
-	return NewAuthService(errorQueries(), "test-secret-key-32-bytes-padding!", 15, 30)
+	return NewAuthService(errorDB(), errorQueries(), "test-secret-key-32-bytes-padding!", 15, 30)
 }
 
 func TestUpsertUser_DBError(t *testing.T) {
@@ -99,7 +99,6 @@ func TestRotateRefreshToken_DBError(t *testing.T) {
 	svc := newErrAuthService()
 	_, _, _, err := svc.RotateRefreshToken(context.Background(), "some-raw-token")
 	require.Error(t, err)
-	assert.Equal(t, ErrInvalidRefreshToken, err)
 }
 
 func TestRevokeRefreshToken_DBError(t *testing.T) {

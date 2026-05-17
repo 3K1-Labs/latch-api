@@ -113,7 +113,7 @@ func TestRecoveryVerify_UserNotFound(t *testing.T) {
 
 func TestRecoveryVerify_IssueTokenError(t *testing.T) {
 	h := newRecoveryHandler(
-		&stubAuth{userByEmailID: "uid", recoveryErr: errGeneric},
+		&stubAuth{verifiedID: "uid", recoveryErr: errGeneric},
 		&stubBackup{},
 		&stubOTP{verOK: true},
 		nil, nil,
@@ -127,7 +127,7 @@ func TestRecoveryVerify_IssueTokenError(t *testing.T) {
 
 func TestRecoveryVerify_Success(t *testing.T) {
 	h := newRecoveryHandler(
-		&stubAuth{userByEmailID: "uid", recoveryToken: "recovery-jwt"},
+		&stubAuth{verifiedID: "uid", recoveryToken: "recovery-jwt"},
 		&stubBackup{},
 		&stubOTP{verOK: true},
 		nil, nil,
