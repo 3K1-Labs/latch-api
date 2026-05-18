@@ -152,3 +152,39 @@ func (s *SorobanService) GetEvents(ctx context.Context, rpcURL string, params Ge
 	}
 	return &result, nil
 }
+
+// ── sendTransaction ──────────────────────────────────────────────────────────
+
+type SendTxResult struct {
+	Status         string `json:"status"`
+	Hash           string `json:"hash"`
+	ErrorResultXdr string `json:"errorResultXdr,omitempty"`
+}
+
+// SendTransaction submits a signed transaction envelope to the Soroban RPC.
+func (s *SorobanService) SendTransaction(ctx context.Context, rpcURL, txXDR string) (*SendTxResult, error) {
+	params := map[string]string{"transaction": txXDR}
+	var result SendTxResult
+	if err := s.call(ctx, rpcURL, "sendTransaction", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ── getTransaction ───────────────────────────────────────────────────────────
+
+type GetTxResult struct {
+	Status         string `json:"status"`
+	ResultXdr      string `json:"resultXdr,omitempty"`
+	ErrorResultXdr string `json:"errorResultXdr,omitempty"`
+}
+
+// GetTransaction fetches the current status of a submitted transaction.
+func (s *SorobanService) GetTransaction(ctx context.Context, rpcURL, hash string) (*GetTxResult, error) {
+	params := map[string]string{"hash": hash}
+	var result GetTxResult
+	if err := s.call(ctx, rpcURL, "getTransaction", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

@@ -179,12 +179,28 @@ func (s *stubHistory) GetHistory(_ context.Context, _ service.HistoryParams) ([]
 // ── sorobanService stub ───────────────────────────────────────────────────────
 
 type stubSoroban struct {
-	result *service.SimulateResult
-	err    error
+	result   *service.SimulateResult
+	err      error
+	sendRes  *service.SendTxResult
+	getTxRes *service.GetTxResult
 }
 
 func (s *stubSoroban) SimulateTransaction(_ context.Context, _, _ string) (*service.SimulateResult, error) {
 	return s.result, s.err
+}
+
+func (s *stubSoroban) SendTransaction(_ context.Context, _, _ string) (*service.SendTxResult, error) {
+	if s.sendRes != nil {
+		return s.sendRes, nil
+	}
+	return &service.SendTxResult{Status: "PENDING", Hash: "abc123"}, s.err
+}
+
+func (s *stubSoroban) GetTransaction(_ context.Context, _, _ string) (*service.GetTxResult, error) {
+	if s.getTxRes != nil {
+		return s.getTxRes, nil
+	}
+	return &service.GetTxResult{Status: "SUCCESS"}, s.err
 }
 
 // errGeneric is a reusable sentinel for "some service error".

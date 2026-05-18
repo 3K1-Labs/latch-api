@@ -178,6 +178,7 @@ func main() {
 	api := r.Group("/api/transaction")
 	{
 		api.POST("/simulate", transactionHandler.Simulate)
+		api.POST("/relay", transactionHandler.Relay)
 	}
 
 	srv := &http.Server{
