@@ -130,11 +130,11 @@ func TestGetHistory_CAddressWithSorobanEvents(t *testing.T) {
 	// Build a valid C-address (contract address) for the test
 	contractPayload := make([]byte, 32)
 	contractPayload[0] = 0x01
-	cAddress := encodeStrkey(strkeyVersionContract, contractPayload)
+	cAddress := makeCAddress(t, contractPayload)
 
 	sacPayload := make([]byte, 32)
 	sacPayload[0] = 0x02
-	sacID := encodeStrkey(strkeyVersionContract, sacPayload)
+	sacID := makeCAddress(t, sacPayload)
 
 	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
 	_, err := svc.GetHistory(context.Background(), HistoryParams{
@@ -156,10 +156,10 @@ func TestGetHistory_SorobanDown_StillSucceeds(t *testing.T) {
 
 	contractPayload := make([]byte, 32)
 	contractPayload[0] = 0x01
-	cAddress := encodeStrkey(strkeyVersionContract, contractPayload)
+	cAddress := makeCAddress(t, contractPayload)
 	sacPayload := make([]byte, 32)
 	sacPayload[0] = 0x02
-	sacID := encodeStrkey(strkeyVersionContract, sacPayload)
+	sacID := makeCAddress(t, sacPayload)
 
 	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
 	txs, err := svc.GetHistory(context.Background(), HistoryParams{

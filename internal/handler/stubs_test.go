@@ -185,7 +185,7 @@ type stubSoroban struct {
 	getTxRes *service.GetTxResult
 }
 
-func (s *stubSoroban) SimulateTransaction(_ context.Context, _, _ string) (*service.SimulateResult, error) {
+func (s *stubSoroban) SimulateTransaction(_ context.Context, _, _ string, _ service.RPCResourceConfig) (*service.SimulateResult, error) {
 	return s.result, s.err
 }
 

@@ -48,7 +48,7 @@ type historyService interface {
 }
 
 type sorobanService interface {
-	SimulateTransaction(ctx context.Context, rpcURL, txXDR string) (*service.SimulateResult, error)
+	SimulateTransaction(ctx context.Context, rpcURL, txXDR string, resourceConfig service.RPCResourceConfig) (*service.SimulateResult, error)
 	SendTransaction(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error)
 	GetTransaction(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error)
 }

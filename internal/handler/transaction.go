@@ -21,14 +21,18 @@ func NewTransactionHandler(sorobanSvc sorobanService, cfg *config.Config) *Trans
 }
 
 type simulateRequest struct {
-	XDR     string `json:"xdr" binding:"required"`
-	Network string `json:"network"`
+	XDR               string                    `json:"xdr" binding:"required"`
+	Network           string                    `json:"network"`
+	ResourceConfig    service.RPCResourceConfig `json:"resourceConfig"`
 }
 
 type simulateResponse struct {
 	MinResourceFee  string                   `json:"min_resource_fee"`
 	TransactionData string                   `json:"transaction_data"`
 	Results         []service.SimResultEntry `json:"results,omitempty"`
+	Events          []string                 `json:"events,omitempty"`
+	RestorePreamble *service.RestorePreamble `json:"restore_preamble,omitempty"`
+	LatestLedger    int64                    `json:"latest_ledger,omitempty"`
 	Error           string                   `json:"error,omitempty"`
 }
 
@@ -67,7 +71,7 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 		rpcURL = h.cfg.SorobanRPCURLMainnet
 	}
 
-	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR)
+	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR, req.ResourceConfig)
 	if err != nil {
 		slog.Error("simulate transaction", "network", req.Network, "err", err)
 		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "simulation failed")
@@ -85,6 +89,9 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 		MinResourceFee:  result.MinResourceFee,
 		TransactionData: result.TransactionData,
 		Results:         result.Results,
+		Events:          result.Events,
+		RestorePreamble: result.RestorePreamble,
+		LatestLedger:    result.LatestLedger,
 	})
 }
 
@@ -118,15 +125,20 @@ func (h *TransactionHandler) Relay(c *gin.Context) {
 		return
 	}
 
-	if sent.Status == "ERROR" {
+	switch sent.Status {
+	case service.RPCStatusError:
 		httpx.Success(c, http.StatusOK, relayResponse{
 			Hash:   sent.Hash,
-			Status: "ERROR",
+			Status: service.RPCStatusError,
 			Error:  sent.ErrorResultXdr,
 		})
 		return
+	case service.RPCStatusTryAgain:
+		// RPC is overloaded; return immediately so the client can retry.
+		httpx.Success(c, http.StatusOK, relayResponse{Status: service.RPCStatusTryAgain})
+		return
 	}
-
+	// For PENDING and DUPLICATE the hash is available — proceed to poll.
 	hash := sent.Hash
 
 	// Poll for up to 20 s (20 × 1 s). The global write deadline is 30 s; this leaves headroom.
@@ -138,16 +150,17 @@ func (h *TransactionHandler) Relay(c *gin.Context) {
 			continue
 		}
 		switch poll.Status {
-		case "SUCCESS":
-			httpx.Success(c, http.StatusOK, relayResponse{Hash: hash, Status: "SUCCESS"})
+		case service.RPCStatusSuccess:
+			httpx.Success(c, http.StatusOK, relayResponse{Hash: hash, Status: service.RPCStatusSuccess})
 			return
-		case "FAILED":
+		case service.RPCStatusFailed:
 			detail := poll.ErrorResultXdr
 			if detail == "" {
 				detail = poll.ResultXdr
 			}
-			httpx.Success(c, http.StatusOK, relayResponse{Hash: hash, Status: "FAILED", Error: detail})
+			httpx.Success(c, http.StatusOK, relayResponse{Hash: hash, Status: service.RPCStatusFailed, Error: detail})
 			return
+		// RPCStatusNotFound means the tx is not yet included in a ledger; continue polling.
 		}
 	}
 
