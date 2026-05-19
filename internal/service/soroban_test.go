@@ -196,10 +196,10 @@ func TestSorobanService_GetLedgerEntries(t *testing.T) {
 			"latestLedger": uint32(500),
 			"entries": []map[string]any{
 				{
-					"key":                    "AAAA==",
-					"xdr":                    "BBBB==",
-					"lastModifiedLedgerSeq":  uint32(490),
-					"liveUntilLedgerSeq":     liveUntil,
+					"key":                   "AAAA==",
+					"xdr":                   "BBBB==",
+					"lastModifiedLedgerSeq": uint32(490),
+					"liveUntilLedgerSeq":    liveUntil,
 				},
 			},
 		},

@@ -21,9 +21,9 @@ func NewTransactionHandler(sorobanSvc sorobanService, cfg *config.Config) *Trans
 }
 
 type simulateRequest struct {
-	XDR               string                    `json:"xdr" binding:"required"`
-	Network           string                    `json:"network"`
-	ResourceConfig    service.RPCResourceConfig `json:"resourceConfig"`
+	XDR            string                    `json:"xdr" binding:"required"`
+	Network        string                    `json:"network"`
+	ResourceConfig service.RPCResourceConfig `json:"resourceConfig"`
 }
 
 type simulateResponse struct {
@@ -160,7 +160,7 @@ func (h *TransactionHandler) Relay(c *gin.Context) {
 			}
 			httpx.Success(c, http.StatusOK, relayResponse{Hash: hash, Status: service.RPCStatusFailed, Error: detail})
 			return
-		// RPCStatusNotFound means the tx is not yet included in a ledger; continue polling.
+			// RPCStatusNotFound means the tx is not yet included in a ledger; continue polling.
 		}
 	}
 

@@ -88,7 +88,7 @@ type SimulateResult struct {
 	MinResourceFee  string           `json:"minResourceFee"`
 	TransactionData string           `json:"transactionData"` // base64 XDR SorobanTransactionData
 	Results         []SimResultEntry `json:"results,omitempty"`
-	Events          []string         `json:"events,omitempty"`          // base64 XDR contract events
+	Events          []string         `json:"events,omitempty"` // base64 XDR contract events
 	LatestLedger    int64            `json:"latestLedger"`
 	Error           string           `json:"error,omitempty"`
 	RestorePreamble *RestorePreamble `json:"restorePreamble,omitempty"` // set when ledger entries need restoration
