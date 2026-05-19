@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -163,6 +162,3 @@ func TestGetDecrypted_UnmarshalError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unmarshal backup")
 }
-
-// Ensure the import is used.
-var _ *sql.DB
