@@ -130,11 +130,11 @@ func TestGetHistory_CAddressWithSorobanEvents(t *testing.T) {
 	// Build a valid C-address (contract address) for the test
 	contractPayload := make([]byte, 32)
 	contractPayload[0] = 0x01
-	cAddress := encodeStrkey(strkeyVersionContract, contractPayload)
+	cAddress := makeCAddress(t, contractPayload)
 
 	sacPayload := make([]byte, 32)
 	sacPayload[0] = 0x02
-	sacID := encodeStrkey(strkeyVersionContract, sacPayload)
+	sacID := makeCAddress(t, sacPayload)
 
 	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
 	_, err := svc.GetHistory(context.Background(), HistoryParams{
@@ -156,10 +156,10 @@ func TestGetHistory_SorobanDown_StillSucceeds(t *testing.T) {
 
 	contractPayload := make([]byte, 32)
 	contractPayload[0] = 0x01
-	cAddress := encodeStrkey(strkeyVersionContract, contractPayload)
+	cAddress := makeCAddress(t, contractPayload)
 	sacPayload := make([]byte, 32)
 	sacPayload[0] = 0x02
-	sacID := encodeStrkey(strkeyVersionContract, sacPayload)
+	sacID := makeCAddress(t, sacPayload)
 
 	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
 	txs, err := svc.GetHistory(context.Background(), HistoryParams{
@@ -192,4 +192,66 @@ func TestGetHistory_LimitClamped(t *testing.T) {
 func TestNewHistoryService(t *testing.T) {
 	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
 	assert.NotNil(t, svc)
+}
+
+func TestGetHistory_TruncatesAtLimit(t *testing.T) {
+	ops := []HorizonOperation{
+		{ID: "op1", TransactionHash: "h1", TransactionSuccessful: true, Type: "payment", CreatedAt: "2024-06-03T00:00:00Z", AssetType: "native"},
+		{ID: "op2", TransactionHash: "h2", TransactionSuccessful: true, Type: "payment", CreatedAt: "2024-06-02T00:00:00Z", AssetType: "native"},
+		{ID: "op3", TransactionHash: "h3", TransactionSuccessful: true, Type: "payment", CreatedAt: "2024-06-01T00:00:00Z", AssetType: "native"},
+	}
+
+	ts := fakeHorizon(t, ops)
+	defer ts.Close()
+
+	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
+	txs, err := svc.GetHistory(context.Background(), HistoryParams{
+		GAddress:   "GABC",
+		Network:    "testnet",
+		HorizonURL: ts.URL,
+		Limit:      2,
+	})
+
+	require.NoError(t, err)
+	assert.Len(t, txs, 2, "result should be capped at limit")
+}
+
+func TestGetHistory_SACEventsIncluded(t *testing.T) {
+	events := []SorobanEvent{
+		{
+			ID:                       "00001000-000000001",
+			TxHash:                   "sac-hash-1",
+			LedgerClosedAt:           "2024-06-01T12:00:00Z",
+			InSuccessfulContractCall: true,
+		},
+		{
+			// Unsuccessful — should be skipped
+			ID:                       "00001000-000000002",
+			TxHash:                   "sac-hash-2",
+			InSuccessfulContractCall: false,
+		},
+	}
+
+	contractPayload := make([]byte, 32)
+	contractPayload[0] = 0x10
+	cAddress := makeCAddress(t, contractPayload)
+	sacPayload := make([]byte, 32)
+	sacPayload[0] = 0x20
+	sacID := makeCAddress(t, sacPayload)
+
+	sts := fakeSorobanRPC(t, 100_000, events)
+	defer sts.Close()
+
+	svc := NewHistoryService(NewSorobanService(), NewHorizonService(), noopRedis())
+	txs, err := svc.GetHistory(context.Background(), HistoryParams{
+		CAddress:      cAddress,
+		NativeSACID:   sacID,
+		Network:       "testnet",
+		SorobanRPCURL: sts.URL,
+		Limit:         50,
+	})
+
+	require.NoError(t, err)
+	assert.Len(t, txs, 1, "only successful contract call should be included")
+	assert.Equal(t, "sac-hash-1", txs[0].Hash)
 }

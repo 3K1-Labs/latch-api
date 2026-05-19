@@ -130,8 +130,8 @@ func TestSacEventToTx(t *testing.T) {
 	toPayload := make([]byte, 32)
 	toPayload[0] = 0x20
 
-	fromAddr := encodeStrkey(strkeyVersionAccount, fromPayload)
-	toAddr := encodeStrkey(strkeyVersionAccount, toPayload)
+	fromAddr := makeGAddress(t, fromPayload)
+	toAddr := makeGAddress(t, toPayload)
 
 	fromXDR, err := AddressToScValXDR(fromAddr)
 	if err != nil {

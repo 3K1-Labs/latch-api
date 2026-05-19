@@ -53,3 +53,17 @@ func TestDecryptBackup_UnknownVersion(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown encryption version")
 }
+
+func TestDecryptBackup_Version1_DBError(t *testing.T) {
+	enc := NewEncryptionService(errorQueries(), "")
+	_, err := enc.DecryptBackup(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", &EncryptedBlob{}, EncVersionBackendKey)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get user key")
+}
+
+func TestDecryptBackup_Version2_DBError(t *testing.T) {
+	enc := NewEncryptionService(errorQueries(), "this-is-a-valid-pepper-32-characters!")
+	_, err := enc.DecryptBackup(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", &EncryptedBlob{}, EncVersionPBKDF2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get user email")
+}

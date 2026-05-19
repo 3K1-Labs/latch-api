@@ -7,6 +7,19 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	sdkxdr "github.com/stellar/go-stellar-sdk/xdr"
+)
+
+// RPC status constants for sendTransaction and getTransaction responses.
+const (
+	RPCStatusPending   = "PENDING"
+	RPCStatusDuplicate = "DUPLICATE"
+	RPCStatusTryAgain  = "TRY_AGAIN_LATER"
+	RPCStatusError     = "ERROR"
+	RPCStatusNotFound  = "NOT_FOUND"
+	RPCStatusFailed    = "FAILED"
+	RPCStatusSuccess   = "SUCCESS"
 )
 
 // SorobanService makes JSON-RPC 2.0 calls to a Soroban RPC endpoint.
@@ -70,25 +83,55 @@ func (s *SorobanService) call(ctx context.Context, rpcURL, method string, params
 
 // ── simulateTransaction ──────────────────────────────────────────────────────
 
+// SimulateResult is the decoded response from the Soroban RPC simulateTransaction call.
 type SimulateResult struct {
 	MinResourceFee  string           `json:"minResourceFee"`
 	TransactionData string           `json:"transactionData"` // base64 XDR SorobanTransactionData
 	Results         []SimResultEntry `json:"results,omitempty"`
+	Events          []string         `json:"events,omitempty"` // base64 XDR contract events
 	LatestLedger    int64            `json:"latestLedger"`
 	Error           string           `json:"error,omitempty"`
+	RestorePreamble *RestorePreamble `json:"restorePreamble,omitempty"` // set when ledger entries need restoration
+	StateChanges    []StateChange    `json:"stateChanges,omitempty"`
 }
 
+// SimResultEntry holds the auth and return XDR for a single host-function invocation.
 type SimResultEntry struct {
-	Auth []string `json:"auth"` // base64 XDR auth entries
-	XDR  string   `json:"xdr"`  // base64 XDR return value
+	Auth []string `json:"auth"` // base64 XDR SorobanAuthorizationEntry values
+	XDR  string   `json:"xdr"`  // base64 XDR return value (ScVal)
 }
 
-// SimulateTransaction calls simulateTransaction on the Soroban RPC and returns
-// the raw simulation result. The caller is responsible for assembling the transaction.
-func (s *SorobanService) SimulateTransaction(ctx context.Context, rpcURL, txXDR string) (*SimulateResult, error) {
-	params := map[string]string{"transaction": txXDR}
+// RestorePreamble is returned when one or more ledger entries required by the transaction
+// have expired and must be restored before the transaction can succeed.
+type RestorePreamble struct {
+	MinResourceFee  string `json:"minResourceFee"`
+	TransactionData string `json:"transactionData"` // base64 XDR SorobanTransactionData for the restore tx
+}
+
+// StateChange describes a single ledger entry mutation previewed by simulation.
+type StateChange struct {
+	Type   string  `json:"type"`
+	Key    string  `json:"key"`
+	Before *string `json:"before,omitempty"`
+	After  *string `json:"after,omitempty"`
+}
+
+// RPCResourceConfig controls instruction leeway added to the simulation resource estimate.
+type RPCResourceConfig struct {
+	InstructionLeeway int `json:"instructionLeeway,omitempty"`
+}
+
+// SimulateTransaction calls simulateTransaction on the Soroban RPC.
+// resourceConfig is optional (pass zero value to omit it).
+// The caller is responsible for applying the returned TransactionData and fees to the transaction.
+func (s *SorobanService) SimulateTransaction(ctx context.Context, rpcURL, txXDR string, resourceConfig RPCResourceConfig) (*SimulateResult, error) {
+	type params struct {
+		Transaction    string            `json:"transaction"`
+		ResourceConfig RPCResourceConfig `json:"resourceConfig,omitempty"`
+	}
+	p := params{Transaction: txXDR, ResourceConfig: resourceConfig}
 	var result SimulateResult
-	if err := s.call(ctx, rpcURL, "simulateTransaction", params, &result); err != nil {
+	if err := s.call(ctx, rpcURL, "simulateTransaction", p, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -187,4 +230,103 @@ func (s *SorobanService) GetTransaction(ctx context.Context, rpcURL, hash string
 		return nil, err
 	}
 	return &result, nil
+}
+
+// ── getTransactions ──────────────────────────────────────────────────────────
+
+type txPagination struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit"`
+}
+
+// RPCTransaction is a single transaction record returned by getTransactions.
+type RPCTransaction struct {
+	Status        string `json:"status"`
+	Hash          string `json:"txHash"`
+	Ledger        int64  `json:"ledger"`
+	CreatedAt     uint32 `json:"createdAt"`
+	EnvelopeXDR   string `json:"envelopeXdr,omitempty"`
+	ResultXDR     string `json:"resultXdr,omitempty"`
+	ResultMetaXDR string `json:"resultMetaXdr,omitempty"`
+}
+
+// GetTransactionsResult is the response from getTransactions.
+type GetTransactionsResult struct {
+	Transactions []RPCTransaction `json:"transactions"`
+	LatestLedger int64            `json:"latestLedger"`
+	Cursor       string           `json:"cursor,omitempty"`
+}
+
+// GetTransactions fetches a paginated list of transactions from the Soroban RPC.
+// Provide cursor to continue from a previous page, or startLedger to begin from a ledger.
+func (s *SorobanService) GetTransactions(ctx context.Context, rpcURL string, startLedger int64, cursor string, limit int) (*GetTransactionsResult, error) {
+	type params struct {
+		StartLedger int64        `json:"startLedger,omitempty"`
+		Pagination  txPagination `json:"pagination"`
+	}
+	p := params{Pagination: txPagination{Limit: limit}}
+	if cursor != "" {
+		p.Pagination.Cursor = cursor
+	} else {
+		p.StartLedger = startLedger
+	}
+	var result GetTransactionsResult
+	if err := s.call(ctx, rpcURL, "getTransactions", p, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ── getLedgerEntries ─────────────────────────────────────────────────────────
+
+// LedgerEntry is a single entry returned by getLedgerEntries.
+type LedgerEntry struct {
+	KeyXDR             string  `json:"key,omitempty"`
+	DataXDR            string  `json:"xdr,omitempty"`
+	LastModifiedLedger uint32  `json:"lastModifiedLedgerSeq"`
+	LiveUntilLedgerSeq *uint32 `json:"liveUntilLedgerSeq,omitempty"`
+}
+
+// GetLedgerEntriesResult is the response from getLedgerEntries.
+type GetLedgerEntriesResult struct {
+	LatestLedger uint32        `json:"latestLedger"`
+	Entries      []LedgerEntry `json:"entries"`
+}
+
+// GetLedgerEntries fetches raw ledger entries by their base64-encoded XDR keys.
+// Useful for reading account sequence numbers and contract state.
+func (s *SorobanService) GetLedgerEntries(ctx context.Context, rpcURL string, keys []string) (*GetLedgerEntriesResult, error) {
+	params := map[string]any{"keys": keys}
+	var result GetLedgerEntriesResult
+	if err := s.call(ctx, rpcURL, "getLedgerEntries", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ── getAccountLedgerSequence ─────────────────────────────────────────────────
+
+// GetAccountLedgerSequence returns the current sequence number for a G-address
+// by fetching and decoding the account's ledger entry from the Soroban RPC.
+func (s *SorobanService) GetAccountLedgerSequence(ctx context.Context, rpcURL, address string) (int64, error) {
+	keyXDR, err := GetAccountLedgerKey(address)
+	if err != nil {
+		return 0, fmt.Errorf("build ledger key for %s: %w", address, err)
+	}
+
+	result, err := s.GetLedgerEntries(ctx, rpcURL, []string{keyXDR})
+	if err != nil {
+		return 0, fmt.Errorf("get ledger entries: %w", err)
+	}
+	if len(result.Entries) == 0 {
+		return 0, fmt.Errorf("account %s not found on ledger", address)
+	}
+
+	var entryData sdkxdr.LedgerEntryData
+	if err := sdkxdr.SafeUnmarshalBase64(result.Entries[0].DataXDR, &entryData); err != nil {
+		return 0, fmt.Errorf("decode ledger entry XDR: %w", err)
+	}
+
+	accountEntry := entryData.MustAccount()
+	return int64(accountEntry.SeqNum), nil
 }
