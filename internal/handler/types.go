@@ -49,8 +49,18 @@ type backupExistsResponse struct {
 	Exists bool `json:"exists" example:"true"`
 }
 
-type blobResponse struct {
-	Blob map[string]any `json:"blob"`
+// clientEncryptedBlob mirrors the EncryptedBackup type produced by the mobile
+// client (Argon2id key derivation + AES-256-GCM). All fields are hex strings.
+type clientEncryptedBlob struct {
+	Version    string `json:"version"`
+	Salt       string `json:"salt"`
+	IV         string `json:"iv"`
+	AuthTag    string `json:"authTag"`
+	Ciphertext string `json:"ciphertext"`
+}
+
+type encryptedBlobResponse struct {
+	EncryptedBlob clientEncryptedBlob `json:"encrypted_blob"`
 }
 
 // ── Success envelope wrappers for Swagger ─────────────────────────────────────
@@ -72,7 +82,7 @@ type backupExistsDataResponse struct {
 }
 
 type blobDataResponse struct {
-	Data blobResponse `json:"data"`
+	Data encryptedBlobResponse `json:"data"`
 }
 
 type pricesDataResponse struct {

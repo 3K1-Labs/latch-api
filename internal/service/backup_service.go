@@ -79,5 +79,38 @@ func (s *BackupService) GetDecrypted(ctx context.Context, userID string) (map[st
 	return blob, nil
 }
 
+// StoreClientEncrypted persists an opaque client-side encrypted blob.
+// The backend never decrypts it — clientBlob is the JSON-serialised
+// EncryptedBackup produced by the mobile client.
+func (s *BackupService) StoreClientEncrypted(ctx context.Context, userID, clientBlob, smartAccountAddress string) error {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("parse user id: %w", err)
+	}
+
+	return s.q.UpsertClientEncryptedBackup(ctx, db.UpsertClientEncryptedBackupParams{
+		ID:                  uuid.New(),
+		UserID:              uid,
+		ClientEncryptedBlob: clientBlob,
+		SmartAccountAddress: smartAccountAddress,
+	})
+}
+
+// GetClientBlob returns the raw client-encrypted JSON blob for the user.
+// Returns ErrNoBackup when no client-side encrypted backup is found.
+func (s *BackupService) GetClientBlob(ctx context.Context, userID string) (string, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return "", fmt.Errorf("parse user id: %w", err)
+	}
+
+	row, err := s.q.GetClientBlobByUserID(ctx, uid)
+	if err != nil || !row.Valid {
+		return "", ErrNoBackup
+	}
+
+	return row.String, nil
+}
+
 // ErrNoBackup is returned when no backup exists for the user.
 var ErrNoBackup = fmt.Errorf("no backup found for this account")

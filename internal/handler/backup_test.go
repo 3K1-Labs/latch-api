@@ -26,6 +26,20 @@ func newBackupHandler(backup *stubBackup, audit *stubAudit) *BackupHandler {
 	return NewBackupHandler(backup, audit)
 }
 
+// validStoreBody returns a well-formed store request body.
+func validStoreBody(smartAccount string) *bytes.Reader {
+	return postJSONBody(map[string]any{
+		"smart_account_address": smartAccount,
+		"encrypted_blob": map[string]any{
+			"version":    "2",
+			"salt":       "aabbccdd",
+			"iv":         "eeff0011",
+			"authTag":    "22334455",
+			"ciphertext": "66778899",
+		},
+	})
+}
+
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 func TestStore_InvalidBody(t *testing.T) {
@@ -45,7 +59,27 @@ func TestStore_MissingSmartAccount(t *testing.T) {
 	r.POST("/backup", h.Store)
 
 	w := httptest.NewRecorder()
-	body := postJSONBody(map[string]any{"blob": map[string]any{"version": "1"}})
+	body := postJSONBody(map[string]any{
+		"encrypted_blob": map[string]any{
+			"version": "2", "salt": "aa", "iv": "bb", "authTag": "cc", "ciphertext": "dd",
+		},
+	})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestStore_IncompleteEncryptedBlob(t *testing.T) {
+	h := newBackupHandler(&stubBackup{}, nil)
+	r := gin.New()
+	r.POST("/backup", h.Store)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{
+		"smart_account_address": "GABC",
+		"encrypted_blob":        map[string]any{"version": "2"}, // missing fields
+	})
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", body), "uid")
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -58,11 +92,7 @@ func TestStore_ServiceError(t *testing.T) {
 	r.POST("/backup", h.Store)
 
 	w := httptest.NewRecorder()
-	body := postJSONBody(map[string]any{
-		"blob":                  map[string]any{"version": "1", "smart_account": "GABC"},
-		"smart_account_address": "GABC",
-	})
-	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", body), "uid")
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", validStoreBody("GABC")), "uid")
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -74,11 +104,7 @@ func TestStore_Success(t *testing.T) {
 	r.POST("/backup", h.Store)
 
 	w := httptest.NewRecorder()
-	body := postJSONBody(map[string]any{
-		"blob":                  map[string]any{"version": "1", "smart_account": "GABC"},
-		"smart_account_address": "GABC",
-	})
-	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", body), "uid")
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", validStoreBody("GABC")), "uid")
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code)
@@ -87,22 +113,6 @@ func TestStore_Success(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	data := resp["data"].(map[string]any)
 	assert.Equal(t, "backup stored", data["message"])
-}
-
-func TestStore_SmartAccountFromBlob(t *testing.T) {
-	h := newBackupHandler(&stubBackup{}, nil)
-	r := gin.New()
-	r.POST("/backup", h.Store)
-
-	// smart_account_address omitted — should fall back to blob.smart_account
-	w := httptest.NewRecorder()
-	body := postJSONBody(map[string]any{
-		"blob": map[string]any{"version": "1", "smart_account": "GABC"},
-	})
-	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", body), "uid")
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
 // ── Exists ────────────────────────────────────────────────────────────────────

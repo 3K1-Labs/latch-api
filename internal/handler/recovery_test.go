@@ -197,8 +197,8 @@ func TestGetBlob_BackupError(t *testing.T) {
 
 func TestGetBlob_Success(t *testing.T) {
 	tok := makeRecoveryToken(t, "uid", "recovery", time.Now().Add(time.Hour))
-	blob := map[string]any{"version": "1", "mnemonic": "word1 word2"}
-	h := newRecoveryHandler(&stubAuth{}, &stubBackup{blob: blob}, &stubOTP{}, nil, nil)
+	rawBlob := `{"version":"2","salt":"aabb","iv":"ccdd","authTag":"eeff","ciphertext":"0011"}`
+	h := newRecoveryHandler(&stubAuth{}, &stubBackup{clientBlob: rawBlob}, &stubOTP{}, nil, nil)
 	r := gin.New()
 	r.GET("/blob", h.GetBlob)
 
@@ -211,6 +211,6 @@ func TestGetBlob_Success(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	data := resp["data"].(map[string]any)
-	blobData := data["blob"].(map[string]any)
-	assert.Equal(t, "1", blobData["version"])
+	encBlob := data["encrypted_blob"].(map[string]any)
+	assert.Equal(t, "2", encBlob["version"])
 }

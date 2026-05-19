@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -13,6 +14,7 @@ import (
 type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
+	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
@@ -21,6 +23,7 @@ type Querier interface {
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
+	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
 	VerifyUserEmail(ctx context.Context, email string) (uuid.UUID, error)

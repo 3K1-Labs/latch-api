@@ -11,6 +11,7 @@ import (
 const (
 	EncVersionBackendKey = 1 // Phase 1: per-user key stored in DB
 	EncVersionPBKDF2     = 2 // Phase 2: key derived from email + server pepper
+	EncVersionClientSide = 3 // Phase 3: client encrypts with Argon2id+AES-256-GCM; backend stores opaque blob
 )
 
 // EncryptionService handles key management and delegates to the crypto primitives

@@ -23,15 +23,16 @@ type AuditLog struct {
 }
 
 type CredentialBackup struct {
-	ID                  uuid.UUID `json:"id"`
-	UserID              uuid.UUID `json:"user_id"`
-	EncryptedBlob       []byte    `json:"encrypted_blob"`
-	Iv                  []byte    `json:"iv"`
-	AuthTag             []byte    `json:"auth_tag"`
-	EncryptionVersion   int32     `json:"encryption_version"`
-	SmartAccountAddress string    `json:"smart_account_address"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  uuid.UUID      `json:"id"`
+	UserID              uuid.UUID      `json:"user_id"`
+	EncryptedBlob       []byte         `json:"encrypted_blob"`
+	Iv                  []byte         `json:"iv"`
+	AuthTag             []byte         `json:"auth_tag"`
+	EncryptionVersion   int32          `json:"encryption_version"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
 type RefreshToken struct {

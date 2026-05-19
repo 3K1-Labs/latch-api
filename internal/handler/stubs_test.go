@@ -126,11 +126,11 @@ type stubBackup struct {
 	storeErr   error
 	existsBool bool
 	existsErr  error
-	blob       map[string]any
+	clientBlob string
 	getErr     error
 }
 
-func (s *stubBackup) Store(_ context.Context, _ string, _ []byte, _ string) error {
+func (s *stubBackup) StoreClientEncrypted(_ context.Context, _, _, _ string) error {
 	return s.storeErr
 }
 
@@ -138,14 +138,14 @@ func (s *stubBackup) Exists(_ context.Context, _ string) (bool, error) {
 	return s.existsBool, s.existsErr
 }
 
-func (s *stubBackup) GetDecrypted(_ context.Context, _ string) (map[string]any, error) {
+func (s *stubBackup) GetClientBlob(_ context.Context, _ string) (string, error) {
 	if s.getErr != nil {
-		return nil, s.getErr
+		return "", s.getErr
 	}
-	if s.blob != nil {
-		return s.blob, nil
+	if s.clientBlob != "" {
+		return s.clientBlob, nil
 	}
-	return map[string]any{"version": "1"}, nil
+	return `{"version":"2","salt":"aabb","iv":"ccdd","authTag":"eeff","ciphertext":"0011"}`, nil
 }
 
 // ── priceService stub ─────────────────────────────────────────────────────────
@@ -179,9 +179,9 @@ func (s *stubHistory) GetHistory(_ context.Context, _ service.HistoryParams) ([]
 // ── sorobanService stub ───────────────────────────────────────────────────────
 
 type stubSoroban struct {
-	result   *service.SimulateResult
-	err      error
-	sendRes  *service.SendTxResult
+	result  *service.SimulateResult
+	err     error
+	sendRes *service.SendTxResult
 	getTxRes *service.GetTxResult
 }
 
