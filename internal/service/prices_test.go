@@ -130,6 +130,66 @@ func TestPriceService_CoinGeckoDown_ReturnsNil(t *testing.T) {
 	}
 }
 
+func TestPriceService_NetworkError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	ts.Close() // close so all connections are refused
+
+	transport := &rewriteHostTransport{
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
+		targetScheme: "http",
+	}
+	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
+	result := svc.GetPrices(context.Background(), []string{"native"})
+	if pd := result["native"]; pd != nil {
+		t.Errorf("expected nil on network error, got %+v", pd)
+	}
+}
+
+func TestPriceService_DecodeError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("this is not valid json {{{"))
+	}))
+	defer ts.Close()
+
+	transport := &rewriteHostTransport{
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
+		targetScheme: "http",
+	}
+	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
+	result := svc.GetPrices(context.Background(), []string{"native"})
+	if pd := result["native"]; pd != nil {
+		t.Errorf("expected nil on decode error, got %+v", pd)
+	}
+}
+
+func TestPriceService_WithAPIKey_SendsHeader(t *testing.T) {
+	var gotKey string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("x-cg-demo-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"stellar": map[string]any{"usd": 0.1, "usd_24h_change": 0.0},
+		})
+	}))
+	defer ts.Close()
+
+	transport := &rewriteHostTransport{
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
+		targetScheme: "http",
+	}
+	svc := NewPriceService(disconnectedRedis(), "test-api-key")
+	svc.httpClient = &http.Client{Transport: transport}
+	svc.GetPrices(context.Background(), []string{"native"})
+
+	if gotKey != "test-api-key" {
+		t.Errorf("API key header = %q, want test-api-key", gotKey)
+	}
+}
+
 // rewriteHostTransport redirects all outgoing HTTP requests to a fixed host/scheme.
 // This lets us point the PriceService's hardcoded CoinGecko URL at a test server.
 type rewriteHostTransport struct {

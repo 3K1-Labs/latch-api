@@ -106,3 +106,10 @@ func TestRevokeRefreshToken_DBError(t *testing.T) {
 	err := svc.RevokeRefreshToken(context.Background(), "some-raw-token")
 	require.Error(t, err)
 }
+
+func TestIssueRefreshToken_InvalidUUID(t *testing.T) {
+	svc := newTestAuthService()
+	_, err := svc.issueRefreshToken(context.Background(), "not-a-valid-uuid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse user id")
+}

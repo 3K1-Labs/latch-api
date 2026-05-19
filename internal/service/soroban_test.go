@@ -6,6 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	sdkstrkey "github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // sorobanRPCHandler returns an http.HandlerFunc that responds to JSON-RPC calls
@@ -242,6 +246,205 @@ func TestSorobanService_GetLedgerEntries_NotFound(t *testing.T) {
 	if len(result.Entries) != 0 {
 		t.Errorf("got %d entries, want 0", len(result.Entries))
 	}
+}
+
+func TestSorobanService_SendTransaction(t *testing.T) {
+	ts := httptest.NewServer(sorobanRPCHandler(t, map[string]any{
+		"sendTransaction": map[string]any{
+			"status": "PENDING",
+			"hash":   "deadbeef123",
+		},
+	}))
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	result, err := svc.SendTransaction(context.Background(), ts.URL, "signed-xdr")
+	if err != nil {
+		t.Fatalf("SendTransaction: %v", err)
+	}
+	if result.Status != "PENDING" {
+		t.Errorf("Status = %q, want PENDING", result.Status)
+	}
+	if result.Hash != "deadbeef123" {
+		t.Errorf("Hash = %q, want deadbeef123", result.Hash)
+	}
+}
+
+func TestSorobanService_GetTransaction(t *testing.T) {
+	ts := httptest.NewServer(sorobanRPCHandler(t, map[string]any{
+		"getTransaction": map[string]any{
+			"status":    "SUCCESS",
+			"resultXdr": "AAABBBCCC",
+		},
+	}))
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	result, err := svc.GetTransaction(context.Background(), ts.URL, "txhash")
+	if err != nil {
+		t.Fatalf("GetTransaction: %v", err)
+	}
+	if result.Status != "SUCCESS" {
+		t.Errorf("Status = %q, want SUCCESS", result.Status)
+	}
+	if result.ResultXdr != "AAABBBCCC" {
+		t.Errorf("ResultXdr = %q, want AAABBBCCC", result.ResultXdr)
+	}
+}
+
+func TestSorobanService_GetAccountLedgerSequence_InvalidAddress(t *testing.T) {
+	svc := NewSorobanService()
+	_, err := svc.GetAccountLedgerSequence(context.Background(), "http://localhost:1", "NOTANADDRESS")
+	if err == nil {
+		t.Fatal("expected error for invalid address, got nil")
+	}
+}
+
+func TestSorobanService_GetAccountLedgerSequence_NotFound(t *testing.T) {
+	ts := httptest.NewServer(sorobanRPCHandler(t, map[string]any{
+		"getLedgerEntries": map[string]any{
+			"latestLedger": uint32(500),
+			"entries":      []map[string]any{},
+		},
+	}))
+	defer ts.Close()
+
+	payload := make([]byte, 32)
+	for i := range payload {
+		payload[i] = byte(i + 1)
+	}
+	addr, err := encodeGAddress(payload)
+	if err != nil {
+		t.Fatalf("encode address: %v", err)
+	}
+
+	svc := newTestSorobanService(ts.Client())
+	_, err = svc.GetAccountLedgerSequence(context.Background(), ts.URL, addr)
+	if err == nil {
+		t.Fatal("expected error for missing account, got nil")
+	}
+}
+
+func TestSorobanService_GetAccountLedgerSequence_InvalidXDR(t *testing.T) {
+	ts := httptest.NewServer(sorobanRPCHandler(t, map[string]any{
+		"getLedgerEntries": map[string]any{
+			"latestLedger": uint32(500),
+			"entries": []map[string]any{
+				{"key": "AAAA==", "xdr": "not-valid-xdr-data!!!"},
+			},
+		},
+	}))
+	defer ts.Close()
+
+	payload := make([]byte, 32)
+	for i := range payload {
+		payload[i] = byte(i + 1)
+	}
+	addr, err := encodeGAddress(payload)
+	if err != nil {
+		t.Fatalf("encode address: %v", err)
+	}
+
+	svc := newTestSorobanService(ts.Client())
+	_, err = svc.GetAccountLedgerSequence(context.Background(), ts.URL, addr)
+	if err == nil {
+		t.Fatal("expected error for invalid XDR, got nil")
+	}
+}
+
+func TestSorobanService_Call_DecodeError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("this is not json {{{"))
+	}))
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	_, err := svc.SimulateTransaction(context.Background(), ts.URL, "xdr", RPCResourceConfig{})
+	if err == nil {
+		t.Fatal("expected error for invalid JSON response, got nil")
+	}
+}
+
+func TestSorobanService_Call_NetworkError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	ts.Close() // close immediately so connections are refused
+
+	svc := newTestSorobanService(ts.Client())
+	_, err := svc.SimulateTransaction(context.Background(), ts.URL, "xdr", RPCResourceConfig{})
+	if err == nil {
+		t.Fatal("expected error for closed server, got nil")
+	}
+}
+
+// encodeGAddress is a test helper that builds a valid G-address from raw bytes.
+func encodeGAddress(payload []byte) (string, error) {
+	return sdkstrkey.Encode(sdkstrkey.VersionByteAccountID, payload)
+}
+
+func rpcErrorServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"error":   map[string]any{"code": -32600, "message": "RPC error"},
+		})
+	}))
+}
+
+func TestSorobanService_GetEvents_Error(t *testing.T) {
+	ts := rpcErrorServer(t)
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	_, err := svc.GetEvents(context.Background(), ts.URL, GetEventsParams{StartLedger: 1})
+	require.Error(t, err)
+}
+
+func TestSorobanService_SendTransaction_RPCError(t *testing.T) {
+	ts := rpcErrorServer(t)
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	_, err := svc.SendTransaction(context.Background(), ts.URL, "xdr")
+	require.Error(t, err)
+}
+
+func TestSorobanService_GetTransaction_RPCError(t *testing.T) {
+	ts := rpcErrorServer(t)
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	_, err := svc.GetTransaction(context.Background(), ts.URL, "hash")
+	require.Error(t, err)
+}
+
+func TestSorobanService_GetLedgerEntries_RPCError(t *testing.T) {
+	ts := rpcErrorServer(t)
+	defer ts.Close()
+
+	svc := newTestSorobanService(ts.Client())
+	_, err := svc.GetLedgerEntries(context.Background(), ts.URL, []string{"AAAA=="})
+	require.Error(t, err)
+}
+
+func TestSorobanService_GetAccountLedgerSequence_RPCError(t *testing.T) {
+	ts := rpcErrorServer(t)
+	defer ts.Close()
+
+	payload := make([]byte, 32)
+	payload[0] = 0x01
+	addr, err := encodeGAddress(payload)
+	if err != nil {
+		t.Fatalf("encode address: %v", err)
+	}
+
+	svc := newTestSorobanService(ts.Client())
+	_, err = svc.GetAccountLedgerSequence(context.Background(), ts.URL, addr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "get ledger entries")
 }
 
 func TestSorobanService_GetEvents(t *testing.T) {

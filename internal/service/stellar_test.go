@@ -190,6 +190,28 @@ func TestDecodeI128Amount_WrongType(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestDecodeScAddressTopic_InvalidBase64 verifies that malformed input returns an error.
+func TestDecodeScAddressTopic_InvalidBase64(t *testing.T) {
+	_, err := DecodeScAddressTopic("not-valid-base64!!!")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unmarshal ScVal")
+}
+
+// TestDecodeScAddressTopic_WrongType verifies that a non-address ScVal returns an error.
+func TestDecodeScAddressTopic_WrongType(t *testing.T) {
+	sym := SymbolToScValXDR("transfer")
+	_, err := DecodeScAddressTopic(sym)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected SCV_ADDRESS")
+}
+
+// TestGetAccountLedgerKey_InvalidAddress verifies that a non-G address returns an error.
+func TestGetAccountLedgerKey_InvalidAddress(t *testing.T) {
+	_, err := GetAccountLedgerKey("INVALID_ADDRESS")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode address")
+}
+
 // TestGetAccountLedgerKey verifies that GetAccountLedgerKey produces a decodable
 // LedgerKey of type Account for a valid G-address.
 func TestGetAccountLedgerKey(t *testing.T) {
