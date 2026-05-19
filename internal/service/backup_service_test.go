@@ -64,3 +64,30 @@ func TestStore_EncryptionError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encrypt backup")
 }
+
+func TestStoreClientEncrypted_InvalidUUID(t *testing.T) {
+	svc := NewBackupService(nil, nil)
+	err := svc.StoreClientEncrypted(context.Background(), "not-a-uuid", `{"version":"2"}`, "GABC")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse user id")
+}
+
+func TestStoreClientEncrypted_DBError(t *testing.T) {
+	svc := NewBackupService(errorQueries(), nil)
+	err := svc.StoreClientEncrypted(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", `{"version":"2"}`, "GABC")
+	require.Error(t, err)
+}
+
+func TestGetClientBlob_InvalidUUID(t *testing.T) {
+	svc := NewBackupService(nil, nil)
+	_, err := svc.GetClientBlob(context.Background(), "not-a-uuid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse user id")
+}
+
+func TestGetClientBlob_DBError(t *testing.T) {
+	svc := NewBackupService(errorQueries(), nil)
+	_, err := svc.GetClientBlob(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	require.Error(t, err)
+	assert.Equal(t, ErrNoBackup, err)
+}

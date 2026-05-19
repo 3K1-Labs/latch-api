@@ -34,9 +34,9 @@ type auditService interface {
 }
 
 type backupService interface {
-	Store(ctx context.Context, userID string, plaintext []byte, smartAccountAddress string) error
+	StoreClientEncrypted(ctx context.Context, userID, clientBlob, smartAccountAddress string) error
 	Exists(ctx context.Context, userID string) (bool, error)
-	GetDecrypted(ctx context.Context, userID string) (map[string]any, error)
+	GetClientBlob(ctx context.Context, userID string) (string, error)
 }
 
 type priceService interface {
