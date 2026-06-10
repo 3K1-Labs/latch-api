@@ -23,6 +23,10 @@ const (
 	ActionRecoveryInitiated AuditAction = "recovery_initiated"
 	ActionRecoveryCompleted AuditAction = "recovery_completed"
 	ActionLogout            AuditAction = "logout"
+	ActionCosignCreated     AuditAction = "cosign_created"
+	ActionCosignSigned      AuditAction = "cosign_signed"
+	ActionCosignSubmitted   AuditAction = "cosign_submitted"
+	ActionCosignCancelled   AuditAction = "cosign_cancelled"
 )
 
 type AuditService struct {

@@ -8,6 +8,9 @@ sql:
       - "migrations/000003_create_user_encryption_keys.up.sql"
       - "migrations/000004_create_refresh_tokens.up.sql"
       - "migrations/000005_create_audit_log.up.sql"
+      - "migrations/000006_unique_refresh_token_hash.up.sql"
+      - "migrations/000007_client_encrypted_backup.up.sql"
+      - "migrations/000008_create_cosign_requests.up.sql"
     gen:
       go:
         package: "db"

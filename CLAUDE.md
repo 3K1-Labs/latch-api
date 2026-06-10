@@ -126,7 +126,7 @@ The primary client. React Native + Expo 55, Bun package manager, Expo Router, Zu
 - The credential blob sent to `/v1/backup` is **plaintext** from the mobile side — the backend performs all AES-256-GCM encryption before storage
 - Smart account users: BIP-44 index ≥ 0 for seed wallets, index = -1 for passkey wallets
 - Android Soroban calls bypass Axios (raw XMLHttpRequest) due to OkHttp TLS incompatibility — keep `/api/transaction/*` responses simple and avoid chunked transfer encoding
-- `EXPO_PUBLIC_BUNDLER_SECRET` is currently embedded in the mobile app (testnet only); the production path is for the backend to own the bundler keypair and sign outer transactions server-side
+- `BUNDLER_SECRET` is currently embedded in the mobile app (testnet only); the production path is for the backend to own the bundler keypair and sign outer transactions server-side
 
 ### freighter (`references/freighter/`)
 

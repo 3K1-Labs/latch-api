@@ -22,6 +22,28 @@ type AuditLog struct {
 	CreatedAt time.Time             `json:"created_at"`
 }
 
+type CosignRequest struct {
+	ID                  uuid.UUID      `json:"id"`
+	UserID              uuid.UUID      `json:"user_id"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+	UnsignedTxXdr       string         `json:"unsigned_tx_xdr"`
+	Network             string         `json:"network"`
+	Threshold           int32          `json:"threshold"`
+	Status              string         `json:"status"`
+	SubmittedTxHash     sql.NullString `json:"submitted_tx_hash"`
+	ExpiresAt           time.Time      `json:"expires_at"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+}
+
+type CosignSignature struct {
+	ID           uuid.UUID `json:"id"`
+	RequestID    uuid.UUID `json:"request_id"`
+	SignerKey    string    `json:"signer_key"`
+	AuthEntryXdr string    `json:"auth_entry_xdr"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type CredentialBackup struct {
 	ID                  uuid.UUID      `json:"id"`
 	UserID              uuid.UUID      `json:"user_id"`
@@ -30,9 +52,9 @@ type CredentialBackup struct {
 	AuthTag             []byte         `json:"auth_tag"`
 	EncryptionVersion   int32          `json:"encryption_version"`
 	SmartAccountAddress string         `json:"smart_account_address"`
-	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
+	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
 }
 
 type RefreshToken struct {

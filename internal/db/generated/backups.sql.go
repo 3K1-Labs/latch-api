@@ -50,6 +50,19 @@ func (q *Queries) GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetB
 	return i, err
 }
 
+const getClientBlobByUserID = `-- name: GetClientBlobByUserID :one
+SELECT client_encrypted_blob
+FROM credential_backups
+WHERE user_id = $1
+`
+
+func (q *Queries) GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getClientBlobByUserID, userID)
+	var client_encrypted_blob sql.NullString
+	err := row.Scan(&client_encrypted_blob)
+	return client_encrypted_blob, err
+}
+
 const upsertBackup = `-- name: UpsertBackup :exec
 INSERT INTO credential_backups
     (id, user_id, encrypted_blob, iv, auth_tag, encryption_version, smart_account_address)
@@ -101,10 +114,10 @@ ON CONFLICT (user_id) DO UPDATE SET
 `
 
 type UpsertClientEncryptedBackupParams struct {
-	ID                  uuid.UUID `json:"id"`
-	UserID              uuid.UUID `json:"user_id"`
-	ClientEncryptedBlob string    `json:"client_encrypted_blob"`
-	SmartAccountAddress string    `json:"smart_account_address"`
+	ID                  uuid.UUID      `json:"id"`
+	UserID              uuid.UUID      `json:"user_id"`
+	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
+	SmartAccountAddress string         `json:"smart_account_address"`
 }
 
 func (q *Queries) UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error {
@@ -115,17 +128,4 @@ func (q *Queries) UpsertClientEncryptedBackup(ctx context.Context, arg UpsertCli
 		arg.SmartAccountAddress,
 	)
 	return err
-}
-
-const getClientBlobByUserID = `-- name: GetClientBlobByUserID :one
-SELECT client_encrypted_blob
-FROM credential_backups
-WHERE user_id = $1
-`
-
-func (q *Queries) GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error) {
-	row := q.db.QueryRowContext(ctx, getClientBlobByUserID, userID)
-	var clientEncryptedBlob sql.NullString
-	err := row.Scan(&clientEncryptedBlob)
-	return clientEncryptedBlob, err
 }

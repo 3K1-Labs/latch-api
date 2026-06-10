@@ -13,14 +13,21 @@ import (
 
 type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
+	CancelCosignRequest(ctx context.Context, arg CancelCosignRequestParams) error
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
+	GetCosignRequest(ctx context.Context, arg GetCosignRequestParams) (CosignRequest, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
+	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
+	ListPendingCosignRequests(ctx context.Context, arg ListPendingCosignRequestsParams) ([]CosignRequest, error)
+	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error

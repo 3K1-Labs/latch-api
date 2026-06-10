@@ -39,6 +39,15 @@ type backupService interface {
 	GetClientBlob(ctx context.Context, userID string) (string, error)
 }
 
+type cosignService interface {
+	Create(ctx context.Context, userID string, in service.CreateCosignInput) (service.CosignRequest, error)
+	List(ctx context.Context, userID, smartAccountAddress string) ([]service.CosignRequest, error)
+	Get(ctx context.Context, userID, id string) (service.CosignRequest, error)
+	AddSignature(ctx context.Context, userID, id, signerKey, authEntryXDR string) (service.CosignRequest, error)
+	MarkSubmitted(ctx context.Context, userID, id, txHash string) error
+	Cancel(ctx context.Context, userID, id string) error
+}
+
 type priceService interface {
 	GetPrices(ctx context.Context, tokens []string) map[string]*service.PriceData
 }

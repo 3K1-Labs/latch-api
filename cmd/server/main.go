@@ -79,6 +79,7 @@ func main() {
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
 	backupSvc := service.NewBackupService(queries, encSvc)
+	cosignSvc := service.NewCosignService(queries)
 	sorobanSvc := service.NewSorobanService()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
@@ -87,6 +88,7 @@ func main() {
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
+	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc)
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
@@ -173,6 +175,17 @@ func main() {
 
 		v1.GET("/prices", pricesHandler.GetPrices)
 		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), historyHandler.GetHistory)
+
+		cosign := v1.Group("/cosign/requests")
+		cosign.Use(middleware.RequireAuth(cfg.JWTSecret))
+		{
+			cosign.POST("", cosignHandler.Create)
+			cosign.GET("", cosignHandler.List)
+			cosign.GET("/:id", cosignHandler.Get)
+			cosign.POST("/:id/signatures", cosignHandler.AddSignature)
+			cosign.POST("/:id/submission", cosignHandler.MarkSubmitted)
+			cosign.DELETE("/:id", cosignHandler.Cancel)
+		}
 	}
 
 	api := r.Group("/api/transaction")
