@@ -11,11 +11,12 @@ import (
 	"github.com/latch/backend/internal/service"
 )
 
-// CosignHandler serves the multisig cosign request queue. Payloads
-// (unsigned_tx_xdr, auth_entry_xdr) are opaque — already client-encrypted — so
-// the backend stores and returns them verbatim. All access is scoped to the
-// authenticated user; the on-chain __check_auth is the authoritative signer
-// check at submission time.
+// CosignHandler serves the multisig cosign queue. It is scoped by an opaque
+// blind queue_index = HMAC(WCK, wallet address) — only WCK-holding members can
+// compute it, so it doubles as the access capability. The server never sees the
+// wallet address, the device keys, or the tx contents (all client-encrypted),
+// and stores no user<->wallet link. RequireAuth still gates the routes to block
+// anonymous abuse; the authenticated identity is used only for the audit actor.
 type CosignHandler struct {
 	cosignSvc cosignService
 	auditSvc  auditService
@@ -26,10 +27,10 @@ func NewCosignHandler(cosignSvc cosignService, auditSvc auditService) *CosignHan
 }
 
 type createCosignRequest struct {
-	SmartAccountAddress string `json:"smart_account_address" binding:"required"`
-	UnsignedTxXDR       string `json:"unsigned_tx_xdr" binding:"required"`
-	Network             string `json:"network" binding:"required"`
-	Threshold           int    `json:"threshold" binding:"required,min=1"`
+	QueueIndex    string `json:"queue_index" binding:"required"`
+	UnsignedTxXDR string `json:"unsigned_tx_xdr" binding:"required"`
+	Network       string `json:"network" binding:"required"`
+	Threshold     int    `json:"threshold" binding:"required,min=1"`
 }
 
 // Create godoc
@@ -37,7 +38,7 @@ type createCosignRequest struct {
 // @Tags         cosign
 // @Accept       json
 // @Produce      json
-// @Param        body body createCosignRequest true "Opaque assembled tx + threshold"
+// @Param        body body createCosignRequest true "Blind queue index + encrypted tx + threshold"
 // @Success      201 {object} map[string]any
 // @Failure      400 {object} apiErrorResponse
 // @Failure      401 {object} apiErrorResponse
@@ -45,37 +46,33 @@ type createCosignRequest struct {
 // @Security     BearerAuth
 // @Router       /v1/cosign/requests [post]
 func (h *CosignHandler) Create(c *gin.Context) {
-	userID := middleware.UserIDFromContext(c.Request.Context())
-
 	var req createCosignRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid request body")
 		return
 	}
 
-	out, err := h.cosignSvc.Create(c.Request.Context(), userID, service.CreateCosignInput{
-		SmartAccountAddress: req.SmartAccountAddress,
-		UnsignedTxXDR:       req.UnsignedTxXDR,
-		Network:             req.Network,
-		Threshold:           req.Threshold,
+	out, err := h.cosignSvc.Create(c.Request.Context(), service.CreateCosignInput{
+		QueueIndex:    req.QueueIndex,
+		UnsignedTxXDR: req.UnsignedTxXDR,
+		Network:       req.Network,
+		Threshold:     req.Threshold,
 	})
 	if err != nil {
-		slog.Error("create cosign request", "userID", userID, "err", err)
+		slog.Error("create cosign request", "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionCosignCreated), c.ClientIP(), c.Request.UserAgent(), map[string]any{
-		"smart_account": req.SmartAccountAddress,
-	})
+	h.audit(c, service.ActionCosignCreated)
 	httpx.Success(c, http.StatusCreated, out)
 }
 
 // List godoc
-// @Summary      List pending cosign requests for a smart account
+// @Summary      List pending cosign requests for a queue
 // @Tags         cosign
 // @Produce      json
-// @Param        smart_account_address query string true "Smart account C-address"
+// @Param        queue_index query string true "Blind queue index"
 // @Success      200 {object} map[string]any
 // @Failure      400 {object} apiErrorResponse
 // @Failure      401 {object} apiErrorResponse
@@ -83,17 +80,15 @@ func (h *CosignHandler) Create(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /v1/cosign/requests [get]
 func (h *CosignHandler) List(c *gin.Context) {
-	userID := middleware.UserIDFromContext(c.Request.Context())
-
-	account := c.Query("smart_account_address")
-	if account == "" {
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "smart_account_address is required")
+	queueIndex := c.Query("queue_index")
+	if queueIndex == "" {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "queue_index is required")
 		return
 	}
 
-	reqs, err := h.cosignSvc.List(c.Request.Context(), userID, account)
+	reqs, err := h.cosignSvc.List(c.Request.Context(), queueIndex)
 	if err != nil {
-		slog.Error("list cosign requests", "userID", userID, "err", err)
+		slog.Error("list cosign requests", "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
@@ -113,19 +108,17 @@ func (h *CosignHandler) List(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /v1/cosign/requests/{id} [get]
 func (h *CosignHandler) Get(c *gin.Context) {
-	userID := middleware.UserIDFromContext(c.Request.Context())
-
-	out, err := h.cosignSvc.Get(c.Request.Context(), userID, c.Param("id"))
+	out, err := h.cosignSvc.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		h.writeServiceErr(c, userID, "get cosign request", err)
+		h.writeServiceErr(c, "get cosign request", err)
 		return
 	}
 	httpx.Success(c, http.StatusOK, out)
 }
 
 type addSignatureRequest struct {
-	SignerKey    string `json:"signer_key" binding:"required"`
-	AuthEntryXDR string `json:"auth_entry_xdr" binding:"required"`
+	BlindSignerID string `json:"blind_signer_id" binding:"required"`
+	AuthEntryXDR  string `json:"auth_entry_xdr" binding:"required"`
 }
 
 // AddSignature godoc
@@ -134,7 +127,7 @@ type addSignatureRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        id path string true "Request ID"
-// @Param        body body addSignatureRequest true "Signer key + opaque auth entry"
+// @Param        body body addSignatureRequest true "Blind signer id + encrypted auth entry"
 // @Success      200 {object} map[string]any
 // @Failure      400 {object} apiErrorResponse
 // @Failure      401 {object} apiErrorResponse
@@ -143,21 +136,19 @@ type addSignatureRequest struct {
 // @Security     BearerAuth
 // @Router       /v1/cosign/requests/{id}/signatures [post]
 func (h *CosignHandler) AddSignature(c *gin.Context) {
-	userID := middleware.UserIDFromContext(c.Request.Context())
-
 	var req addSignatureRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid request body")
 		return
 	}
 
-	out, err := h.cosignSvc.AddSignature(c.Request.Context(), userID, c.Param("id"), req.SignerKey, req.AuthEntryXDR)
+	out, err := h.cosignSvc.AddSignature(c.Request.Context(), c.Param("id"), req.BlindSignerID, req.AuthEntryXDR)
 	if err != nil {
-		h.writeServiceErr(c, userID, "add cosign signature", err)
+		h.writeServiceErr(c, "add cosign signature", err)
 		return
 	}
 
-	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionCosignSigned), c.ClientIP(), c.Request.UserAgent(), nil)
+	h.audit(c, service.ActionCosignSigned)
 	httpx.Success(c, http.StatusOK, out)
 }
 
@@ -180,22 +171,18 @@ type markSubmittedRequest struct {
 // @Security     BearerAuth
 // @Router       /v1/cosign/requests/{id}/submission [post]
 func (h *CosignHandler) MarkSubmitted(c *gin.Context) {
-	userID := middleware.UserIDFromContext(c.Request.Context())
-
 	var req markSubmittedRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid request body")
 		return
 	}
 
-	if err := h.cosignSvc.MarkSubmitted(c.Request.Context(), userID, c.Param("id"), req.TxHash); err != nil {
-		h.writeServiceErr(c, userID, "mark cosign submitted", err)
+	if err := h.cosignSvc.MarkSubmitted(c.Request.Context(), c.Param("id"), req.TxHash); err != nil {
+		h.writeServiceErr(c, "mark cosign submitted", err)
 		return
 	}
 
-	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionCosignSubmitted), c.ClientIP(), c.Request.UserAgent(), map[string]any{
-		"tx_hash": req.TxHash,
-	})
+	h.audit(c, service.ActionCosignSubmitted)
 	httpx.Success(c, http.StatusOK, gin.H{"message": "submission recorded"})
 }
 
@@ -211,26 +198,31 @@ func (h *CosignHandler) MarkSubmitted(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /v1/cosign/requests/{id} [delete]
 func (h *CosignHandler) Cancel(c *gin.Context) {
-	userID := middleware.UserIDFromContext(c.Request.Context())
-
-	if err := h.cosignSvc.Cancel(c.Request.Context(), userID, c.Param("id")); err != nil {
-		h.writeServiceErr(c, userID, "cancel cosign request", err)
+	if err := h.cosignSvc.Cancel(c.Request.Context(), c.Param("id")); err != nil {
+		h.writeServiceErr(c, "cancel cosign request", err)
 		return
 	}
 
-	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionCosignCancelled), c.ClientIP(), c.Request.UserAgent(), nil)
+	h.audit(c, service.ActionCosignCancelled)
 	httpx.Success(c, http.StatusOK, gin.H{"message": "cancelled"})
 }
 
+// audit records the action + actor, but never a wallet identifier (no
+// queue_index / address) so the audit log can't link a user to a wallet.
+func (h *CosignHandler) audit(c *gin.Context, action service.AuditAction) {
+	userID := middleware.UserIDFromContext(c.Request.Context())
+	h.auditSvc.Log(c.Request.Context(), userID, string(action), c.ClientIP(), c.Request.UserAgent(), nil)
+}
+
 // writeServiceErr maps cosign service sentinel errors to HTTP responses.
-func (h *CosignHandler) writeServiceErr(c *gin.Context, userID, op string, err error) {
+func (h *CosignHandler) writeServiceErr(c *gin.Context, op string, err error) {
 	switch {
 	case errors.Is(err, service.ErrCosignNotFound):
 		httpx.Fail(c, http.StatusNotFound, httpx.ErrNotFound, "cosign request not found")
 	case errors.Is(err, service.ErrCosignNotPending):
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "cosign request is no longer pending")
 	default:
-		slog.Error(op, "userID", userID, "err", err)
+		slog.Error(op, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 	}
 }

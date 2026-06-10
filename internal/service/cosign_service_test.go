@@ -8,10 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	validUID = "11111111-1111-1111-1111-111111111111"
-	validRID = "22222222-2222-2222-2222-222222222222"
-)
+const validRID = "22222222-2222-2222-2222-222222222222"
 
 func TestNewCosignService(t *testing.T) {
 	assert.NotNil(t, NewCosignService(nil))
@@ -19,17 +16,10 @@ func TestNewCosignService(t *testing.T) {
 
 // ── Create ──────────────────────────────────────────────────────────────────
 
-func TestCosignServiceCreate_InvalidUser(t *testing.T) {
-	svc := NewCosignService(errorQueries())
-	_, err := svc.Create(context.Background(), "not-a-uuid", CreateCosignInput{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse user id")
-}
-
 func TestCosignServiceCreate_InsertError(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	_, err := svc.Create(context.Background(), validUID, CreateCosignInput{
-		SmartAccountAddress: "CABC", UnsignedTxXDR: "v1:x", Network: "testnet", Threshold: 2,
+	_, err := svc.Create(context.Background(), CreateCosignInput{
+		QueueIndex: "qidx", UnsignedTxXDR: "v1:x", Network: "testnet", Threshold: 2,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "insert cosign request")
@@ -37,38 +27,24 @@ func TestCosignServiceCreate_InsertError(t *testing.T) {
 
 // ── List ────────────────────────────────────────────────────────────────────
 
-func TestCosignServiceList_InvalidUser(t *testing.T) {
-	svc := NewCosignService(errorQueries())
-	_, err := svc.List(context.Background(), "bad", "CABC")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse user id")
-}
-
 func TestCosignServiceList_QueryError(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	_, err := svc.List(context.Background(), validUID, "CABC")
+	_, err := svc.List(context.Background(), "qidx")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "list cosign requests")
 }
 
-// ── Get / getOwned ──────────────────────────────────────────────────────────
-
-func TestCosignServiceGet_InvalidUser(t *testing.T) {
-	svc := NewCosignService(errorQueries())
-	_, err := svc.Get(context.Background(), "bad", validRID)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse user id")
-}
+// ── Get / getByID ─────────────────────────────────────────────────────────────
 
 func TestCosignServiceGet_MalformedID(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	_, err := svc.Get(context.Background(), validUID, "not-a-uuid")
+	_, err := svc.Get(context.Background(), "not-a-uuid")
 	require.ErrorIs(t, err, ErrCosignNotFound)
 }
 
 func TestCosignServiceGet_QueryError(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	_, err := svc.Get(context.Background(), validUID, validRID)
+	_, err := svc.Get(context.Background(), validRID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "get cosign request")
 }
@@ -77,41 +53,39 @@ func TestCosignServiceGet_QueryError(t *testing.T) {
 
 func TestCosignServiceAddSignature_MalformedID(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	_, err := svc.AddSignature(context.Background(), validUID, "not-a-uuid", "key", "xdr")
+	_, err := svc.AddSignature(context.Background(), "not-a-uuid", "blind", "xdr")
 	require.ErrorIs(t, err, ErrCosignNotFound)
 }
 
 func TestCosignServiceAddSignature_QueryError(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	_, err := svc.AddSignature(context.Background(), validUID, validRID, "key", "xdr")
+	_, err := svc.AddSignature(context.Background(), validRID, "blind", "xdr")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "get cosign request")
 }
 
 // ── MarkSubmitted / Cancel ────────────────────────────────────────────────────
 
-func TestCosignServiceMarkSubmitted_InvalidUser(t *testing.T) {
+func TestCosignServiceMarkSubmitted_MalformedID(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	err := svc.MarkSubmitted(context.Background(), "bad", validRID, "hash")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse user id")
+	err := svc.MarkSubmitted(context.Background(), "not-a-uuid", "hash")
+	require.ErrorIs(t, err, ErrCosignNotFound)
 }
 
 func TestCosignServiceMarkSubmitted_QueryError(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	err := svc.MarkSubmitted(context.Background(), validUID, validRID, "hash")
+	err := svc.MarkSubmitted(context.Background(), validRID, "hash")
 	require.Error(t, err)
 }
 
-func TestCosignServiceCancel_InvalidUser(t *testing.T) {
+func TestCosignServiceCancel_MalformedID(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	err := svc.Cancel(context.Background(), "bad", validRID)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse user id")
+	err := svc.Cancel(context.Background(), "not-a-uuid")
+	require.ErrorIs(t, err, ErrCosignNotFound)
 }
 
 func TestCosignServiceCancel_QueryError(t *testing.T) {
 	svc := NewCosignService(errorQueries())
-	err := svc.Cancel(context.Background(), validUID, validRID)
+	err := svc.Cancel(context.Background(), validRID)
 	require.Error(t, err)
 }

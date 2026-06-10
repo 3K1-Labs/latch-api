@@ -40,12 +40,12 @@ type backupService interface {
 }
 
 type cosignService interface {
-	Create(ctx context.Context, userID string, in service.CreateCosignInput) (service.CosignRequest, error)
-	List(ctx context.Context, userID, smartAccountAddress string) ([]service.CosignRequest, error)
-	Get(ctx context.Context, userID, id string) (service.CosignRequest, error)
-	AddSignature(ctx context.Context, userID, id, signerKey, authEntryXDR string) (service.CosignRequest, error)
-	MarkSubmitted(ctx context.Context, userID, id, txHash string) error
-	Cancel(ctx context.Context, userID, id string) error
+	Create(ctx context.Context, in service.CreateCosignInput) (service.CosignRequest, error)
+	List(ctx context.Context, queueIndex string) ([]service.CosignRequest, error)
+	Get(ctx context.Context, id string) (service.CosignRequest, error)
+	AddSignature(ctx context.Context, id, blindSignerID, authEntryXDR string) (service.CosignRequest, error)
+	MarkSubmitted(ctx context.Context, id, txHash string) error
+	Cancel(ctx context.Context, id string) error
 }
 
 type priceService interface {

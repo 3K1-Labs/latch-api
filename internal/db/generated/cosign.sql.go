@@ -16,36 +16,25 @@ import (
 const cancelCosignRequest = `-- name: CancelCosignRequest :exec
 UPDATE cosign_requests
 SET status = 'cancelled', updated_at = NOW()
-WHERE id = $1 AND user_id = $2 AND status = 'pending'
+WHERE id = $1 AND status = 'pending'
 `
 
-type CancelCosignRequestParams struct {
-	ID     uuid.UUID `json:"id"`
-	UserID uuid.UUID `json:"user_id"`
-}
-
-func (q *Queries) CancelCosignRequest(ctx context.Context, arg CancelCosignRequestParams) error {
-	_, err := q.db.ExecContext(ctx, cancelCosignRequest, arg.ID, arg.UserID)
+func (q *Queries) CancelCosignRequest(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, cancelCosignRequest, id)
 	return err
 }
 
 const getCosignRequest = `-- name: GetCosignRequest :one
-SELECT id, user_id, smart_account_address, unsigned_tx_xdr, network, threshold, status, submitted_tx_hash, expires_at, created_at, updated_at FROM cosign_requests
-WHERE id = $1 AND user_id = $2
+SELECT id, queue_index, unsigned_tx_xdr, network, threshold, status, submitted_tx_hash, expires_at, created_at, updated_at FROM cosign_requests
+WHERE id = $1
 `
 
-type GetCosignRequestParams struct {
-	ID     uuid.UUID `json:"id"`
-	UserID uuid.UUID `json:"user_id"`
-}
-
-func (q *Queries) GetCosignRequest(ctx context.Context, arg GetCosignRequestParams) (CosignRequest, error) {
-	row := q.db.QueryRowContext(ctx, getCosignRequest, arg.ID, arg.UserID)
+func (q *Queries) GetCosignRequest(ctx context.Context, id uuid.UUID) (CosignRequest, error) {
+	row := q.db.QueryRowContext(ctx, getCosignRequest, id)
 	var i CosignRequest
 	err := row.Scan(
 		&i.ID,
-		&i.UserID,
-		&i.SmartAccountAddress,
+		&i.QueueIndex,
 		&i.UnsignedTxXdr,
 		&i.Network,
 		&i.Threshold,
@@ -60,26 +49,24 @@ func (q *Queries) GetCosignRequest(ctx context.Context, arg GetCosignRequestPara
 
 const insertCosignRequest = `-- name: InsertCosignRequest :one
 INSERT INTO cosign_requests (
-    id, user_id, smart_account_address, unsigned_tx_xdr, network, threshold, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, user_id, smart_account_address, unsigned_tx_xdr, network, threshold, status, submitted_tx_hash, expires_at, created_at, updated_at
+    id, queue_index, unsigned_tx_xdr, network, threshold, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, queue_index, unsigned_tx_xdr, network, threshold, status, submitted_tx_hash, expires_at, created_at, updated_at
 `
 
 type InsertCosignRequestParams struct {
-	ID                  uuid.UUID `json:"id"`
-	UserID              uuid.UUID `json:"user_id"`
-	SmartAccountAddress string    `json:"smart_account_address"`
-	UnsignedTxXdr       string    `json:"unsigned_tx_xdr"`
-	Network             string    `json:"network"`
-	Threshold           int32     `json:"threshold"`
-	ExpiresAt           time.Time `json:"expires_at"`
+	ID            uuid.UUID `json:"id"`
+	QueueIndex    string    `json:"queue_index"`
+	UnsignedTxXdr string    `json:"unsigned_tx_xdr"`
+	Network       string    `json:"network"`
+	Threshold     int32     `json:"threshold"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 func (q *Queries) InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error) {
 	row := q.db.QueryRowContext(ctx, insertCosignRequest,
 		arg.ID,
-		arg.UserID,
-		arg.SmartAccountAddress,
+		arg.QueueIndex,
 		arg.UnsignedTxXdr,
 		arg.Network,
 		arg.Threshold,
@@ -88,8 +75,7 @@ func (q *Queries) InsertCosignRequest(ctx context.Context, arg InsertCosignReque
 	var i CosignRequest
 	err := row.Scan(
 		&i.ID,
-		&i.UserID,
-		&i.SmartAccountAddress,
+		&i.QueueIndex,
 		&i.UnsignedTxXdr,
 		&i.Network,
 		&i.Threshold,
@@ -103,30 +89,30 @@ func (q *Queries) InsertCosignRequest(ctx context.Context, arg InsertCosignReque
 }
 
 const insertCosignSignature = `-- name: InsertCosignSignature :exec
-INSERT INTO cosign_signatures (id, request_id, signer_key, auth_entry_xdr)
+INSERT INTO cosign_signatures (id, request_id, blind_signer_id, auth_entry_xdr)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (request_id, signer_key) DO NOTHING
+ON CONFLICT (request_id, blind_signer_id) DO NOTHING
 `
 
 type InsertCosignSignatureParams struct {
-	ID           uuid.UUID `json:"id"`
-	RequestID    uuid.UUID `json:"request_id"`
-	SignerKey    string    `json:"signer_key"`
-	AuthEntryXdr string    `json:"auth_entry_xdr"`
+	ID            uuid.UUID `json:"id"`
+	RequestID     uuid.UUID `json:"request_id"`
+	BlindSignerID string    `json:"blind_signer_id"`
+	AuthEntryXdr  string    `json:"auth_entry_xdr"`
 }
 
 func (q *Queries) InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error {
 	_, err := q.db.ExecContext(ctx, insertCosignSignature,
 		arg.ID,
 		arg.RequestID,
-		arg.SignerKey,
+		arg.BlindSignerID,
 		arg.AuthEntryXdr,
 	)
 	return err
 }
 
 const listCosignSignatures = `-- name: ListCosignSignatures :many
-SELECT id, request_id, signer_key, auth_entry_xdr, created_at FROM cosign_signatures
+SELECT id, request_id, blind_signer_id, auth_entry_xdr, created_at FROM cosign_signatures
 WHERE request_id = $1
 ORDER BY created_at ASC
 `
@@ -143,7 +129,7 @@ func (q *Queries) ListCosignSignatures(ctx context.Context, requestID uuid.UUID)
 		if err := rows.Scan(
 			&i.ID,
 			&i.RequestID,
-			&i.SignerKey,
+			&i.BlindSignerID,
 			&i.AuthEntryXdr,
 			&i.CreatedAt,
 		); err != nil {
@@ -161,21 +147,15 @@ func (q *Queries) ListCosignSignatures(ctx context.Context, requestID uuid.UUID)
 }
 
 const listPendingCosignRequests = `-- name: ListPendingCosignRequests :many
-SELECT id, user_id, smart_account_address, unsigned_tx_xdr, network, threshold, status, submitted_tx_hash, expires_at, created_at, updated_at FROM cosign_requests
-WHERE user_id = $1
-  AND smart_account_address = $2
+SELECT id, queue_index, unsigned_tx_xdr, network, threshold, status, submitted_tx_hash, expires_at, created_at, updated_at FROM cosign_requests
+WHERE queue_index = $1
   AND status = 'pending'
   AND expires_at > NOW()
 ORDER BY created_at DESC
 `
 
-type ListPendingCosignRequestsParams struct {
-	UserID              uuid.UUID `json:"user_id"`
-	SmartAccountAddress string    `json:"smart_account_address"`
-}
-
-func (q *Queries) ListPendingCosignRequests(ctx context.Context, arg ListPendingCosignRequestsParams) ([]CosignRequest, error) {
-	rows, err := q.db.QueryContext(ctx, listPendingCosignRequests, arg.UserID, arg.SmartAccountAddress)
+func (q *Queries) ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingCosignRequests, queueIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +165,7 @@ func (q *Queries) ListPendingCosignRequests(ctx context.Context, arg ListPending
 		var i CosignRequest
 		if err := rows.Scan(
 			&i.ID,
-			&i.UserID,
-			&i.SmartAccountAddress,
+			&i.QueueIndex,
 			&i.UnsignedTxXdr,
 			&i.Network,
 			&i.Threshold,
@@ -211,17 +190,16 @@ func (q *Queries) ListPendingCosignRequests(ctx context.Context, arg ListPending
 
 const markCosignSubmitted = `-- name: MarkCosignSubmitted :exec
 UPDATE cosign_requests
-SET status = 'submitted', submitted_tx_hash = $3, updated_at = NOW()
-WHERE id = $1 AND user_id = $2 AND status = 'pending'
+SET status = 'submitted', submitted_tx_hash = $2, updated_at = NOW()
+WHERE id = $1 AND status = 'pending'
 `
 
 type MarkCosignSubmittedParams struct {
 	ID              uuid.UUID      `json:"id"`
-	UserID          uuid.UUID      `json:"user_id"`
 	SubmittedTxHash sql.NullString `json:"submitted_tx_hash"`
 }
 
 func (q *Queries) MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error {
-	_, err := q.db.ExecContext(ctx, markCosignSubmitted, arg.ID, arg.UserID, arg.SubmittedTxHash)
+	_, err := q.db.ExecContext(ctx, markCosignSubmitted, arg.ID, arg.SubmittedTxHash)
 	return err
 }

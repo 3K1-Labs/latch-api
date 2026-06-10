@@ -29,20 +29,20 @@ type stubCosign struct {
 	cancelErr error
 }
 
-func (s *stubCosign) Create(_ context.Context, _ string, _ service.CreateCosignInput) (service.CosignRequest, error) {
+func (s *stubCosign) Create(_ context.Context, _ service.CreateCosignInput) (service.CosignRequest, error) {
 	return s.createOut, s.createErr
 }
-func (s *stubCosign) List(_ context.Context, _, _ string) ([]service.CosignRequest, error) {
+func (s *stubCosign) List(_ context.Context, _ string) ([]service.CosignRequest, error) {
 	return s.listOut, s.listErr
 }
-func (s *stubCosign) Get(_ context.Context, _, _ string) (service.CosignRequest, error) {
+func (s *stubCosign) Get(_ context.Context, _ string) (service.CosignRequest, error) {
 	return s.getOut, s.getErr
 }
-func (s *stubCosign) AddSignature(_ context.Context, _, _, _, _ string) (service.CosignRequest, error) {
+func (s *stubCosign) AddSignature(_ context.Context, _, _, _ string) (service.CosignRequest, error) {
 	return s.addOut, s.addErr
 }
-func (s *stubCosign) MarkSubmitted(_ context.Context, _, _, _ string) error { return s.submitErr }
-func (s *stubCosign) Cancel(_ context.Context, _, _ string) error           { return s.cancelErr }
+func (s *stubCosign) MarkSubmitted(_ context.Context, _, _ string) error { return s.submitErr }
+func (s *stubCosign) Cancel(_ context.Context, _ string) error           { return s.cancelErr }
 
 func newCosignHandler(cosign *stubCosign) *CosignHandler {
 	return NewCosignHandler(cosign, &stubAudit{})
@@ -50,10 +50,10 @@ func newCosignHandler(cosign *stubCosign) *CosignHandler {
 
 func validCreateBody() *bytes.Reader {
 	return postJSONBody(map[string]any{
-		"smart_account_address": "CCSPCDD5BS2QBM5X7X5WB5RKK7BSFX5U6PBL3C5W7CAR6LAJFNEIW3FH",
-		"unsigned_tx_xdr":       "v1:abc",
-		"network":               "testnet",
-		"threshold":             2,
+		"queue_index":     "9f2c1ab34de5",
+		"unsigned_tx_xdr": "v1:abc",
+		"network":         "testnet",
+		"threshold":       2,
 	})
 }
 
@@ -76,9 +76,9 @@ func TestCosignCreate_MissingThreshold(t *testing.T) {
 	r.POST("/cosign/requests", h.Create)
 
 	body := postJSONBody(map[string]any{
-		"smart_account_address": "CABC",
-		"unsigned_tx_xdr":       "v1:abc",
-		"network":               "testnet",
+		"queue_index":     "9f2c1ab34de5",
+		"unsigned_tx_xdr": "v1:abc",
+		"network":         "testnet",
 	})
 	w := httptest.NewRecorder()
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests", body), "uid")
@@ -118,7 +118,7 @@ func TestCosignCreate_Success(t *testing.T) {
 
 // ── List ────────────────────────────────────────────────────────────────────
 
-func TestCosignList_MissingAccount(t *testing.T) {
+func TestCosignList_MissingQueueIndex(t *testing.T) {
 	h := newCosignHandler(&stubCosign{})
 	r := gin.New()
 	r.GET("/cosign/requests", h.List)
@@ -135,7 +135,7 @@ func TestCosignList_Success(t *testing.T) {
 	r.GET("/cosign/requests", h.List)
 
 	w := httptest.NewRecorder()
-	req := withUserID(httptest.NewRequest(http.MethodGet, "/cosign/requests?smart_account_address=CABC", nil), "uid")
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/cosign/requests?queue_index=9f2c1ab34de5", nil), "uid")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
@@ -187,7 +187,7 @@ func TestCosignAddSignature_NotPending(t *testing.T) {
 	r := gin.New()
 	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
 
-	body := postJSONBody(map[string]any{"signer_key": "04ab", "auth_entry_xdr": "v1:xyz"})
+	body := postJSONBody(map[string]any{"blind_signer_id": "b1ind", "auth_entry_xdr": "v1:xyz"})
 	w := httptest.NewRecorder()
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/signatures", body), "uid")
 	req.Header.Set("Content-Type", "application/json")
@@ -200,7 +200,7 @@ func TestCosignAddSignature_Success(t *testing.T) {
 	r := gin.New()
 	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
 
-	body := postJSONBody(map[string]any{"signer_key": "04ab", "auth_entry_xdr": "v1:xyz"})
+	body := postJSONBody(map[string]any{"blind_signer_id": "b1ind", "auth_entry_xdr": "v1:xyz"})
 	w := httptest.NewRecorder()
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/signatures", body), "uid")
 	req.Header.Set("Content-Type", "application/json")
