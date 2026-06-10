@@ -24,6 +24,12 @@ type otpService interface {
 	Verify(ctx context.Context, email, code string) (bool, error)
 }
 
+type walletAuthService interface {
+	Challenge(ctx context.Context, wallet, keyType string) (string, int, error)
+	SignIn(ctx context.Context, in service.WalletSignInInput) (string, string, error)
+	AccessTTL() int
+}
+
 type emailService interface {
 	SendOTP(to, otp string) error
 	SendRecoveryOTP(to, otp string) error

@@ -57,12 +57,13 @@ type CredentialBackup struct {
 }
 
 type RefreshToken struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
-	TokenHash string    `json:"token_hash"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Revoked   bool      `json:"revoked"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            uuid.UUID      `json:"id"`
+	UserID        uuid.NullUUID  `json:"user_id"`
+	TokenHash     string         `json:"token_hash"`
+	ExpiresAt     time.Time      `json:"expires_at"`
+	Revoked       bool           `json:"revoked"`
+	CreatedAt     time.Time      `json:"created_at"`
+	WalletAddress sql.NullString `json:"wallet_address"`
 }
 
 type User struct {

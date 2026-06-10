@@ -75,6 +75,8 @@ func main() {
 	// Services
 	authSvc := service.NewAuthService(sqlDB, queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
 	otpSvc := service.NewOTPService(redisClient)
+	walletNonceSvc := service.NewWalletNonceService(redisClient)
+	walletAuthSvc := service.NewWalletAuthService(authSvc, walletNonceSvc)
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
@@ -87,6 +89,7 @@ func main() {
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
+	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
 	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc)
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
@@ -154,6 +157,8 @@ func main() {
 		{
 			auth.POST("/register", otpLimiter, authHandler.Register)
 			auth.POST("/verify", authHandler.Verify)
+			auth.POST("/challenge", walletAuthHandler.Challenge)
+			auth.POST("/sign-in", walletAuthHandler.SignIn)
 			auth.POST("/refresh", authHandler.Refresh)
 			auth.POST("/logout", middleware.RequireAuth(cfg.JWTSecret), authHandler.Logout)
 		}

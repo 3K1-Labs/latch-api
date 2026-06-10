@@ -12,6 +12,7 @@ sql:
       - "migrations/000007_client_encrypted_backup.up.sql"
       - "migrations/000008_create_cosign_requests.up.sql"
       - "migrations/000009_cosign_blind_index.up.sql"
+      - "migrations/000010_wallet_refresh_tokens.up.sql"
     gen:
       go:
         package: "db"

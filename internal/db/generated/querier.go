@@ -25,6 +25,7 @@ type Querier interface {
 	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
 	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error

@@ -27,6 +27,7 @@ const (
 	ActionCosignSigned      AuditAction = "cosign_signed"
 	ActionCosignSubmitted   AuditAction = "cosign_submitted"
 	ActionCosignCancelled   AuditAction = "cosign_cancelled"
+	ActionWalletSignIn      AuditAction = "wallet_sign_in"
 )
 
 type AuditService struct {
