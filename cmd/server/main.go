@@ -82,6 +82,9 @@ func main() {
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
 	backupSvc := service.NewBackupService(queries, encSvc)
 	cosignSvc := service.NewCosignService(queries)
+	wckBundleSvc := service.NewWCKBundleService(queries)
+	pushTokenSvc := service.NewPushTokenService(queries)
+	expoNotifier := service.NewExpoPushNotifier()
 	sorobanSvc := service.NewSorobanService()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
@@ -91,7 +94,9 @@ func main() {
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
-	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc)
+	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
+	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
+	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
@@ -190,6 +195,20 @@ func main() {
 			cosign.POST("/:id/signatures", cosignHandler.AddSignature)
 			cosign.POST("/:id/submission", cosignHandler.MarkSubmitted)
 			cosign.DELETE("/:id", cosignHandler.Cancel)
+		}
+
+		wck := v1.Group("/wck-bundles")
+		wck.Use(middleware.RequireAuth(cfg.JWTSecret))
+		{
+			wck.PUT("/:pickup_key", wckBundleHandler.Store)
+			wck.GET("/:pickup_key", wckBundleHandler.Get)
+		}
+
+		push := v1.Group("/push-tokens")
+		push.Use(middleware.RequireAuth(cfg.JWTSecret))
+		{
+			push.POST("", pushTokenHandler.Register)
+			push.DELETE("/:token", pushTokenHandler.Delete)
 		}
 	}
 

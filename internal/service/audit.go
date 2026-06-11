@@ -28,6 +28,9 @@ const (
 	ActionCosignSubmitted   AuditAction = "cosign_submitted"
 	ActionCosignCancelled   AuditAction = "cosign_cancelled"
 	ActionWalletSignIn      AuditAction = "wallet_sign_in"
+	ActionWCKBundleStored   AuditAction = "wck_bundle_stored"
+	ActionPushRegistered    AuditAction = "push_registered"
+	ActionPushUnregistered  AuditAction = "push_unregistered"
 )
 
 type AuditService struct {

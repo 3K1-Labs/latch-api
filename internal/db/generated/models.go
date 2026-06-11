@@ -22,6 +22,14 @@ type AuditLog struct {
 	CreatedAt time.Time             `json:"created_at"`
 }
 
+type CosignPushToken struct {
+	PushToken     string    `json:"push_token"`
+	QueueIndex    string    `json:"queue_index"`
+	BlindSignerID string    `json:"blind_signer_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type CosignRequest struct {
 	ID              uuid.UUID      `json:"id"`
 	QueueIndex      string         `json:"queue_index"`
@@ -79,4 +87,12 @@ type UserEncryptionKey struct {
 	UserID    uuid.UUID `json:"user_id"`
 	KeyHex    string    `json:"key_hex"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type WckBundle struct {
+	PickupKey string    `json:"pickup_key"`
+	Bundle    string    `json:"bundle"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Uploader  string    `json:"uploader"`
 }

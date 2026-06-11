@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/httpx"
@@ -20,10 +22,12 @@ import (
 type CosignHandler struct {
 	cosignSvc cosignService
 	auditSvc  auditService
+	pushSvc   pushTokenService
+	notifier  pushNotifier
 }
 
-func NewCosignHandler(cosignSvc cosignService, auditSvc auditService) *CosignHandler {
-	return &CosignHandler{cosignSvc: cosignSvc, auditSvc: auditSvc}
+func NewCosignHandler(cosignSvc cosignService, auditSvc auditService, pushSvc pushTokenService, notifier pushNotifier) *CosignHandler {
+	return &CosignHandler{cosignSvc: cosignSvc, auditSvc: auditSvc, pushSvc: pushSvc, notifier: notifier}
 }
 
 type createCosignRequest struct {
@@ -149,7 +153,34 @@ func (h *CosignHandler) AddSignature(c *gin.Context) {
 	}
 
 	h.audit(c, service.ActionCosignSigned)
+	h.notifyQueue(out.QueueIndex, req.BlindSignerID)
 	httpx.Success(c, http.StatusOK, out)
+}
+
+// notifyQueue pushes a content-free "pending approval" notification to every
+// member registered for the queue, excluding the signer who just acted.
+// Fire-and-forget on a detached context: the notification must not delay or
+// fail the signature response. The payload carries only the queue index — a
+// value the server already stores — so it adds zero knowledge.
+func (h *CosignHandler) notifyQueue(queueIndex, actorBlindSignerID string) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("panic in cosign push notify", "panic", r)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		tokens, err := h.pushSvc.TokensForQueue(ctx, queueIndex, actorBlindSignerID)
+		if err != nil {
+			slog.Error("list push tokens for queue", "err", err)
+			return
+		}
+		if err := h.notifier.NotifyCosignUpdated(ctx, tokens, queueIndex); err != nil {
+			slog.Error("send cosign push", "err", err, "tokens", len(tokens))
+		}
+	}()
 }
 
 type markSubmittedRequest struct {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/service"
@@ -45,7 +46,7 @@ func (s *stubCosign) MarkSubmitted(_ context.Context, _, _ string) error { retur
 func (s *stubCosign) Cancel(_ context.Context, _ string) error           { return s.cancelErr }
 
 func newCosignHandler(cosign *stubCosign) *CosignHandler {
-	return NewCosignHandler(cosign, &stubAudit{})
+	return NewCosignHandler(cosign, &stubAudit{}, &stubPushTokens{}, &stubNotifier{})
 }
 
 func validCreateBody() *bytes.Reader {
@@ -256,4 +257,73 @@ func TestCosignCancel_Success(t *testing.T) {
 	req := withUserID(httptest.NewRequest(http.MethodDelete, "/cosign/requests/req-1", nil), "uid")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// ── AddSignature push trigger ───────────────────────────────────────────────
+
+func TestCosignAddSignature_NotifiesQueueExcludingActor(t *testing.T) {
+	push := &stubPushTokens{tokensOut: []string{"tokA", "tokB"}, done: make(chan struct{})}
+	notifier := &stubNotifier{done: make(chan struct{})}
+	h := NewCosignHandler(
+		&stubCosign{addOut: service.CosignRequest{ID: "req-1", QueueIndex: "qidx-1"}},
+		&stubAudit{}, push, notifier,
+	)
+	r := gin.New()
+	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
+
+	body := postJSONBody(map[string]any{"blind_signer_id": "b1ind", "auth_entry_xdr": "v1:xyz"})
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/signatures", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case <-notifier.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("push notifier was not called")
+	}
+	assert.Equal(t, "qidx-1", push.gotQueueIndex)
+	assert.Equal(t, "b1ind", push.gotExclude) // actor never self-notified
+	assert.Equal(t, []string{"tokA", "tokB"}, notifier.gotTokens)
+	assert.Equal(t, "qidx-1", notifier.gotQueueIndex)
+}
+
+func TestCosignAddSignature_NotifyFailureDoesNotAffectResponse(t *testing.T) {
+	push := &stubPushTokens{tokensErr: errGeneric, done: make(chan struct{})}
+	h := NewCosignHandler(
+		&stubCosign{addOut: service.CosignRequest{ID: "req-1", QueueIndex: "qidx-1"}},
+		&stubAudit{}, push, &stubNotifier{},
+	)
+	r := gin.New()
+	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
+
+	body := postJSONBody(map[string]any{"blind_signer_id": "b1ind", "auth_entry_xdr": "v1:xyz"})
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/signatures", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	<-push.done // let the goroutine finish so -race sees the full interleaving
+}
+
+func TestCosignAddSignature_NoNotifyOnServiceError(t *testing.T) {
+	push := &stubPushTokens{done: make(chan struct{})}
+	h := NewCosignHandler(&stubCosign{addErr: service.ErrCosignNotPending}, &stubAudit{}, push, &stubNotifier{})
+	r := gin.New()
+	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
+
+	body := postJSONBody(map[string]any{"blind_signer_id": "b1ind", "auth_entry_xdr": "v1:xyz"})
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/signatures", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	select {
+	case <-push.done:
+		t.Fatal("push lookup must not run when AddSignature fails")
+	case <-time.After(100 * time.Millisecond):
+	}
 }

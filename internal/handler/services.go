@@ -54,6 +54,21 @@ type cosignService interface {
 	Cancel(ctx context.Context, id string) error
 }
 
+type wckBundleService interface {
+	Store(ctx context.Context, pickupKey, bundle, uploader string) (service.WCKBundle, error)
+	Get(ctx context.Context, pickupKey string) (service.WCKBundle, error)
+}
+
+type pushTokenService interface {
+	Replace(ctx context.Context, token string, regs []service.PushRegistration) error
+	Delete(ctx context.Context, token string) error
+	TokensForQueue(ctx context.Context, queueIndex, excludeBlindSignerID string) ([]string, error)
+}
+
+type pushNotifier interface {
+	NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error
+}
+
 type priceService interface {
 	GetPrices(ctx context.Context, tokens []string) map[string]*service.PriceData
 }

@@ -11,10 +11,12 @@ import (
 	db "github.com/latch/backend/internal/db/generated"
 )
 
-// cosignRequestTTL bounds how long collected signatures stay valid. Mirrors the
-// client's pinned on-chain signature expiration window (~2h); the client gates
-// the real expiry on-chain, this just keeps the queue from growing unbounded.
-const cosignRequestTTL = 2 * time.Hour
+// cosignRequestTTL bounds how long collected signatures stay valid. The client
+// pins ~24h of on-chain signature validity (SIGNATURE_VALIDITY_LEDGERS); this
+// sits just under it so a listed request always has live signatures — ledgers
+// can run slower than 5s, never the reverse. The client still gates the real
+// expiry on-chain; this keeps the queue from growing unbounded.
+const cosignRequestTTL = 23 * time.Hour
 
 var (
 	// ErrCosignNotFound is returned when a request does not exist.
