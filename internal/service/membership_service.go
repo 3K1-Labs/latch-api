@@ -19,10 +19,10 @@ type WalletMembership struct {
 }
 
 type MembershipService struct {
-	q *db.Queries
+	q db.Querier
 }
 
-func NewMembershipService(q *db.Queries) *MembershipService {
+func NewMembershipService(q db.Querier) *MembershipService {
 	return &MembershipService{q: q}
 }
 
