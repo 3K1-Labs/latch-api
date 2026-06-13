@@ -65,6 +65,11 @@ type pushTokenService interface {
 	TokensForQueue(ctx context.Context, queueIndex, excludeBlindSignerID string) ([]string, error)
 }
 
+type membershipService interface {
+	Announce(ctx context.Context, walletRef string, memberBlindIDs []string, announcer string) error
+	List(ctx context.Context, memberBlindID string) ([]service.WalletMembership, error)
+}
+
 type pushNotifier interface {
 	NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error
 }
