@@ -32,6 +32,7 @@ type Querier interface {
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
@@ -43,6 +44,7 @@ type Querier interface {
 	// legacy '' row) can replace a bundle. A mismatched uploader yields no row,
 	// which the service maps to a conflict error.
 	UpsertWCKBundle(ctx context.Context, arg UpsertWCKBundleParams) (WckBundle, error)
+	UpsertWalletMembership(ctx context.Context, arg UpsertWalletMembershipParams) error
 	VerifyUserEmail(ctx context.Context, email string) (uuid.UUID, error)
 }
 

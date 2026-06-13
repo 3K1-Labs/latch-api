@@ -84,6 +84,7 @@ func main() {
 	cosignSvc := service.NewCosignService(queries)
 	wckBundleSvc := service.NewWCKBundleService(queries)
 	pushTokenSvc := service.NewPushTokenService(queries)
+	membershipSvc := service.NewMembershipService(queries)
 	expoNotifier := service.NewExpoPushNotifier()
 	sorobanSvc := service.NewSorobanService()
 	horizonSvc := service.NewHorizonService()
@@ -97,6 +98,7 @@ func main() {
 	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
 	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
 	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
+	membershipHandler := handler.NewMembershipHandler(membershipSvc, auditSvc)
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
@@ -209,6 +211,13 @@ func main() {
 		{
 			push.POST("", pushTokenHandler.Register)
 			push.DELETE("/:token", pushTokenHandler.Delete)
+		}
+
+		memberships := v1.Group("/memberships")
+		memberships.Use(middleware.RequireAuth(cfg.JWTSecret))
+		{
+			memberships.POST("", membershipHandler.Announce)
+			memberships.GET("", membershipHandler.List)
 		}
 	}
 

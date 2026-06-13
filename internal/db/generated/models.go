@@ -89,6 +89,13 @@ type UserEncryptionKey struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type WalletMembership struct {
+	MemberBlindID string    `json:"member_blind_id"`
+	WalletRef     string    `json:"wallet_ref"`
+	Announcer     string    `json:"announcer"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type WckBundle struct {
 	PickupKey string    `json:"pickup_key"`
 	Bundle    string    `json:"bundle"`

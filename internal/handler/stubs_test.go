@@ -139,6 +139,28 @@ func (s *stubWCKBundle) Get(_ context.Context, _ string) (service.WCKBundle, err
 	return s.getOut, s.getErr
 }
 
+// ── membershipService stub ────────────────────────────────────────────────────
+
+type stubMembership struct {
+	announceErr error
+	listOut     []service.WalletMembership
+	listErr     error
+
+	announcedWalletRef string
+	announcedMembers   []string
+	announcer          string
+}
+
+func (s *stubMembership) Announce(_ context.Context, walletRef string, memberBlindIDs []string, announcer string) error {
+	s.announcedWalletRef = walletRef
+	s.announcedMembers = memberBlindIDs
+	s.announcer = announcer
+	return s.announceErr
+}
+func (s *stubMembership) List(_ context.Context, _ string) ([]service.WalletMembership, error) {
+	return s.listOut, s.listErr
+}
+
 // ── pushTokenService / pushNotifier stubs ─────────────────────────────────────
 
 type stubPushTokens struct {
