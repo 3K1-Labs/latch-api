@@ -20,13 +20,17 @@ var (
 
 // WalletAuthService orchestrates SEP-10-style wallet sign-in: issue a single-use
 // nonce, then verify the wallet's signature over it and mint wallet-scope tokens.
+// Ed25519 wallets verify against the G-address directly; passkey wallets verify a
+// WebAuthn assertion against the account's on-chain webauthn signer key(s).
 type WalletAuthService struct {
-	auth  *AuthService
-	nonce *WalletNonceService
+	auth           *AuthService
+	nonce          *WalletNonceService
+	signerReader   WebAuthnSignerReader
+	allowedOrigins []string
 }
 
-func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService) *WalletAuthService {
-	return &WalletAuthService{auth: auth, nonce: nonce}
+func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, allowedOrigins []string) *WalletAuthService {
+	return &WalletAuthService{auth: auth, nonce: nonce, signerReader: signerReader, allowedOrigins: allowedOrigins}
 }
 
 // Challenge issues a single-use nonce for (wallet, keyType), returned as
@@ -46,13 +50,19 @@ func (s *WalletAuthService) Challenge(ctx context.Context, wallet, keyType strin
 	return base64.RawURLEncoding.EncodeToString(nonceBytes), int(ttl.Seconds()), nil
 }
 
-// WalletSignInInput carries the verified-payload fields for sign-in. Only the
-// Ed25519 path is supported today; Signature is the raw ed25519 signature bytes.
+// WalletSignInInput carries the verified-payload fields for sign-in.
+// Ed25519: Signature is the raw ed25519 signature over the nonce bytes.
+// Passkey: AuthenticatorData, ClientDataJSON, and PasskeySignature (ASN.1 DER)
+// form the WebAuthn assertion over the nonce.
 type WalletSignInInput struct {
 	Wallet      string
 	KeyType     string
 	NonceB64URL string
 	Signature   []byte
+
+	AuthenticatorData []byte
+	ClientDataJSON    []byte
+	PasskeySignature  []byte
 }
 
 // SignIn consumes the nonce, verifies the signature, and returns a wallet-scope
@@ -76,12 +86,30 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 			return "", "", err
 		}
 	case KeyTypePasskey:
-		return "", "", ErrPasskeyNotEnabled
+		if err := s.verifyPasskey(ctx, in, nonceBytes); err != nil {
+			return "", "", err
+		}
 	default:
 		return "", "", ErrUnsupportedKeyType
 	}
 
 	return s.auth.IssueWalletTokenPair(ctx, in.Wallet, in.KeyType)
+}
+
+// verifyPasskey reads the account's on-chain webauthn signer key(s) and verifies
+// the WebAuthn assertion against them. The candidate keys come from chain (not the
+// request), so a caller can't sign in as a wallet whose key it doesn't control.
+func (s *WalletAuthService) verifyPasskey(ctx context.Context, in WalletSignInInput, nonceBytes []byte) error {
+	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet)
+	if err != nil {
+		if errors.Is(err, ErrNoWebAuthnSigner) {
+			return ErrBadSignature
+		}
+		return err
+	}
+	return VerifyWebAuthnAssertion(
+		keys, nonceBytes, in.AuthenticatorData, in.ClientDataJSON, in.PasskeySignature, s.allowedOrigins,
+	)
 }
 
 // AccessTTL exposes the access-token lifetime (seconds) for the expires_in field.

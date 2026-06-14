@@ -129,6 +129,31 @@ func TestWalletSignIn_PasskeyNotEnabled(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestWalletSignIn_PasskeyBadAssertionEncoding(t *testing.T) {
+	r := gin.New()
+	r.POST("/auth/sign-in", newWalletAuthHandler(&stubWalletAuth{}).SignIn)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, jsonReq(http.MethodPost, "/auth/sign-in", map[string]any{
+		"wallet": "CABC", "key_type": "passkey", "nonce": "abc",
+		"authenticator_data": "!!!not-base64!!!",
+	}))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestWalletSignIn_PasskeySuccess(t *testing.T) {
+	r := gin.New()
+	r.POST("/auth/sign-in", newWalletAuthHandler(&stubWalletAuth{access: "atok", refresh: "rtok"}).SignIn)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, jsonReq(http.MethodPost, "/auth/sign-in", map[string]any{
+		"wallet": "CABC", "key_type": "passkey", "nonce": "abc",
+		"authenticator_data": "BQ==", "client_data_json": "e30=", "passkey_signature": "QQ==",
+	}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "atok")
+}
+
 func TestWalletSignIn_Success(t *testing.T) {
 	r := gin.New()
 	r.POST("/auth/sign-in", newWalletAuthHandler(&stubWalletAuth{access: "atok", refresh: "rtok"}).SignIn)

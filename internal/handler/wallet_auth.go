@@ -13,9 +13,9 @@ import (
 
 // WalletAuthHandler serves SEP-10-style wallet sign-in: a single-use nonce
 // challenge signed by the wallet key, exchanged for wallet-scope tokens. This
-// lets wallet-only users (no email account) authenticate. Only the Ed25519
-// (mnemonic) path is enabled; passkey sign-in needs an on-chain pubkey lookup
-// and is rejected with a clear message until that is added.
+// lets wallet-only users (no email account) authenticate. Ed25519 (mnemonic)
+// wallets sign the nonce directly; passkey wallets present a WebAuthn assertion
+// verified against the account's on-chain webauthn signer key(s).
 type WalletAuthHandler struct {
 	walletAuthSvc walletAuthService
 	auditSvc      auditService
@@ -66,6 +66,10 @@ type walletSignInRequest struct {
 	KeyType   string `json:"key_type" binding:"required"`
 	Nonce     string `json:"nonce" binding:"required"`
 	Signature string `json:"signature"` // base64 ed25519 signature over the raw nonce bytes
+	// Passkey (WebAuthn) assertion fields — all standard base64.
+	AuthenticatorData string `json:"authenticator_data"`
+	ClientDataJSON    string `json:"client_data_json"`
+	PasskeySignature  string `json:"passkey_signature"` // ASN.1 DER P-256 signature
 }
 
 // SignIn godoc
@@ -91,12 +95,22 @@ func (h *WalletAuthHandler) SignIn(c *gin.Context) {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid signature encoding")
 		return
 	}
+	authData, err1 := base64.StdEncoding.DecodeString(req.AuthenticatorData)
+	clientData, err2 := base64.StdEncoding.DecodeString(req.ClientDataJSON)
+	passkeySig, err3 := base64.StdEncoding.DecodeString(req.PasskeySignature)
+	if err1 != nil || err2 != nil || err3 != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid passkey assertion encoding")
+		return
+	}
 
 	accessToken, refreshToken, err := h.walletAuthSvc.SignIn(c.Request.Context(), service.WalletSignInInput{
-		Wallet:      req.Wallet,
-		KeyType:     req.KeyType,
-		NonceB64URL: req.Nonce,
-		Signature:   sig,
+		Wallet:            req.Wallet,
+		KeyType:           req.KeyType,
+		NonceB64URL:       req.Nonce,
+		Signature:         sig,
+		AuthenticatorData: authData,
+		ClientDataJSON:    clientData,
+		PasskeySignature:  passkeySig,
 	})
 	if err != nil {
 		h.writeSignInErr(c, req.Wallet, err)
