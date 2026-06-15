@@ -86,11 +86,19 @@ func newRateLimiter(redisClient *redis.Client, limit int, window time.Duration, 
 }
 
 func (rl *RateLimiter) check(ctx context.Context, key string) (bool, error) {
-	pipe := rl.redis.Pipeline()
-	incr := pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, rl.window)
-	if _, err := pipe.Exec(ctx); err != nil {
+	count, err := rl.redis.Incr(ctx, key).Result()
+	if err != nil {
 		return false, err
 	}
-	return incr.Val() <= int64(rl.limit), nil
+	// Set the TTL only when the window opens (first request). Resetting it on
+	// every request makes the key immortal under steady traffic: the counter
+	// climbs past the limit and never resets, so the subject stays 429'd until
+	// all traffic to the key idles for a full window. Expiring once lets the
+	// fixed window actually roll.
+	if count == 1 {
+		if err := rl.redis.Expire(ctx, key, rl.window).Err(); err != nil {
+			return false, err
+		}
+	}
+	return count <= int64(rl.limit), nil
 }
