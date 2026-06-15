@@ -48,6 +48,25 @@ func NewEmailRateLimiter(redisClient *redis.Client, limit int, window time.Durat
 	})
 }
 
+// subjectRateLimitKey keys by the authenticated user that RequireAuth injects
+// into the request context, falling back to client IP when absent. Reads from
+// context — never re-parses the JWT here (see security rules).
+func subjectRateLimitKey(c *gin.Context) string {
+	if sub := UserIDFromContext(c.Request.Context()); sub != "" {
+		return fmt.Sprintf("rl:sub:%s", sub)
+	}
+	return fmt.Sprintf("rl:ip:%s", c.ClientIP())
+}
+
+// NewSubjectRateLimiter limits authenticated traffic per wallet (the JWT
+// subject) instead of per IP, so distinct users sharing one IP — CGNAT, a home
+// NAT, two devices on the same Wi-Fi — don't collide on a single bucket. Must
+// be registered AFTER RequireAuth on the route group so the subject is present;
+// the global IP limiter still applies underneath as a DoS backstop.
+func NewSubjectRateLimiter(redisClient *redis.Client, limit int, window time.Duration) gin.HandlerFunc {
+	return newRateLimiter(redisClient, limit, window, subjectRateLimitKey)
+}
+
 func newRateLimiter(redisClient *redis.Client, limit int, window time.Duration, keyFn func(*gin.Context) string) gin.HandlerFunc {
 	rl := &RateLimiter{redis: redisClient, limit: limit, window: window}
 	return func(c *gin.Context) {

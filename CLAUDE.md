@@ -93,7 +93,8 @@ references/freighter-mobile/ # Freighter React Native wallet
 
 ### Rate Limiting
 
-- Per-IP: 100 req/min (general)
+- Per-IP: 300 req/min (general, global DoS backstop)
+- Per-wallet: 100 req/min on authenticated routes (JWT subject; key `rl:sub:`) so users sharing one IP don't collide
 - Per-email: 3 OTPs/hour, 3 recovery initiations/24h
 
 ## Reference Projects
