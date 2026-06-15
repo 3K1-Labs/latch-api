@@ -106,8 +106,11 @@ func main() {
 	historyHandler := handler.NewHistoryHandler(historySvc, cfg)
 	transactionHandler := handler.NewTransactionHandler(sorobanSvc, cfg)
 
-	// Rate limiters
-	generalLimiter := middleware.NewIPRateLimiter(redisClient, 100, time.Minute)
+	// Rate limiters. The global IP limiter is a DoS backstop; authenticated
+	// routes are additionally limited per wallet (JWT subject) so users sharing
+	// one IP (CGNAT, a home NAT, two devices) don't collide on a single bucket.
+	generalLimiter := middleware.NewIPRateLimiter(redisClient, 300, time.Minute)
+	authedLimiter := middleware.NewSubjectRateLimiter(redisClient, 100, time.Minute)
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
@@ -172,7 +175,7 @@ func main() {
 		}
 
 		backup := v1.Group("/backup")
-		backup.Use(middleware.RequireAuth(cfg.JWTSecret))
+		backup.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			backup.POST("", backupHandler.Store)
 			backup.PUT("", backupHandler.Store)
@@ -187,10 +190,10 @@ func main() {
 		}
 
 		v1.GET("/prices", pricesHandler.GetPrices)
-		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), historyHandler.GetHistory)
+		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), authedLimiter, historyHandler.GetHistory)
 
 		cosign := v1.Group("/cosign/requests")
-		cosign.Use(middleware.RequireAuth(cfg.JWTSecret))
+		cosign.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			cosign.POST("", cosignHandler.Create)
 			cosign.GET("", cosignHandler.List)
@@ -201,21 +204,21 @@ func main() {
 		}
 
 		wck := v1.Group("/wck-bundles")
-		wck.Use(middleware.RequireAuth(cfg.JWTSecret))
+		wck.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			wck.PUT("/:pickup_key", wckBundleHandler.Store)
 			wck.GET("/:pickup_key", wckBundleHandler.Get)
 		}
 
 		push := v1.Group("/push-tokens")
-		push.Use(middleware.RequireAuth(cfg.JWTSecret))
+		push.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			push.POST("", pushTokenHandler.Register)
 			push.DELETE("/:token", pushTokenHandler.Delete)
 		}
 
 		memberships := v1.Group("/memberships")
-		memberships.Use(middleware.RequireAuth(cfg.JWTSecret))
+		memberships.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			memberships.POST("", membershipHandler.Announce)
 			memberships.GET("", membershipHandler.List)

@@ -114,8 +114,9 @@ Client IP is obtained via `c.ClientIP()` — Gin extracts it from `X-Real-IP` / 
 
 ## Rate limiting
 
-- Three limiters only: general IP (100/min), OTP email (3/hr), recovery email (3/24h)
-- Redis keys follow `rl:ip:{ip}` and `rl:email:{email}` patterns
+- Four limiters: general IP (300/min, global DoS backstop), authenticated subject (100/min, per wallet — applied after `RequireAuth` on authed groups so users sharing one IP don't collide), OTP email (3/hr), recovery email (3/24h)
+- Redis keys follow `rl:ip:{ip}`, `rl:sub:{walletID}`, and `rl:email:{email}` patterns
+- The subject limiter reads the user ID from context (set by `RequireAuth`) — never re-parse the JWT in the limiter
 - Fail-open: if Redis is unavailable, allow the request through and log the error
 - New public endpoints that accept an email must use the email-keyed limiter, not only the IP limiter
 
