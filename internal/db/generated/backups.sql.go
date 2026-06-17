@@ -129,3 +129,4 @@ func (q *Queries) UpsertClientEncryptedBackup(ctx context.Context, arg UpsertCli
 	)
 	return err
 }
+
