@@ -191,7 +191,7 @@ func TestIssueTokenPair_Success(t *testing.T) {
 func TestRotateRefreshToken_TokenNotFound(t *testing.T) {
 	svc, mock := newMockAuthService(t)
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT user_id, expires_at, revoked").
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
@@ -204,9 +204,9 @@ func TestRotateRefreshToken_TokenRevoked(t *testing.T) {
 	svc, mock := newMockAuthService(t)
 	uid := uuid.New()
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT user_id, expires_at, revoked").
-		WillReturnRows(sqlmock.NewRows([]string{"user_id", "expires_at", "revoked"}).
-			AddRow(uid.String(), time.Now().Add(time.Hour), true))
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "wallet_address", "expires_at", "revoked"}).
+			AddRow(uid, nil, time.Now().Add(time.Hour), true))
 	mock.ExpectRollback()
 
 	_, _, _, err := svc.RotateRefreshToken(context.Background(), "raw-token")
@@ -217,9 +217,9 @@ func TestRotateRefreshToken_TokenExpired(t *testing.T) {
 	svc, mock := newMockAuthService(t)
 	uid := uuid.New()
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT user_id, expires_at, revoked").
-		WillReturnRows(sqlmock.NewRows([]string{"user_id", "expires_at", "revoked"}).
-			AddRow(uid.String(), time.Now().Add(-time.Hour), false))
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "wallet_address", "expires_at", "revoked"}).
+			AddRow(uid, nil, time.Now().Add(-time.Hour), false))
 	mock.ExpectRollback()
 
 	_, _, _, err := svc.RotateRefreshToken(context.Background(), "raw-token")
@@ -230,9 +230,9 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 	svc, mock := newMockAuthService(t)
 	uid := uuid.New()
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT user_id, expires_at, revoked").
-		WillReturnRows(sqlmock.NewRows([]string{"user_id", "expires_at", "revoked"}).
-			AddRow(uid.String(), time.Now().Add(time.Hour), false))
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "wallet_address", "expires_at", "revoked"}).
+			AddRow(uid, nil, time.Now().Add(time.Hour), false))
 	mock.ExpectExec("UPDATE refresh_tokens SET revoked").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO refresh_tokens").

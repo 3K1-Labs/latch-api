@@ -13,19 +13,38 @@ import (
 
 type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
+	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
+	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
+	GetCosignRequest(ctx context.Context, id uuid.UUID) (CosignRequest, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
+	GetWCKBundle(ctx context.Context, pickupKey string) (WckBundle, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
+	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
+	InsertPushTokenRegistration(ctx context.Context, arg InsertPushTokenRegistrationParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
+	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
+	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
+	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
+	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
+	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
+	// The conflict update is guarded by uploader: only the original uploader (or a
+	// legacy '' row) can replace a bundle. A mismatched uploader yields no row,
+	// which the service maps to a conflict error.
+	UpsertWCKBundle(ctx context.Context, arg UpsertWCKBundleParams) (WckBundle, error)
+	UpsertWalletMembership(ctx context.Context, arg UpsertWalletMembershipParams) error
 	VerifyUserEmail(ctx context.Context, email string) (uuid.UUID, error)
 }
 

@@ -120,6 +120,90 @@ type stubAudit struct{}
 
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
+// ── wckBundleService stub ─────────────────────────────────────────────────────
+
+type stubWCKBundle struct {
+	storeOut service.WCKBundle
+	storeErr error
+	getOut   service.WCKBundle
+	getErr   error
+
+	storedUploader string
+}
+
+func (s *stubWCKBundle) Store(_ context.Context, _, _, uploader string) (service.WCKBundle, error) {
+	s.storedUploader = uploader
+	return s.storeOut, s.storeErr
+}
+func (s *stubWCKBundle) Get(_ context.Context, _ string) (service.WCKBundle, error) {
+	return s.getOut, s.getErr
+}
+
+// ── membershipService stub ────────────────────────────────────────────────────
+
+type stubMembership struct {
+	announceErr error
+	listOut     []service.WalletMembership
+	listErr     error
+
+	announcedWalletRef string
+	announcedMembers   []string
+	announcer          string
+}
+
+func (s *stubMembership) Announce(_ context.Context, walletRef string, memberBlindIDs []string, announcer string) error {
+	s.announcedWalletRef = walletRef
+	s.announcedMembers = memberBlindIDs
+	s.announcer = announcer
+	return s.announceErr
+}
+func (s *stubMembership) List(_ context.Context, _ string) ([]service.WalletMembership, error) {
+	return s.listOut, s.listErr
+}
+
+// ── pushTokenService / pushNotifier stubs ─────────────────────────────────────
+
+type stubPushTokens struct {
+	replaceErr error
+	deleteErr  error
+	tokensOut  []string
+	tokensErr  error
+
+	gotQueueIndex string
+	gotExclude    string
+	done          chan struct{} // closed after TokensForQueue is called, for async tests
+}
+
+func (s *stubPushTokens) Replace(_ context.Context, _ string, _ []service.PushRegistration) error {
+	return s.replaceErr
+}
+func (s *stubPushTokens) Delete(_ context.Context, _ string) error { return s.deleteErr }
+func (s *stubPushTokens) TokensForQueue(_ context.Context, queueIndex, exclude string) ([]string, error) {
+	s.gotQueueIndex = queueIndex
+	s.gotExclude = exclude
+	if s.done != nil {
+		defer close(s.done)
+	}
+	return s.tokensOut, s.tokensErr
+}
+
+type stubNotifier struct {
+	err error
+
+	gotTokens     []string
+	gotQueueIndex string
+	done          chan struct{}
+}
+
+func (s *stubNotifier) NotifyCosignUpdated(_ context.Context, tokens []string, queueIndex string) error {
+	s.gotTokens = tokens
+	s.gotQueueIndex = queueIndex
+	if s.done != nil {
+		defer close(s.done)
+	}
+	return s.err
+}
+
 // ── backupService stub ────────────────────────────────────────────────────────
 
 type stubBackup struct {

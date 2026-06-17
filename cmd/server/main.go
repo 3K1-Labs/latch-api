@@ -75,26 +75,42 @@ func main() {
 	// Services
 	authSvc := service.NewAuthService(sqlDB, queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
 	otpSvc := service.NewOTPService(redisClient)
+	walletNonceSvc := service.NewWalletNonceService(redisClient)
+	sorobanSvc := service.NewSorobanService()
+	webAuthnSignerReader := service.NewSorobanWebAuthnSignerReader(sorobanSvc, cfg.WalletAuthSorobanURL)
+	walletAuthSvc := service.NewWalletAuthService(authSvc, walletNonceSvc, webAuthnSignerReader, cfg.WebAuthnAllowedOrigins)
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
 	backupSvc := service.NewBackupService(queries, encSvc)
-	sorobanSvc := service.NewSorobanService()
+	cosignSvc := service.NewCosignService(queries)
+	wckBundleSvc := service.NewWCKBundleService(queries)
+	pushTokenSvc := service.NewPushTokenService(queries)
+	membershipSvc := service.NewMembershipService(queries)
+	expoNotifier := service.NewExpoPushNotifier()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
+	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
+	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
+	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
+	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
+	membershipHandler := handler.NewMembershipHandler(membershipSvc, auditSvc)
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
 	historyHandler := handler.NewHistoryHandler(historySvc, cfg)
 	transactionHandler := handler.NewTransactionHandler(sorobanSvc, cfg)
 
-	// Rate limiters
-	generalLimiter := middleware.NewIPRateLimiter(redisClient, 100, time.Minute)
+	// Rate limiters. The global IP limiter is a DoS backstop; authenticated
+	// routes are additionally limited per wallet (JWT subject) so users sharing
+	// one IP (CGNAT, a home NAT, two devices) don't collide on a single bucket.
+	generalLimiter := middleware.NewIPRateLimiter(redisClient, 300, time.Minute)
+	authedLimiter := middleware.NewSubjectRateLimiter(redisClient, 100, time.Minute)
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
@@ -152,12 +168,14 @@ func main() {
 		{
 			auth.POST("/register", otpLimiter, authHandler.Register)
 			auth.POST("/verify", authHandler.Verify)
+			auth.POST("/challenge", walletAuthHandler.Challenge)
+			auth.POST("/sign-in", walletAuthHandler.SignIn)
 			auth.POST("/refresh", authHandler.Refresh)
 			auth.POST("/logout", middleware.RequireAuth(cfg.JWTSecret), authHandler.Logout)
 		}
 
 		backup := v1.Group("/backup")
-		backup.Use(middleware.RequireAuth(cfg.JWTSecret))
+		backup.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			backup.POST("", backupHandler.Store)
 			backup.PUT("", backupHandler.Store)
@@ -172,7 +190,39 @@ func main() {
 		}
 
 		v1.GET("/prices", pricesHandler.GetPrices)
-		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), historyHandler.GetHistory)
+		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), authedLimiter, historyHandler.GetHistory)
+
+		cosign := v1.Group("/cosign/requests")
+		cosign.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			cosign.POST("", cosignHandler.Create)
+			cosign.GET("", cosignHandler.List)
+			cosign.GET("/:id", cosignHandler.Get)
+			cosign.POST("/:id/signatures", cosignHandler.AddSignature)
+			cosign.POST("/:id/submission", cosignHandler.MarkSubmitted)
+			cosign.DELETE("/:id", cosignHandler.Cancel)
+		}
+
+		wck := v1.Group("/wck-bundles")
+		wck.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			wck.PUT("/:pickup_key", wckBundleHandler.Store)
+			wck.GET("/:pickup_key", wckBundleHandler.Get)
+		}
+
+		push := v1.Group("/push-tokens")
+		push.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			push.POST("", pushTokenHandler.Register)
+			push.DELETE("/:token", pushTokenHandler.Delete)
+		}
+
+		memberships := v1.Group("/memberships")
+		memberships.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			memberships.POST("", membershipHandler.Announce)
+			memberships.GET("", membershipHandler.List)
+		}
 	}
 
 	api := r.Group("/api/transaction")

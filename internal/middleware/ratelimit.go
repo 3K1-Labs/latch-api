@@ -48,6 +48,25 @@ func NewEmailRateLimiter(redisClient *redis.Client, limit int, window time.Durat
 	})
 }
 
+// subjectRateLimitKey keys by the authenticated user that RequireAuth injects
+// into the request context, falling back to client IP when absent. Reads from
+// context — never re-parses the JWT here (see security rules).
+func subjectRateLimitKey(c *gin.Context) string {
+	if sub := UserIDFromContext(c.Request.Context()); sub != "" {
+		return fmt.Sprintf("rl:sub:%s", sub)
+	}
+	return fmt.Sprintf("rl:ip:%s", c.ClientIP())
+}
+
+// NewSubjectRateLimiter limits authenticated traffic per wallet (the JWT
+// subject) instead of per IP, so distinct users sharing one IP — CGNAT, a home
+// NAT, two devices on the same Wi-Fi — don't collide on a single bucket. Must
+// be registered AFTER RequireAuth on the route group so the subject is present;
+// the global IP limiter still applies underneath as a DoS backstop.
+func NewSubjectRateLimiter(redisClient *redis.Client, limit int, window time.Duration) gin.HandlerFunc {
+	return newRateLimiter(redisClient, limit, window, subjectRateLimitKey)
+}
+
 func newRateLimiter(redisClient *redis.Client, limit int, window time.Duration, keyFn func(*gin.Context) string) gin.HandlerFunc {
 	rl := &RateLimiter{redis: redisClient, limit: limit, window: window}
 	return func(c *gin.Context) {
@@ -67,11 +86,19 @@ func newRateLimiter(redisClient *redis.Client, limit int, window time.Duration, 
 }
 
 func (rl *RateLimiter) check(ctx context.Context, key string) (bool, error) {
-	pipe := rl.redis.Pipeline()
-	incr := pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, rl.window)
-	if _, err := pipe.Exec(ctx); err != nil {
+	count, err := rl.redis.Incr(ctx, key).Result()
+	if err != nil {
 		return false, err
 	}
-	return incr.Val() <= int64(rl.limit), nil
+	// Set the TTL only when the window opens (first request). Resetting it on
+	// every request makes the key immortal under steady traffic: the counter
+	// climbs past the limit and never resets, so the subject stays 429'd until
+	// all traffic to the key idles for a full window. Expiring once lets the
+	// fixed window actually roll.
+	if count == 1 {
+		if err := rl.redis.Expire(ctx, key, rl.window).Err(); err != nil {
+			return false, err
+		}
+	}
+	return count <= int64(rl.limit), nil
 }
