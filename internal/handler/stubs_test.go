@@ -263,9 +263,9 @@ func (s *stubHistory) GetHistory(_ context.Context, _ service.HistoryParams) ([]
 // ── sorobanService stub ───────────────────────────────────────────────────────
 
 type stubSoroban struct {
-	result  *service.SimulateResult
-	err     error
-	sendRes *service.SendTxResult
+	result   *service.SimulateResult
+	err      error
+	sendRes  *service.SendTxResult
 	getTxRes *service.GetTxResult
 }
 
