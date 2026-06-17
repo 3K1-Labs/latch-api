@@ -87,6 +87,7 @@ func main() {
 	wckBundleSvc := service.NewWCKBundleService(queries)
 	pushTokenSvc := service.NewPushTokenService(queries)
 	membershipSvc := service.NewMembershipService(queries)
+	cleanupSvc := service.NewCleanupService(queries, cfg.CosignRetention, cfg.WCKBundleRetention, cfg.WalletMembershipRetention)
 	expoNotifier := service.NewExpoPushNotifier()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
@@ -231,6 +232,11 @@ func main() {
 		api.POST("/relay", transactionHandler.Relay)
 	}
 
+	// Background retention sweep. Stops when ctx is cancelled on shutdown.
+	if cfg.CleanupEnabled {
+		go runCleanupScheduler(ctx, cleanupSvc, cfg.CleanupInterval)
+	}
+
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),
 		Handler:           r,
@@ -254,6 +260,37 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+}
+
+// runCleanupScheduler sweeps the multisig tables every interval until ctx is
+// cancelled. Each pass gets its own bounded deadline so a slow sweep can't run
+// into the next tick or block shutdown; a failed pass is logged and retried on
+// the next tick.
+func runCleanupScheduler(ctx context.Context, svc *service.CleanupService, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			res, err := svc.Run(runCtx)
+			cancel()
+			if err != nil {
+				slog.Error("cleanup pass failed",
+					"cosign_requests", res.CosignRequests,
+					"wck_bundles", res.WCKBundles,
+					"wallet_memberships", res.WalletMemberships,
+					"err", err)
+				continue
+			}
+			slog.Info("cleanup pass complete",
+				"cosign_requests", res.CosignRequests,
+				"wck_bundles", res.WCKBundles,
+				"wallet_memberships", res.WalletMemberships)
+		}
 	}
 }
 
