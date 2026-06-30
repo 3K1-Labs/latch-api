@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,4 +54,33 @@ func TestEmailRateLimiter_FallsBackToIP_NoBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestSubjectRateLimitKey_UsesSubjectFromContext(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	c.Request = req.WithContext(context.WithValue(req.Context(), UserIDKey, "wallet-A"))
+
+	assert.Equal(t, "rl:sub:wallet-A", subjectRateLimitKey(c))
+}
+
+func TestSubjectRateLimitKey_FallsBackToIP_NoSubject(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+
+	// No authenticated subject in context → keyed by client IP, not subject.
+	assert.True(t, strings.HasPrefix(subjectRateLimitKey(c), "rl:ip:"))
+}
+
+func TestSubjectRateLimiter_FailOpen_RedisDown(t *testing.T) {
+	limiter := NewSubjectRateLimiter(disconnectedRedis(), 1, time.Minute)
+
+	r := gin.New()
+	r.GET("/", limiter, func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, w.Code, "limiter must fail open when Redis is unreachable")
 }
