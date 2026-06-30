@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 const (
 	EncVersionBackendKey = 1 // Phase 1: per-user key stored in DB
 	EncVersionPBKDF2     = 2 // Phase 2: key derived from email + server pepper
+	EncVersionClientSide = 3 // Phase 3: client encrypts with Argon2id+AES-256-GCM; backend stores opaque blob
 )
 
 // EncryptionService handles key management and delegates to the crypto primitives
@@ -86,11 +86,8 @@ func (s *EncryptionService) DecryptBackup(ctx context.Context, userID string, bl
 		if err != nil {
 			return nil, fmt.Errorf("get user email: %w", err)
 		}
-		// Salt is the raw UUID bytes; use the string form as fallback.
-		salt, err := hex.DecodeString(userID)
-		if err != nil {
-			salt = []byte(userID)
-		}
+		// Salt is the raw 16-byte UUID, not the hyphenated ASCII string.
+		salt := uid[:]
 		key := DeriveKeyPBKDF2(email, s.serverPepper, salt)
 		return Decrypt(blob, key)
 

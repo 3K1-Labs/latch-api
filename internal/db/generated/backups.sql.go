@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -49,6 +50,19 @@ func (q *Queries) GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetB
 	return i, err
 }
 
+const getClientBlobByUserID = `-- name: GetClientBlobByUserID :one
+SELECT client_encrypted_blob
+FROM credential_backups
+WHERE user_id = $1
+`
+
+func (q *Queries) GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getClientBlobByUserID, userID)
+	var client_encrypted_blob sql.NullString
+	err := row.Scan(&client_encrypted_blob)
+	return client_encrypted_blob, err
+}
+
 const upsertBackup = `-- name: UpsertBackup :exec
 INSERT INTO credential_backups
     (id, user_id, encrypted_blob, iv, auth_tag, encryption_version, smart_account_address)
@@ -84,3 +98,35 @@ func (q *Queries) UpsertBackup(ctx context.Context, arg UpsertBackupParams) erro
 	)
 	return err
 }
+
+const upsertClientEncryptedBackup = `-- name: UpsertClientEncryptedBackup :exec
+INSERT INTO credential_backups
+    (id, user_id, client_encrypted_blob, encryption_version, smart_account_address)
+VALUES ($1, $2, $3, 3, $4)
+ON CONFLICT (user_id) DO UPDATE SET
+    client_encrypted_blob = EXCLUDED.client_encrypted_blob,
+    encryption_version    = 3,
+    smart_account_address = EXCLUDED.smart_account_address,
+    encrypted_blob        = NULL,
+    iv                    = NULL,
+    auth_tag              = NULL,
+    updated_at            = NOW()
+`
+
+type UpsertClientEncryptedBackupParams struct {
+	ID                  uuid.UUID      `json:"id"`
+	UserID              uuid.UUID      `json:"user_id"`
+	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+}
+
+func (q *Queries) UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error {
+	_, err := q.db.ExecContext(ctx, upsertClientEncryptedBackup,
+		arg.ID,
+		arg.UserID,
+		arg.ClientEncryptedBlob,
+		arg.SmartAccountAddress,
+	)
+	return err
+}
+

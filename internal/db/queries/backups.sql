@@ -10,6 +10,19 @@ ON CONFLICT (user_id) DO UPDATE SET
     smart_account_address = EXCLUDED.smart_account_address,
     updated_at            = NOW();
 
+-- name: UpsertClientEncryptedBackup :exec
+INSERT INTO credential_backups
+    (id, user_id, client_encrypted_blob, encryption_version, smart_account_address)
+VALUES ($1, $2, $3, 3, $4)
+ON CONFLICT (user_id) DO UPDATE SET
+    client_encrypted_blob = EXCLUDED.client_encrypted_blob,
+    encryption_version    = 3,
+    smart_account_address = EXCLUDED.smart_account_address,
+    encrypted_blob        = NULL,
+    iv                    = NULL,
+    auth_tag              = NULL,
+    updated_at            = NOW();
+
 -- name: BackupExists :one
 SELECT EXISTS(
     SELECT 1 FROM credential_backups WHERE user_id = $1
@@ -17,5 +30,10 @@ SELECT EXISTS(
 
 -- name: GetBackupByUserID :one
 SELECT encrypted_blob, iv, auth_tag, encryption_version
+FROM credential_backups
+WHERE user_id = $1;
+
+-- name: GetClientBlobByUserID :one
+SELECT client_encrypted_blob
 FROM credential_backups
 WHERE user_id = $1;

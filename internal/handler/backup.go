@@ -12,36 +12,28 @@ import (
 )
 
 type BackupHandler struct {
-	backupSvc *service.BackupService
-	auditSvc  *service.AuditService
+	backupSvc backupService
+	auditSvc  auditService
 }
 
-func NewBackupHandler(backupSvc *service.BackupService, auditSvc *service.AuditService) *BackupHandler {
+func NewBackupHandler(backupSvc backupService, auditSvc auditService) *BackupHandler {
 	return &BackupHandler{backupSvc: backupSvc, auditSvc: auditSvc}
 }
 
-// CredentialBlob is the plaintext shape of the backup sent by the mobile app.
-type CredentialBlob struct {
-	Version           string `json:"version"`
-	PasskeyPrivateKey string `json:"passkey_private_key,omitempty"`
-	CredentialID      string `json:"credential_id,omitempty"`
-	KeyDataHex        string `json:"key_data_hex,omitempty"`
-	SmartAccount      string `json:"smart_account,omitempty"`
-	Mnemonic          string `json:"mnemonic,omitempty"`
-}
-
 type storeBackupRequest struct {
-	Blob                CredentialBlob `json:"blob"`
-	SmartAccountAddress string         `json:"smart_account_address"`
+	EncryptedBlob       clientEncryptedBlob `json:"encrypted_blob"`
+	SmartAccountAddress string              `json:"smart_account_address" binding:"required"`
 }
 
 // Store godoc
-// @Summary      Store encrypted backup
-// @Description  Encrypts the credential blob server-side and upserts it. POST and PUT are identical — both upsert.
+// @Summary      Store client-encrypted backup
+// @Description  Stores an opaque credential blob that the mobile client has already encrypted
+// @Description  with Argon2id + AES-256-GCM. The backend never decrypts it.
+// @Description  POST and PUT are identical — both upsert.
 // @Tags         backup
 // @Accept       json
 // @Produce      json
-// @Param        body body storeBackupRequest true "Credential blob and smart account address"
+// @Param        body body storeBackupRequest true "Client-encrypted blob and smart account address"
 // @Success      201 {object} messageDataResponse
 // @Failure      400 {object} apiErrorResponse
 // @Failure      401 {object} apiErrorResponse
@@ -57,31 +49,32 @@ func (h *BackupHandler) Store(c *gin.Context) {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid request body")
 		return
 	}
-	if req.Blob.SmartAccount == "" && req.SmartAccountAddress == "" {
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "blob is required")
+
+	eb := req.EncryptedBlob
+	if eb.Version == "" || eb.Salt == "" || eb.IV == "" || eb.AuthTag == "" || eb.Ciphertext == "" {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "encrypted_blob is incomplete")
 		return
 	}
 
-	smartAccount := req.SmartAccountAddress
-	if smartAccount == "" {
-		smartAccount = req.Blob.SmartAccount
-	}
-
-	plaintext, err := json.Marshal(req.Blob)
+	blobJSON, err := json.Marshal(eb)
 	if err != nil {
-		slog.Error("marshal backup blob", "userID", userID, "err", err)
+		slog.Error("marshal client encrypted blob", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	if err := h.backupSvc.Store(c.Request.Context(), userID, plaintext, smartAccount); err != nil {
-		slog.Error("store backup", "userID", userID, "err", err)
+	if err := h.backupSvc.StoreClientEncrypted(c.Request.Context(), userID, string(blobJSON), req.SmartAccountAddress); err != nil {
+		slog.Error("store client encrypted backup", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionBackupStored), c.ClientIP(), c.Request.UserAgent(), map[string]any{
-		"smart_account": smartAccount,
+	action := service.ActionBackupStored
+	if c.Request.Method == "PUT" {
+		action = service.ActionBackupUpdated
+	}
+	h.auditSvc.Log(c.Request.Context(), userID, string(action), c.ClientIP(), c.Request.UserAgent(), map[string]any{
+		"smart_account": req.SmartAccountAddress,
 	})
 
 	httpx.Success(c, http.StatusCreated, gin.H{"message": "backup stored"})

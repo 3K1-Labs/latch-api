@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,7 +46,8 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	if cfg.AppEnv == "production" {
+	isProd := strings.EqualFold(cfg.AppEnv, "production")
+	if isProd {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -70,28 +73,45 @@ func main() {
 	queries := db.New(sqlDB)
 
 	// Services
-	authSvc := service.NewAuthService(queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
+	authSvc := service.NewAuthService(sqlDB, queries, cfg.JWTSecret, cfg.AccessTokenTTLMin, cfg.RefreshTokenTTLDay)
 	otpSvc := service.NewOTPService(redisClient)
+	walletNonceSvc := service.NewWalletNonceService(redisClient)
+	sorobanSvc := service.NewSorobanService()
+	webAuthnSignerReader := service.NewSorobanWebAuthnSignerReader(sorobanSvc, cfg.WalletAuthSorobanURL)
+	walletAuthSvc := service.NewWalletAuthService(authSvc, walletNonceSvc, webAuthnSignerReader, cfg.WebAuthnAllowedOrigins)
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
 	backupSvc := service.NewBackupService(queries, encSvc)
-	sorobanSvc := service.NewSorobanService()
+	cosignSvc := service.NewCosignService(queries)
+	wckBundleSvc := service.NewWCKBundleService(queries)
+	pushTokenSvc := service.NewPushTokenService(queries)
+	membershipSvc := service.NewMembershipService(queries)
+	cleanupSvc := service.NewCleanupService(queries, cfg.CosignRetention, cfg.WCKBundleRetention, cfg.WalletMembershipRetention)
+	expoNotifier := service.NewExpoPushNotifier()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
+	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
+	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
+	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
+	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
+	membershipHandler := handler.NewMembershipHandler(membershipSvc, auditSvc)
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
 	historyHandler := handler.NewHistoryHandler(historySvc, cfg)
 	transactionHandler := handler.NewTransactionHandler(sorobanSvc, cfg)
 
-	// Rate limiters
-	generalLimiter := middleware.NewIPRateLimiter(redisClient, 100, time.Minute)
+	// Rate limiters. The global IP limiter is a DoS backstop; authenticated
+	// routes are additionally limited per wallet (JWT subject) so users sharing
+	// one IP (CGNAT, a home NAT, two devices) don't collide on a single bucket.
+	generalLimiter := middleware.NewIPRateLimiter(redisClient, 300, time.Minute)
+	authedLimiter := middleware.NewSubjectRateLimiter(redisClient, 100, time.Minute)
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
@@ -99,26 +119,37 @@ func main() {
 	r := gin.New()
 	r.Use(middleware.CORS())
 	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
+	if isProd {
+		r.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+			slog.Error("panic recovered", "panic", err)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": gin.H{"code": "INTERNAL_ERROR", "message": "internal error"},
+			})
+		}))
+	} else {
+		r.Use(gin.Recovery())
+	}
 	r.Use(timeoutMiddleware(30 * time.Second))
+	r.Use(middleware.MaxBodySize(256 * 1024)) // 256 KB global cap; backup endpoint is the largest payload
 	r.Use(generalLimiter)
 
-	// Intercept doc.json inside the wildcard to inject the correct host/scheme
-	// from the incoming request, so "Try it out" works on both localhost and production.
-	r.GET("/swagger/*any", func(c *gin.Context) {
-		if c.Param("any") == "/doc.json" {
-			docs.SwaggerInfo.Host = c.Request.Host
-			if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
-				docs.SwaggerInfo.Schemes = []string{"https"}
-			} else {
-				docs.SwaggerInfo.Schemes = []string{"http"}
+	// Swagger UI is only available in non-production environments.
+	if !isProd {
+		r.GET("/swagger/*any", func(c *gin.Context) {
+			if c.Param("any") == "/doc.json" {
+				docs.SwaggerInfo.Host = c.Request.Host
+				if c.GetHeader("X-Forwarded-Proto") == "https" || c.Request.TLS != nil {
+					docs.SwaggerInfo.Schemes = []string{"https"}
+				} else {
+					docs.SwaggerInfo.Schemes = []string{"http"}
+				}
+				c.Header("Content-Type", "application/json")
+				c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
+				return
 			}
-			c.Header("Content-Type", "application/json")
-			c.String(http.StatusOK, docs.SwaggerInfo.ReadDoc())
-			return
-		}
-		ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
-	})
+			ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+		})
+	}
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := pool.Ping(c.Request.Context()); err != nil {
@@ -138,12 +169,14 @@ func main() {
 		{
 			auth.POST("/register", otpLimiter, authHandler.Register)
 			auth.POST("/verify", authHandler.Verify)
+			auth.POST("/challenge", walletAuthHandler.Challenge)
+			auth.POST("/sign-in", walletAuthHandler.SignIn)
 			auth.POST("/refresh", authHandler.Refresh)
 			auth.POST("/logout", middleware.RequireAuth(cfg.JWTSecret), authHandler.Logout)
 		}
 
 		backup := v1.Group("/backup")
-		backup.Use(middleware.RequireAuth(cfg.JWTSecret))
+		backup.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
 			backup.POST("", backupHandler.Store)
 			backup.PUT("", backupHandler.Store)
@@ -158,12 +191,50 @@ func main() {
 		}
 
 		v1.GET("/prices", pricesHandler.GetPrices)
-		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), historyHandler.GetHistory)
+		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), authedLimiter, historyHandler.GetHistory)
+
+		cosign := v1.Group("/cosign/requests")
+		cosign.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			cosign.POST("", cosignHandler.Create)
+			cosign.GET("", cosignHandler.List)
+			cosign.GET("/:id", cosignHandler.Get)
+			cosign.POST("/:id/signatures", cosignHandler.AddSignature)
+			cosign.POST("/:id/submission", cosignHandler.MarkSubmitted)
+			cosign.DELETE("/:id", cosignHandler.Cancel)
+		}
+
+		wck := v1.Group("/wck-bundles")
+		wck.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			wck.PUT("/:pickup_key", wckBundleHandler.Store)
+			wck.GET("/:pickup_key", wckBundleHandler.Get)
+		}
+
+		push := v1.Group("/push-tokens")
+		push.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			push.POST("", pushTokenHandler.Register)
+			push.DELETE("/:token", pushTokenHandler.Delete)
+		}
+
+		memberships := v1.Group("/memberships")
+		memberships.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			memberships.POST("", membershipHandler.Announce)
+			memberships.GET("", membershipHandler.List)
+		}
 	}
 
 	api := r.Group("/api/transaction")
 	{
 		api.POST("/simulate", transactionHandler.Simulate)
+		api.POST("/relay", transactionHandler.Relay)
+	}
+
+	// Background retention sweep. Stops when ctx is cancelled on shutdown.
+	if cfg.CleanupEnabled {
+		go runCleanupScheduler(ctx, cleanupSvc, cfg.CleanupInterval)
 	}
 
 	srv := &http.Server{
@@ -189,6 +260,37 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+}
+
+// runCleanupScheduler sweeps the multisig tables every interval until ctx is
+// cancelled. Each pass gets its own bounded deadline so a slow sweep can't run
+// into the next tick or block shutdown; a failed pass is logged and retried on
+// the next tick.
+func runCleanupScheduler(ctx context.Context, svc *service.CleanupService, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			res, err := svc.Run(runCtx)
+			cancel()
+			if err != nil {
+				slog.Error("cleanup pass failed",
+					"cosign_requests", res.CosignRequests,
+					"wck_bundles", res.WCKBundles,
+					"wallet_memberships", res.WalletMemberships,
+					"err", err)
+				continue
+			}
+			slog.Info("cleanup pass complete",
+				"cosign_requests", res.CosignRequests,
+				"wck_bundles", res.WCKBundles,
+				"wallet_memberships", res.WalletMemberships)
+		}
 	}
 }
 

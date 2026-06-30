@@ -11,11 +11,11 @@ import (
 )
 
 type HistoryHandler struct {
-	historySvc *service.HistoryService
+	historySvc historyService
 	cfg        *config.Config
 }
 
-func NewHistoryHandler(historySvc *service.HistoryService, cfg *config.Config) *HistoryHandler {
+func NewHistoryHandler(historySvc historyService, cfg *config.Config) *HistoryHandler {
 	return &HistoryHandler{historySvc: historySvc, cfg: cfg}
 }
 
@@ -51,6 +51,9 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 	limit := 50
 	if l := c.Query("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			if n > 100 {
+				n = 100
+			}
 			limit = n
 		}
 	}

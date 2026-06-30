@@ -22,14 +22,14 @@ func NewEmailService(apiKey, fromName, fromAddr string) *EmailService {
 
 func (s *EmailService) SendOTP(toEmail, otp string) error {
 	return s.send(toEmail,
-		fmt.Sprintf("%s is your Latch verification code", otp),
+		"Your Latch verification code",
 		fmt.Sprintf(otpTemplate, otp),
 	)
 }
 
 func (s *EmailService) SendRecoveryOTP(toEmail, otp string) error {
 	return s.send(toEmail,
-		fmt.Sprintf("%s is your Latch account recovery code", otp),
+		"Your Latch account recovery code",
 		fmt.Sprintf(recoveryTemplate, otp),
 	)
 }

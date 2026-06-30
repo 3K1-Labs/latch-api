@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,21 +15,21 @@ import (
 )
 
 type RecoveryHandler struct {
-	authSvc     *service.AuthService
-	backupSvc   *service.BackupService
-	otpSvc      *service.OTPService
-	emailSvc    *service.EmailService
-	auditSvc    *service.AuditService
+	authSvc     authService
+	backupSvc   backupService
+	otpSvc      otpService
+	emailSvc    emailService
+	auditSvc    auditService
 	jwtSecret   string
 	recoveryTTL time.Duration
 }
 
 func NewRecoveryHandler(
-	authSvc *service.AuthService,
-	backupSvc *service.BackupService,
-	otpSvc *service.OTPService,
-	emailSvc *service.EmailService,
-	auditSvc *service.AuditService,
+	authSvc authService,
+	backupSvc backupService,
+	otpSvc otpService,
+	emailSvc emailService,
+	auditSvc auditService,
 	jwtSecret string,
 	recoveryTTLMin int,
 ) *RecoveryHandler {
@@ -112,7 +113,7 @@ func (h *RecoveryHandler) Verify(c *gin.Context) {
 		return
 	}
 
-	userID, _ := h.authSvc.GetUserByEmail(c.Request.Context(), req.Email)
+	userID, _ := h.authSvc.GetVerifiedUserByEmail(c.Request.Context(), req.Email)
 	if userID == "" {
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired OTP")
 		return
@@ -132,8 +133,9 @@ func (h *RecoveryHandler) Verify(c *gin.Context) {
 }
 
 // GetBlob godoc
-// @Summary      Fetch decrypted credential blob
-// @Description  Decrypts and returns the credential blob. Requires a recovery-scoped JWT (from POST /v1/recovery/verify).
+// @Summary      Fetch encrypted credential blob
+// @Description  Returns the opaque client-encrypted blob. The mobile client decrypts it
+// @Description  locally using the recovery password. Requires a recovery-scoped JWT.
 // @Tags         recovery
 // @Produce      json
 // @Success      200 {object} blobDataResponse
@@ -149,20 +151,29 @@ func (h *RecoveryHandler) GetBlob(c *gin.Context) {
 		return
 	}
 
-	blob, err := h.backupSvc.GetDecrypted(c.Request.Context(), userID)
+	blobJSON, err := h.backupSvc.GetClientBlob(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, service.ErrNoBackup) {
 			httpx.Fail(c, http.StatusNotFound, httpx.ErrNotFound, "no backup found for this account")
 			return
 		}
-		slog.Error("get decrypted backup", "userID", userID, "err", err)
+		slog.Error("get client encrypted backup", "userID", userID, "err", err)
+		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
+		return
+	}
+
+	// Unmarshal to validate the stored JSON before returning, then pass it back
+	// as a structured value so the response envelope is well-formed.
+	var encBlob json.RawMessage
+	if err := json.Unmarshal([]byte(blobJSON), &encBlob); err != nil {
+		slog.Error("unmarshal client encrypted blob", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRecoveryCompleted), c.ClientIP(), c.Request.UserAgent(), nil)
 
-	httpx.Success(c, http.StatusOK, gin.H{"blob": blob})
+	httpx.Success(c, http.StatusOK, gin.H{"encrypted_blob": encBlob})
 }
 
 func (h *RecoveryHandler) validateRecoveryToken(c *gin.Context) (string, error) {

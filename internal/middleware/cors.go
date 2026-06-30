@@ -13,6 +13,7 @@ func CORS() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
 		c.Header("Access-Control-Max-Age", "86400")
+		c.Header("Vary", "Origin")
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)

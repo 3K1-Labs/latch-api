@@ -6,14 +6,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/httpx"
-	"github.com/latch/backend/internal/service"
 )
 
 type PricesHandler struct {
-	priceSvc *service.PriceService
+	priceSvc priceService
 }
 
-func NewPricesHandler(priceSvc *service.PriceService) *PricesHandler {
+func NewPricesHandler(priceSvc priceService) *PricesHandler {
 	return &PricesHandler{priceSvc: priceSvc}
 }
 

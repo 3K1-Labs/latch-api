@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -14,14 +15,16 @@ import (
 )
 
 type AuthService struct {
+	db         *sql.DB
 	q          *db.Queries
 	jwtSecret  string
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
 
-func NewAuthService(q *db.Queries, jwtSecret string, accessTTLMin, refreshTTLDay int) *AuthService {
+func NewAuthService(sqlDB *sql.DB, q *db.Queries, jwtSecret string, accessTTLMin, refreshTTLDay int) *AuthService {
 	return &AuthService{
+		db:         sqlDB,
 		q:          q,
 		jwtSecret:  jwtSecret,
 		accessTTL:  time.Duration(accessTTLMin) * time.Minute,
@@ -82,12 +85,24 @@ func (s *AuthService) IssueTokenPair(ctx context.Context, userID string) (access
 	return accessToken, refreshToken, nil
 }
 
-// RotateRefreshToken validates the raw token, revokes it, and issues a new pair.
-// Returns ErrInvalidRefreshToken when the token is absent, expired, or already revoked.
-func (s *AuthService) RotateRefreshToken(ctx context.Context, rawToken string) (userID, accessToken, refreshToken string, err error) {
+// RotateRefreshToken validates the raw token, revokes it, and issues a new pair
+// inside a single transaction to prevent concurrent reuse of the same token.
+// Handles both user-owned and wallet-owned tokens. The returned subject is the
+// userID (user tokens) or the wallet address (wallet tokens) — used only as the
+// audit actor. Returns ErrInvalidRefreshToken when the token is absent, expired,
+// or already revoked.
+func (s *AuthService) RotateRefreshToken(ctx context.Context, rawToken string) (subject, accessToken, refreshToken string, err error) {
 	tokenHash := HashToken(rawToken)
 
-	row, err := s.q.GetRefreshToken(ctx, tokenHash)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback on any non-commit path is intentional
+
+	qtx := s.q.WithTx(tx)
+
+	row, err := qtx.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		return "", "", "", ErrInvalidRefreshToken
 	}
@@ -95,16 +110,59 @@ func (s *AuthService) RotateRefreshToken(ctx context.Context, rawToken string) (
 		return "", "", "", ErrInvalidRefreshToken
 	}
 
-	if err := s.q.RevokeRefreshToken(ctx, tokenHash); err != nil {
+	if err := qtx.RevokeRefreshToken(ctx, tokenHash); err != nil {
 		return "", "", "", fmt.Errorf("revoke old refresh token: %w", err)
 	}
 
-	uid := row.UserID.String()
-	access, refresh, err := s.IssueTokenPair(ctx, uid)
-	if err != nil {
-		return "", "", "", err
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", "", fmt.Errorf("generate random bytes: %w", err)
 	}
-	return uid, access, refresh, nil
+	newRawToken := hex.EncodeToString(raw)
+	newHash := HashToken(newRawToken)
+
+	// Wallet-owned token: rotate under wallet_address, issue a wallet access token.
+	if row.WalletAddress.Valid {
+		wallet := row.WalletAddress.String
+		if err := qtx.InsertWalletRefreshToken(ctx, db.InsertWalletRefreshTokenParams{
+			ID:            uuid.New(),
+			WalletAddress: sql.NullString{String: wallet, Valid: true},
+			TokenHash:     newHash,
+			ExpiresAt:     time.Now().Add(s.refreshTTL),
+		}); err != nil {
+			return "", "", "", fmt.Errorf("insert new wallet refresh token: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return "", "", "", fmt.Errorf("commit: %w", err)
+		}
+		accessToken, err = s.issueWalletAccessToken(wallet, KeyTypeForWallet(wallet))
+		if err != nil {
+			return "", "", "", fmt.Errorf("issue wallet access token: %w", err)
+		}
+		return wallet, accessToken, newRawToken, nil
+	}
+
+	// User-owned token.
+	if !row.UserID.Valid {
+		return "", "", "", ErrInvalidRefreshToken
+	}
+	uid := row.UserID.UUID
+	if err := qtx.InsertRefreshToken(ctx, db.InsertRefreshTokenParams{
+		ID:        uuid.New(),
+		UserID:    uuid.NullUUID{UUID: uid, Valid: true},
+		TokenHash: newHash,
+		ExpiresAt: time.Now().Add(s.refreshTTL),
+	}); err != nil {
+		return "", "", "", fmt.Errorf("insert new refresh token: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", "", "", fmt.Errorf("commit: %w", err)
+	}
+	accessToken, err = s.issueAccessToken(uid.String())
+	if err != nil {
+		return "", "", "", fmt.Errorf("issue access token: %w", err)
+	}
+	return uid.String(), accessToken, newRawToken, nil
 }
 
 // RevokeRefreshToken revokes a single refresh token by its raw value.
@@ -152,7 +210,7 @@ func (s *AuthService) issueRefreshToken(ctx context.Context, userID string) (str
 
 	err = s.q.InsertRefreshToken(ctx, db.InsertRefreshTokenParams{
 		ID:        uuid.New(),
-		UserID:    uid,
+		UserID:    uuid.NullUUID{UUID: uid, Valid: true},
 		TokenHash: HashToken(rawToken),
 		ExpiresAt: time.Now().Add(s.refreshTTL),
 	})
@@ -160,6 +218,51 @@ func (s *AuthService) issueRefreshToken(ctx context.Context, userID string) (str
 		return "", fmt.Errorf("store refresh token: %w", err)
 	}
 
+	return rawToken, nil
+}
+
+// IssueWalletTokenPair mints a wallet-scoped access JWT (sub=wallet,
+// scope="wallet", kty=keyType) plus a refresh token owned by the wallet address
+// (no users row). Used by SEP-10-style wallet sign-in.
+func (s *AuthService) IssueWalletTokenPair(ctx context.Context, wallet, keyType string) (accessToken, refreshToken string, err error) {
+	accessToken, err = s.issueWalletAccessToken(wallet, keyType)
+	if err != nil {
+		return "", "", fmt.Errorf("issue wallet access token: %w", err)
+	}
+	refreshToken, err = s.issueWalletRefreshToken(ctx, wallet)
+	if err != nil {
+		return "", "", fmt.Errorf("issue wallet refresh token: %w", err)
+	}
+	return accessToken, refreshToken, nil
+}
+
+func (s *AuthService) issueWalletAccessToken(wallet, keyType string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":   wallet,
+		"scope": "wallet",
+		"kty":   keyType,
+		"exp":   time.Now().Add(s.accessTTL).Unix(),
+		"iat":   time.Now().Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return tok.SignedString([]byte(s.jwtSecret))
+}
+
+func (s *AuthService) issueWalletRefreshToken(ctx context.Context, wallet string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate random bytes: %w", err)
+	}
+	rawToken := hex.EncodeToString(raw)
+
+	if err := s.q.InsertWalletRefreshToken(ctx, db.InsertWalletRefreshTokenParams{
+		ID:            uuid.New(),
+		WalletAddress: sql.NullString{String: wallet, Valid: true},
+		TokenHash:     HashToken(rawToken),
+		ExpiresAt:     time.Now().Add(s.refreshTTL),
+	}); err != nil {
+		return "", fmt.Errorf("store wallet refresh token: %w", err)
+	}
 	return rawToken, nil
 }
 

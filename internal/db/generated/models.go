@@ -22,25 +22,56 @@ type AuditLog struct {
 	CreatedAt time.Time             `json:"created_at"`
 }
 
+type CosignPushToken struct {
+	PushToken     string    `json:"push_token"`
+	QueueIndex    string    `json:"queue_index"`
+	BlindSignerID string    `json:"blind_signer_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type CosignRequest struct {
+	ID              uuid.UUID      `json:"id"`
+	QueueIndex      string         `json:"queue_index"`
+	UnsignedTxXdr   string         `json:"unsigned_tx_xdr"`
+	Network         string         `json:"network"`
+	Threshold       int32          `json:"threshold"`
+	Status          string         `json:"status"`
+	SubmittedTxHash sql.NullString `json:"submitted_tx_hash"`
+	ExpiresAt       time.Time      `json:"expires_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+type CosignSignature struct {
+	ID            uuid.UUID `json:"id"`
+	RequestID     uuid.UUID `json:"request_id"`
+	BlindSignerID string    `json:"blind_signer_id"`
+	AuthEntryXdr  string    `json:"auth_entry_xdr"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type CredentialBackup struct {
-	ID                  uuid.UUID `json:"id"`
-	UserID              uuid.UUID `json:"user_id"`
-	EncryptedBlob       []byte    `json:"encrypted_blob"`
-	Iv                  []byte    `json:"iv"`
-	AuthTag             []byte    `json:"auth_tag"`
-	EncryptionVersion   int32     `json:"encryption_version"`
-	SmartAccountAddress string    `json:"smart_account_address"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  uuid.UUID      `json:"id"`
+	UserID              uuid.UUID      `json:"user_id"`
+	EncryptedBlob       []byte         `json:"encrypted_blob"`
+	Iv                  []byte         `json:"iv"`
+	AuthTag             []byte         `json:"auth_tag"`
+	EncryptionVersion   int32          `json:"encryption_version"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
 }
 
 type RefreshToken struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
-	TokenHash string    `json:"token_hash"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Revoked   bool      `json:"revoked"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            uuid.UUID      `json:"id"`
+	UserID        uuid.NullUUID  `json:"user_id"`
+	TokenHash     string         `json:"token_hash"`
+	ExpiresAt     time.Time      `json:"expires_at"`
+	Revoked       bool           `json:"revoked"`
+	CreatedAt     time.Time      `json:"created_at"`
+	WalletAddress sql.NullString `json:"wallet_address"`
 }
 
 type User struct {
@@ -56,4 +87,19 @@ type UserEncryptionKey struct {
 	UserID    uuid.UUID `json:"user_id"`
 	KeyHex    string    `json:"key_hex"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type WalletMembership struct {
+	MemberBlindID string    `json:"member_blind_id"`
+	WalletRef     string    `json:"wallet_ref"`
+	Announcer     string    `json:"announcer"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type WckBundle struct {
+	PickupKey string    `json:"pickup_key"`
+	Bundle    string    `json:"bundle"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Uploader  string    `json:"uploader"`
 }

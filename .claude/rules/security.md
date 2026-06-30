@@ -90,7 +90,8 @@ This codebase uses sqlc-generated parameterized queries. Rules:
 - All public endpoints that accept email must use the email-keyed Redis limiter (not just IP).
 - OTP endpoints: 3 per hour per email.
 - Recovery initiation: 3 per 24 hours per email.
-- General: 100 req/min per IP across all routes.
+- General: 300 req/min per IP across all routes (global DoS backstop).
+- Authenticated routes: additionally 100 req/min per wallet (JWT subject), so distinct users behind one IP (CGNAT, a home NAT, two devices) don't share a bucket. Applied after `RequireAuth`; key `rl:sub:{walletID}`.
 - Rate limit failures must return 429 with `{"error": "too many requests, please try again later"}`.
 - Fail-open on Redis unavailability (log the error; don't block the request).
 
