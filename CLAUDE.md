@@ -41,22 +41,22 @@ Go REST API backend for a Stellar blockchain mobile wallet. Handles auth, encryp
 
 ### Endpoints
 
-| Method | Path | Auth | Purpose |
-|--------|------|------|---------|
-| GET | `/health` | None | DB + Redis liveness check |
-| POST | `/v1/auth/register` | None | Upsert user, send OTP email |
-| POST | `/v1/auth/verify` | None | Verify OTP → access + refresh tokens |
-| POST | `/v1/auth/refresh` | None | Rotate refresh token → new access token |
-| POST | `/v1/auth/logout` | Bearer JWT | Revoke refresh token |
-| POST | `/v1/backup` | Bearer JWT | Encrypt and store credential blob (upsert) |
-| PUT | `/v1/backup` | Bearer JWT | Same upsert as POST |
-| GET | `/v1/backup` | Bearer JWT | Check whether a backup exists |
-| POST | `/v1/recovery/initiate` | None | Send recovery OTP (rate-limited per email) |
-| POST | `/v1/recovery/verify` | None | Verify recovery OTP → short-lived recovery token |
-| GET | `/v1/recovery/blob` | Recovery JWT | Decrypt and return credential blob |
-| GET | `/v1/prices` | None | Live USD prices for Stellar assets (Redis-cached) |
-| GET | `/v1/history` | Bearer JWT | Transaction history for the authenticated user |
-| POST | `/api/transaction/simulate` | None | Simulate a Soroban transaction |
+| Method | Path                        | Auth         | Purpose                                           |
+| ------ | --------------------------- | ------------ | ------------------------------------------------- |
+| GET    | `/health`                   | None         | DB + Redis liveness check                         |
+| POST   | `/v1/auth/register`         | None         | Upsert user, send OTP email                       |
+| POST   | `/v1/auth/verify`           | None         | Verify OTP → access + refresh tokens              |
+| POST   | `/v1/auth/refresh`          | None         | Rotate refresh token → new access token           |
+| POST   | `/v1/auth/logout`           | Bearer JWT   | Revoke refresh token                              |
+| POST   | `/v1/backup`                | Bearer JWT   | Encrypt and store credential blob (upsert)        |
+| PUT    | `/v1/backup`                | Bearer JWT   | Same upsert as POST                               |
+| GET    | `/v1/backup`                | Bearer JWT   | Check whether a backup exists                     |
+| POST   | `/v1/recovery/initiate`     | None         | Send recovery OTP (rate-limited per email)        |
+| POST   | `/v1/recovery/verify`       | None         | Verify recovery OTP → short-lived recovery token  |
+| GET    | `/v1/recovery/blob`         | Recovery JWT | Decrypt and return credential blob                |
+| GET    | `/v1/prices`                | None         | Live USD prices for Stellar assets (Redis-cached) |
+| GET    | `/v1/history`               | Bearer JWT   | Transaction history for the authenticated user    |
+| POST   | `/api/transaction/simulate` | None         | Simulate a Soroban transaction                    |
 
 ### Encryption (two-phase)
 
@@ -93,7 +93,8 @@ references/freighter-mobile/ # Freighter React Native wallet
 
 ### Rate Limiting
 
-- Per-IP: 100 req/min (general)
+- Per-IP: 300 req/min (general, global DoS backstop)
+- Per-wallet: 100 req/min on authenticated routes (JWT subject; key `rl:sub:`) so users sharing one IP don't collide
 - Per-email: 3 OTPs/hour, 3 recovery initiations/24h
 
 ## Reference Projects
@@ -115,18 +116,17 @@ The primary client. React Native + Expo 55, Bun package manager, Expo Router, Zu
 | GET | `/v1/backup` | Check if backup exists |
 | POST | `/v1/recovery/initiate` | Send recovery OTP |
 | POST | `/v1/recovery/verify` | Verify recovery OTP → recovery token |
-| GET | `/v1/recovery/blob` | Fetch decrypted blob via recovery token |
+| GET | `/v1/recovery/blob` | Fetch encrypted backup blob (client decrypts locally with recovery password) |
 | GET | `/v1/prices` | Live asset prices (XLM etc.) |
 | GET | `/v1/history` | Transaction history |
-| POST | `/api/transaction/simulate` | Simulate Soroban transaction |
 
 **Key client-side details to keep in mind:**
 
-- Auth tokens are stored in `expo-secure-store`; the client handles JWT refresh automatically via an Axios interceptor in `src/api/client.ts`
-- The credential blob sent to `/v1/backup` is **plaintext** from the mobile side — the backend performs all AES-256-GCM encryption before storage
+- Auth tokens are stored in `expo-secure-store`; auth/backup/recovery calls use a custom XHR-based `latchFetch` (in `src/api/latch-auth.ts`) with a built-in 401→refresh→retry cycle — not the Axios interceptor in `src/api/client.ts`
+- The credential blob sent to `/v1/backup` is **pre-encrypted by the mobile client** (Argon2id key derivation + AES-256-GCM). The backend stores the opaque ciphertext and never decrypts it.
 - Smart account users: BIP-44 index ≥ 0 for seed wallets, index = -1 for passkey wallets
 - Android Soroban calls bypass Axios (raw XMLHttpRequest) due to OkHttp TLS incompatibility — keep `/api/transaction/*` responses simple and avoid chunked transfer encoding
-- `EXPO_PUBLIC_BUNDLER_SECRET` is currently embedded in the mobile app (testnet only); the production path is for the backend to own the bundler keypair and sign outer transactions server-side
+- `BUNDLER_SECRET` is currently embedded in the mobile app (testnet only); the production path is for the backend to own the bundler keypair and sign outer transactions server-side
 
 ### freighter (`references/freighter/`)
 
@@ -173,3 +173,15 @@ Copy `.env.example` to `.env`. Key variables:
 - `RESEND_API_KEY`, `EMAIL_FROM_ADDR`
 - `SERVER_PEPPER` — empty until Phase 2 encryption migration is complete
 - `ENCRYPTION_MASTER_KEY` — currently unused; required by config but not consumed by any service
+
+### Retention / GC
+
+A background sweep (`internal/service/cleanup_service.go`, scheduled in `cmd/server/main.go`) bounds growth of the multisig tables. All optional; sane defaults bake in.
+
+- `CLEANUP_ENABLED` — run the sweep (default `true`)
+- `CLEANUP_INTERVAL_MIN` — minutes between sweeps (default `60`)
+- `COSIGN_RETENTION_HOURS` — grace kept past a cosign request's `expires_at` before it (and its cascaded signatures) is deleted (default `24`)
+- `WCK_BUNDLE_RETENTION_DAYS` — delete WCK bundles untouched this long; `0` disables (default `180`)
+- `WALLET_MEMBERSHIP_RETENTION_DAYS` — delete membership rows older than this; `0` disables (default `180`)
+
+WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.

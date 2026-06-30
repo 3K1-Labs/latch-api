@@ -7,27 +7,34 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 const getRefreshToken = `-- name: GetRefreshToken :one
-SELECT user_id, expires_at, revoked
+SELECT user_id, wallet_address, expires_at, revoked
 FROM refresh_tokens
 WHERE token_hash = $1
 `
 
 type GetRefreshTokenRow struct {
-	UserID    uuid.UUID `json:"user_id"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Revoked   bool      `json:"revoked"`
+	UserID        uuid.NullUUID  `json:"user_id"`
+	WalletAddress sql.NullString `json:"wallet_address"`
+	ExpiresAt     time.Time      `json:"expires_at"`
+	Revoked       bool           `json:"revoked"`
 }
 
 func (q *Queries) GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error) {
 	row := q.db.QueryRowContext(ctx, getRefreshToken, tokenHash)
 	var i GetRefreshTokenRow
-	err := row.Scan(&i.UserID, &i.ExpiresAt, &i.Revoked)
+	err := row.Scan(
+		&i.UserID,
+		&i.WalletAddress,
+		&i.ExpiresAt,
+		&i.Revoked,
+	)
 	return i, err
 }
 
@@ -37,16 +44,38 @@ VALUES ($1, $2, $3, $4)
 `
 
 type InsertRefreshTokenParams struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
-	TokenHash string    `json:"token_hash"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        uuid.UUID     `json:"id"`
+	UserID    uuid.NullUUID `json:"user_id"`
+	TokenHash string        `json:"token_hash"`
+	ExpiresAt time.Time     `json:"expires_at"`
 }
 
 func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error {
 	_, err := q.db.ExecContext(ctx, insertRefreshToken,
 		arg.ID,
 		arg.UserID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const insertWalletRefreshToken = `-- name: InsertWalletRefreshToken :exec
+INSERT INTO refresh_tokens (id, wallet_address, token_hash, expires_at)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertWalletRefreshTokenParams struct {
+	ID            uuid.UUID      `json:"id"`
+	WalletAddress sql.NullString `json:"wallet_address"`
+	TokenHash     string         `json:"token_hash"`
+	ExpiresAt     time.Time      `json:"expires_at"`
+}
+
+func (q *Queries) InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error {
+	_, err := q.db.ExecContext(ctx, insertWalletRefreshToken,
+		arg.ID,
+		arg.WalletAddress,
 		arg.TokenHash,
 		arg.ExpiresAt,
 	)

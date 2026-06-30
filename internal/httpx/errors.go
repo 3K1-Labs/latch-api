@@ -17,6 +17,10 @@ const (
 	// ErrRateLimited is for callers that exceed the allowed request rate (HTTP 429).
 	ErrRateLimited ErrorCode = "RATE_LIMITED"
 
+	// ErrConflict is for writes that collide with state owned by another
+	// principal (e.g. replacing a WCK bundle uploaded by someone else) (HTTP 409).
+	ErrConflict ErrorCode = "CONFLICT"
+
 	// ErrInternal is for unexpected server-side failures (HTTP 500).
 	ErrInternal ErrorCode = "INTERNAL_ERROR"
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -91,7 +92,7 @@ func (s *BackupService) StoreClientEncrypted(ctx context.Context, userID, client
 	return s.q.UpsertClientEncryptedBackup(ctx, db.UpsertClientEncryptedBackupParams{
 		ID:                  uuid.New(),
 		UserID:              uid,
-		ClientEncryptedBlob: clientBlob,
+		ClientEncryptedBlob: sql.NullString{String: clientBlob, Valid: true},
 		SmartAccountAddress: smartAccountAddress,
 	})
 }

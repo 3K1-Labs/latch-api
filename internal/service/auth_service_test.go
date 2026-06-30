@@ -2,12 +2,25 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
+	db "github.com/latch/backend/internal/db/generated"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newMockAuthService(t *testing.T) (*AuthService, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	q := db.New(sqlDB)
+	return NewAuthService(sqlDB, q, "test-secret-key-32-bytes-padding!", 15, 30), mock
+}
 
 func newTestAuthService() *AuthService {
 	return NewAuthService(nil, nil, "test-secret-key-32-bytes-padding!", 15, 30)
@@ -112,4 +125,124 @@ func TestIssueRefreshToken_InvalidUUID(t *testing.T) {
 	_, err := svc.issueRefreshToken(context.Background(), "not-a-valid-uuid")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
+}
+
+// ── sqlmock: success paths requiring a working DB ─────────────────────────────
+
+func TestUpsertUser_Success(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectQuery("INSERT INTO users").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uid.String()))
+
+	id, err := svc.UpsertUser(context.Background(), "user@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, uid.String(), id)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestVerifyEmail_Success(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectQuery("UPDATE users").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uid.String()))
+
+	id, err := svc.VerifyEmail(context.Background(), "user@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, uid.String(), id)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGetVerifiedUserByEmail_Success(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectQuery("SELECT id").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uid.String()))
+
+	id, err := svc.GetVerifiedUserByEmail(context.Background(), "user@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, uid.String(), id)
+}
+
+func TestGetUserByEmail_Success(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectQuery("SELECT id").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uid.String()))
+
+	id, err := svc.GetUserByEmail(context.Background(), "user@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, uid.String(), id)
+}
+
+func TestIssueTokenPair_Success(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectExec("INSERT INTO refresh_tokens").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	access, refresh, err := svc.IssueTokenPair(context.Background(), uid.String())
+	require.NoError(t, err)
+	assert.NotEmpty(t, access)
+	assert.NotEmpty(t, refresh)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRotateRefreshToken_TokenNotFound(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	_, _, _, err := svc.RotateRefreshToken(context.Background(), "raw-token")
+	require.ErrorIs(t, err, ErrInvalidRefreshToken)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRotateRefreshToken_TokenRevoked(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "wallet_address", "expires_at", "revoked"}).
+			AddRow(uid, nil, time.Now().Add(time.Hour), true))
+	mock.ExpectRollback()
+
+	_, _, _, err := svc.RotateRefreshToken(context.Background(), "raw-token")
+	require.ErrorIs(t, err, ErrInvalidRefreshToken)
+}
+
+func TestRotateRefreshToken_TokenExpired(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "wallet_address", "expires_at", "revoked"}).
+			AddRow(uid, nil, time.Now().Add(-time.Hour), false))
+	mock.ExpectRollback()
+
+	_, _, _, err := svc.RotateRefreshToken(context.Background(), "raw-token")
+	require.ErrorIs(t, err, ErrInvalidRefreshToken)
+}
+
+func TestRotateRefreshToken_Success(t *testing.T) {
+	svc, mock := newMockAuthService(t)
+	uid := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT user_id, wallet_address, expires_at, revoked").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "wallet_address", "expires_at", "revoked"}).
+			AddRow(uid, nil, time.Now().Add(time.Hour), false))
+	mock.ExpectExec("UPDATE refresh_tokens SET revoked").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO refresh_tokens").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	returnedUID, access, refresh, err := svc.RotateRefreshToken(context.Background(), "raw-token")
+	require.NoError(t, err)
+	assert.Equal(t, uid.String(), returnedUID)
+	assert.NotEmpty(t, access)
+	assert.NotEmpty(t, refresh)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

@@ -24,6 +24,12 @@ type otpService interface {
 	Verify(ctx context.Context, email, code string) (bool, error)
 }
 
+type walletAuthService interface {
+	Challenge(ctx context.Context, wallet, keyType string) (string, int, error)
+	SignIn(ctx context.Context, in service.WalletSignInInput) (string, string, error)
+	AccessTTL() int
+}
+
 type emailService interface {
 	SendOTP(to, otp string) error
 	SendRecoveryOTP(to, otp string) error
@@ -37,6 +43,35 @@ type backupService interface {
 	StoreClientEncrypted(ctx context.Context, userID, clientBlob, smartAccountAddress string) error
 	Exists(ctx context.Context, userID string) (bool, error)
 	GetClientBlob(ctx context.Context, userID string) (string, error)
+}
+
+type cosignService interface {
+	Create(ctx context.Context, in service.CreateCosignInput) (service.CosignRequest, error)
+	List(ctx context.Context, queueIndex string) ([]service.CosignRequest, error)
+	Get(ctx context.Context, id string) (service.CosignRequest, error)
+	AddSignature(ctx context.Context, id, blindSignerID, authEntryXDR string) (service.CosignRequest, error)
+	MarkSubmitted(ctx context.Context, id, txHash string) error
+	Cancel(ctx context.Context, id string) error
+}
+
+type wckBundleService interface {
+	Store(ctx context.Context, pickupKey, bundle, uploader string) (service.WCKBundle, error)
+	Get(ctx context.Context, pickupKey string) (service.WCKBundle, error)
+}
+
+type pushTokenService interface {
+	Replace(ctx context.Context, token string, regs []service.PushRegistration) error
+	Delete(ctx context.Context, token string) error
+	TokensForQueue(ctx context.Context, queueIndex, excludeBlindSignerID string) ([]string, error)
+}
+
+type membershipService interface {
+	Announce(ctx context.Context, walletRef string, memberBlindIDs []string, announcer string) error
+	List(ctx context.Context, memberBlindID string) ([]service.WalletMembership, error)
+}
+
+type pushNotifier interface {
+	NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error
 }
 
 type priceService interface {
