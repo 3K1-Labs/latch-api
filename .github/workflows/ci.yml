@@ -46,7 +46,7 @@ jobs:
           awk "BEGIN{ if (${COVERAGE}+0 < 80) { print \"FAIL: \" ${COVERAGE} \"% is below the 80% threshold — write tests for uncovered code\"; exit 1 } }"
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-report
