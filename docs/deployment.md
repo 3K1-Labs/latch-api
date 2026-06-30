@@ -163,7 +163,6 @@ In `references/latch-mobile/.env` (or however the mobile app is configured):
 
 ```
 EXPO_PUBLIC_API_BASE_URL=https://latch-backend.onrender.com
-EXPO_PUBLIC_LATCH_API_URL=https://latch-backend.onrender.com
 ```
 
 ---

@@ -4,10 +4,17 @@ import (
 	"context"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func miniRedisOTPService(t *testing.T) *OTPService {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	return NewOTPService(redis.NewClient(&redis.Options{Addr: mr.Addr()}))
+}
 
 func deadRedis() *redis.Client {
 	return redis.NewClient(&redis.Options{Addr: "localhost:16379"})
@@ -48,6 +55,67 @@ func TestVerify_RedisDown_ReturnsError(t *testing.T) {
 	ok, err := svc.Verify(context.Background(), "user@example.com", "123456")
 	assert.False(t, ok)
 	require.Error(t, err, "Verify must return error when Redis is unavailable")
+}
+
+func TestVerify_OTPNotFound_ReturnsFalse(t *testing.T) {
+	svc := miniRedisOTPService(t)
+	ok, err := svc.Verify(context.Background(), "user@example.com", "123456")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestVerify_CorrectCode_ReturnsTrue(t *testing.T) {
+	svc := miniRedisOTPService(t)
+	code, err := svc.Generate(context.Background(), "user@example.com")
+	require.NoError(t, err)
+
+	ok, err := svc.Verify(context.Background(), "user@example.com", code)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestVerify_OTPConsumedAfterSuccess(t *testing.T) {
+	svc := miniRedisOTPService(t)
+	code, _ := svc.Generate(context.Background(), "user@example.com")
+	ok, _ := svc.Verify(context.Background(), "user@example.com", code)
+	require.True(t, ok, "first verify must succeed")
+
+	ok, err := svc.Verify(context.Background(), "user@example.com", code)
+	require.NoError(t, err)
+	assert.False(t, ok, "OTP must be single-use")
+}
+
+func TestVerify_WrongCode_ReturnsFalse(t *testing.T) {
+	svc := miniRedisOTPService(t)
+	code, _ := svc.Generate(context.Background(), "user@example.com")
+	// Use a code that can't equal the generated one (different length).
+	wrongCode := "x" + code
+
+	ok, err := svc.Verify(context.Background(), "user@example.com", wrongCode)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestVerify_MaxAttemptsInvalidatesOTP(t *testing.T) {
+	svc := miniRedisOTPService(t)
+	code, _ := svc.Generate(context.Background(), "user@example.com")
+
+	// Exhaust all allowed attempts with a wrong code.
+	for i := 0; i < otpMaxAttempts; i++ {
+		ok, err := svc.Verify(context.Background(), "user@example.com", "bad")
+		require.NoError(t, err)
+		assert.False(t, ok)
+	}
+
+	// The next attempt (attempts > otpMaxAttempts) must invalidate and return false.
+	ok, err := svc.Verify(context.Background(), "user@example.com", code)
+	require.NoError(t, err)
+	assert.False(t, ok, "OTP must be invalidated after too many failed attempts")
+
+	// After invalidation the key is gone — subsequent calls return false with no error.
+	ok, err = svc.Verify(context.Background(), "user@example.com", code)
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
 
 func TestGenerateNumericOTP_LeadingZeros(t *testing.T) {
