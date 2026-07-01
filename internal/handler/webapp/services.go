@@ -27,3 +27,16 @@ type accountsService interface {
 type auditService interface {
 	Log(ctx context.Context, userID, action, ipAddr, userAgent string, metadata map[string]any)
 }
+
+type transactionService interface {
+	BuildSend(ctx context.Context, in webapp.BuildSendInput, catalog []webapp.CatalogAsset) (webapp.BuildSendResult, error)
+	SubmitWebAuthn(ctx context.Context, in webapp.SubmitWebAuthnInput) (webapp.SubmitResult, error)
+}
+
+type contextRulesService interface {
+	ListContextRules(ctx context.Context, smartAccountAddress string) ([]webapp.ContextRuleSummary, error)
+}
+
+type balancesService interface {
+	FetchBalancesForCatalog(ctx context.Context, holderAddress string, catalog []webapp.CatalogAsset, includeZero bool) ([]webapp.AssetBalance, error)
+}

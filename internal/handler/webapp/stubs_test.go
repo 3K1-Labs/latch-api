@@ -77,3 +77,35 @@ func (s *stubAccounts) ListAccounts(_ context.Context, _ string) ([]webapp.Accou
 type stubAudit struct{}
 
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
+
+type stubTransaction struct {
+	buildSendResult webapp.BuildSendResult
+	buildSendErr    error
+	submitResult    webapp.SubmitResult
+	submitErr       error
+}
+
+func (s *stubTransaction) BuildSend(_ context.Context, _ webapp.BuildSendInput, _ []webapp.CatalogAsset) (webapp.BuildSendResult, error) {
+	return s.buildSendResult, s.buildSendErr
+}
+func (s *stubTransaction) SubmitWebAuthn(_ context.Context, _ webapp.SubmitWebAuthnInput) (webapp.SubmitResult, error) {
+	return s.submitResult, s.submitErr
+}
+
+type stubContextRules struct {
+	rules []webapp.ContextRuleSummary
+	err   error
+}
+
+func (s *stubContextRules) ListContextRules(_ context.Context, _ string) ([]webapp.ContextRuleSummary, error) {
+	return s.rules, s.err
+}
+
+type stubBalances struct {
+	balances []webapp.AssetBalance
+	err      error
+}
+
+func (s *stubBalances) FetchBalancesForCatalog(_ context.Context, _ string, _ []webapp.CatalogAsset, _ bool) ([]webapp.AssetBalance, error) {
+	return s.balances, s.err
+}

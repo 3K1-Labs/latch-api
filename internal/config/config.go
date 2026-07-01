@@ -76,6 +76,12 @@ type Config struct {
 	WebAppWebAuthnOrigin          string
 	WebAppWebAuthnDevTrustReqHost bool
 	WebAppAllowedDevOrigins       []string
+
+	// Asset catalog for balances/transfers. Native XLM reuses
+	// NativeSACIDTestnet/Mainnet above (same contract regardless of caller);
+	// USDC has no existing mobile equivalent, so it gets its own field.
+	WebAppUSDCSACAddressTestnet string
+	WebAppAssetAllowlistJSON    string
 }
 
 func Load() (*Config, error) {
@@ -117,6 +123,9 @@ func Load() (*Config, error) {
 		WebAppWebAuthnOrigin:          getEnv("WEBAUTHN_ORIGIN", ""),
 		WebAppWebAuthnDevTrustReqHost: getEnv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "") != "",
 		WebAppAllowedDevOrigins:       splitCSV(getEnv("ALLOWED_DEV_ORIGINS", "")),
+
+		WebAppUSDCSACAddressTestnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS", "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"),
+		WebAppAssetAllowlistJSON:    getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
 	}
 
 	var err error

@@ -136,6 +136,34 @@ func TestLoad_WebAppPhase2Fields_DefaultEmpty(t *testing.T) {
 	assert.Empty(t, cfg.WebAppAllowedDevOrigins)
 }
 
+func TestLoad_WebAppAssetCatalogFields(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	t.Setenv("NEXT_PUBLIC_USDC_SAC_ADDRESS", "CUSDCTESTADDRESS")
+	t.Setenv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", `[{"assetId":"native"}]`)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "CUSDCTESTADDRESS", cfg.WebAppUSDCSACAddressTestnet)
+	assert.Equal(t, `[{"assetId":"native"}]`, cfg.WebAppAssetAllowlistJSON)
+}
+
+func TestLoad_WebAppAssetCatalogFields_Defaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	os.Unsetenv("NEXT_PUBLIC_USDC_SAC_ADDRESS")
+	os.Unsetenv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", cfg.WebAppUSDCSACAddressTestnet)
+	assert.Empty(t, cfg.WebAppAssetAllowlistJSON)
+}
+
 func TestLoad_DefaultPort(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")

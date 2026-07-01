@@ -101,24 +101,32 @@ func main() {
 	webappAuditSvc := webapp.NewAuditService(queries)
 	webappWebauthnSvc := webapp.NewWebAuthnService(queries)
 	webappAccountsSvc := webapp.NewAccountsService(queries)
+	webappContextRulesSvc := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
+	webappBalancesSvc := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
 
-	// Smart-account operations need a valid bundler keypair and factory
-	// address. Missing/invalid config disables only this route group (logged
-	// below) rather than crashing the server — mobile traffic must keep
-	// flowing regardless of webapp config completeness.
+	// Smart-account and transaction build/submit operations need a valid
+	// bundler keypair and factory address. Missing/invalid config disables
+	// only these route groups (logged below) rather than crashing the
+	// server — mobile traffic must keep flowing regardless of webapp config
+	// completeness.
 	var webappSmartAccountSvc *webapp.SmartAccountService
+	var webappTransactionSvc *webapp.TransactionService
 	switch {
 	case cfg.WebAppBundlerSecret == "":
-		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account routes disabled")
+		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account/transaction routes disabled")
 	case cfg.WebAppFactoryAddress == "":
-		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account routes disabled")
+		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account/transaction routes disabled")
 	default:
 		if bundlerSvc, err := webapp.NewBundlerService(cfg.WebAppBundlerSecret, cfg.WebAppLegacyDelegatedSignerSecret); err != nil {
-			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account routes disabled", "err", err)
+			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account/transaction routes disabled", "err", err)
 		} else {
 			webappSmartAccountSvc = webapp.NewSmartAccountService(
 				sorobanSvc, bundlerSvc, queries,
 				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress,
+			)
+			webappTransactionSvc = webapp.NewTransactionService(
+				sorobanSvc, bundlerSvc, webappContextRulesSvc,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
 			)
 		}
 	}
@@ -268,7 +276,11 @@ func main() {
 		api.POST("/relay", transactionHandler.Relay)
 	}
 
-	// Web app + Chrome extension routes.
+	// Web app + Chrome extension routes. This is deliberately a separate
+	// *gin.RouterGroup from `api` above (both happen to be rooted at
+	// "/api/transaction" once Phase 3 mounts a sub-group here) rather than
+	// reusing it, so mobile's /api/transaction/{simulate,relay} registration
+	// is never touched as this surface grows.
 	webappGroup := r.Group("/api")
 	webappGroup.Use(middleware.EnsureSession(webappSessionSvc, crossSiteWebAppCookies))
 
@@ -277,6 +289,15 @@ func main() {
 	{
 		accountsGroup.GET("", webappAccountsHandler.List)
 		accountsGroup.POST("/set-active", webappAccountsHandler.SetActive)
+	}
+
+	// Context-rules/balances are pure reads and never touch the bundler, so
+	// they're always mounted regardless of bundler config completeness.
+	webappSmartAccountHandler := webapphandler.NewSmartAccountHandler(webappSmartAccountSvc, webappContextRulesSvc, webappBalancesSvc, cfg)
+	smartAccountGroup := webappGroup.Group("/smart-account")
+	{
+		smartAccountGroup.GET("/context-rules", webappSmartAccountHandler.ContextRules)
+		smartAccountGroup.GET("/balances", webappSmartAccountHandler.Balances)
 	}
 
 	if webappSmartAccountSvc != nil {
@@ -290,11 +311,16 @@ func main() {
 			webauthnGroup.GET("/credentials", webappWebauthnHandler.Credentials)
 		}
 
-		webappSmartAccountHandler := webapphandler.NewSmartAccountHandler(webappSmartAccountSvc)
-		smartAccountGroup := webappGroup.Group("/smart-account")
+		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
+		smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
+	}
+
+	if webappTransactionSvc != nil {
+		webappTransactionHandler := webapphandler.NewTransactionHandler(webappTransactionSvc, cfg)
+		transactionGroup := webappGroup.Group("/transaction")
 		{
-			smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
-			smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
+			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)
+			transactionGroup.POST("/submit-webauthn", webappTransactionHandler.SubmitWebAuthn)
 		}
 	}
 
