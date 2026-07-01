@@ -372,6 +372,16 @@ func (s *TransactionService) SubmitWebAuthn(ctx context.Context, in SubmitWebAut
 	return s.submitWithBundler(ctx, in.TxXdr, entries)
 }
 
+// SubmitAuthEntries submits an already-built transaction with a caller-
+// assembled set of signed auth entries via the bundler. This is the shared
+// tail of both SubmitWebAuthn and the multisig execute flow
+// (MultisigProposalService assembles its own auth entries via
+// buildMultisigExecuteAuthEntries, then reuses this same enforcing-mode
+// simulate/sign/submit/poll pipeline rather than duplicating it).
+func (s *TransactionService) SubmitAuthEntries(ctx context.Context, txXdrB64 string, entries []xdr.SorobanAuthorizationEntry) (SubmitResult, error) {
+	return s.submitWithBundler(ctx, txXdrB64, entries)
+}
+
 // ── shared submit pipeline ───────────────────────────────────────────────────
 
 // submitWithBundler refreshes the bundler's on-chain sequence, re-simulates

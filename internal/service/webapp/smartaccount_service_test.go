@@ -21,11 +21,12 @@ import (
 // sorobanRPC, so Deploy/PredictAddress/IsDeployed can be tested without a
 // live Soroban RPC endpoint.
 type fakeSorobanRPC struct {
-	simulateFn func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error)
-	sendFn     func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error)
-	getTxFn    func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error)
-	ledgerFn   func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error)
-	sequenceFn func(ctx context.Context, rpcURL, address string) (int64, error)
+	simulateFn     func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error)
+	sendFn         func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error)
+	getTxFn        func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error)
+	ledgerFn       func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error)
+	sequenceFn     func(ctx context.Context, rpcURL, address string) (int64, error)
+	latestLedgerFn func(ctx context.Context, rpcURL string) (int64, error)
 }
 
 func (f *fakeSorobanRPC) SimulateTransaction(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
@@ -42,6 +43,9 @@ func (f *fakeSorobanRPC) GetLedgerEntries(ctx context.Context, rpcURL string, ke
 }
 func (f *fakeSorobanRPC) GetAccountLedgerSequence(ctx context.Context, rpcURL, address string) (int64, error) {
 	return f.sequenceFn(ctx, rpcURL, address)
+}
+func (f *fakeSorobanRPC) GetLatestLedger(ctx context.Context, rpcURL string) (int64, error) {
+	return f.latestLedgerFn(ctx, rpcURL)
 }
 
 func testContractAddress(t *testing.T) string {

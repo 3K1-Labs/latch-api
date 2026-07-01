@@ -11,4 +11,11 @@ type ErrorCode string
 const (
 	// ErrInternal is for unexpected server-side failures (HTTP 500).
 	ErrInternal ErrorCode = "internal_error"
+	// ErrNoContextRule is returned by proposal creation when the caller
+	// requires a matched on-chain context rule and none was found.
+	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"
+	// ErrProposalRefreshed is returned when a proposal's auth was
+	// automatically rebuilt because it was near expiry — the client must
+	// collect fresh approvals before retrying.
+	ErrProposalRefreshed ErrorCode = "PROPOSAL_REFRESHED"
 )

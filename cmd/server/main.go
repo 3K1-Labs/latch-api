@@ -111,14 +111,17 @@ func main() {
 	// completeness.
 	var webappSmartAccountSvc *webapp.SmartAccountService
 	var webappTransactionSvc *webapp.TransactionService
+	var webappMultisigDraftSvc *webapp.MultisigDraftService
+	var webappMultisigAccountsSvc *webapp.MultisigAccountsService
+	var webappMultisigProposalSvc *webapp.MultisigProposalService
 	switch {
 	case cfg.WebAppBundlerSecret == "":
-		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account/transaction routes disabled")
+		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
 	case cfg.WebAppFactoryAddress == "":
-		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account/transaction routes disabled")
+		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
 	default:
 		if bundlerSvc, err := webapp.NewBundlerService(cfg.WebAppBundlerSecret, cfg.WebAppLegacyDelegatedSignerSecret); err != nil {
-			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account/transaction routes disabled", "err", err)
+			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account/transaction/multisig routes disabled", "err", err)
 		} else {
 			webappSmartAccountSvc = webapp.NewSmartAccountService(
 				sorobanSvc, bundlerSvc, queries,
@@ -126,6 +129,12 @@ func main() {
 			)
 			webappTransactionSvc = webapp.NewTransactionService(
 				sorobanSvc, bundlerSvc, webappContextRulesSvc,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
+			)
+			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
+			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)
+			webappMultisigProposalSvc = webapp.NewMultisigProposalService(
+				sorobanSvc, bundlerSvc, webappContextRulesSvc, webappBalancesSvc, webappTransactionSvc, queries,
 				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
 			)
 		}
@@ -321,6 +330,67 @@ func main() {
 		{
 			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)
 			transactionGroup.POST("/submit-webauthn", webappTransactionHandler.SubmitWebAuthn)
+		}
+	}
+
+	// Multisig (Safe-style multi-signer smart accounts): drafts (pre-deployment
+	// member collection), deployed accounts, invite-token join flow, and
+	// proposal build/approve/execute. Gated on the same bundler/factory config
+	// as webauthn/smart-account/transaction above, since deploying a multisig
+	// account and building/executing its proposals both need the bundler.
+	if webappMultisigDraftSvc != nil {
+		webappMultisigAccountsHandler := webapphandler.NewMultisigAccountsHandler(webappMultisigAccountsSvc)
+		webappMultisigDraftsHandler := webapphandler.NewMultisigDraftsHandler(webappMultisigDraftSvc)
+		webappMultisigDraftWebAuthnHandler := webapphandler.NewMultisigDraftWebAuthnHandler(webappMultisigDraftSvc, webappWebauthnSvc, cfg)
+		webappMultisigJoinHandler := webapphandler.NewMultisigJoinHandler(webappMultisigDraftSvc, webappWebauthnSvc, cfg)
+		webappMultisigProposalsHandler := webapphandler.NewMultisigProposalsHandler(webappMultisigProposalSvc, cfg)
+
+		multisigGroup := webappGroup.Group("/multisig")
+
+		multisigAccountsGroup := multisigGroup.Group("/accounts")
+		{
+			multisigAccountsGroup.GET("", webappMultisigAccountsHandler.List)
+			multisigAccountsGroup.POST("/draft", webappMultisigAccountsHandler.Draft)
+			multisigAccountsGroup.POST("/deploy", webappMultisigAccountsHandler.Deploy)
+			multisigAccountsGroup.POST("/register", webappMultisigAccountsHandler.Register)
+		}
+
+		multisigDraftsGroup := multisigGroup.Group("/drafts")
+		{
+			multisigDraftsGroup.POST("", webappMultisigDraftsHandler.Create)
+			multisigDraftsGroup.GET("", webappMultisigDraftsHandler.GetActive)
+			multisigDraftsGroup.GET("/:id", webappMultisigDraftsHandler.Get)
+			multisigDraftsGroup.PATCH("/:id", webappMultisigDraftsHandler.UpdateThreshold)
+			multisigDraftsGroup.POST("/:id/predict", webappMultisigDraftsHandler.Predict)
+			multisigDraftsGroup.POST("/:id/deploy", webappMultisigDraftsHandler.Deploy)
+			multisigDraftsGroup.POST("/:id/members", webappMultisigDraftsHandler.AddMember)
+			multisigDraftsGroup.DELETE("/:id/members/:memberId", webappMultisigDraftsHandler.DeleteMember)
+			multisigDraftsGroup.POST("/:id/webauthn/register/begin", webappMultisigDraftWebAuthnHandler.RegistrationBegin)
+			multisigDraftsGroup.POST("/:id/webauthn/register/finish", webappMultisigDraftWebAuthnHandler.RegistrationFinish)
+			multisigDraftsGroup.POST("/:id/webauthn/authenticate/begin", webappMultisigDraftWebAuthnHandler.AuthenticationBegin)
+			multisigDraftsGroup.POST("/:id/webauthn/authenticate/finish", webappMultisigDraftWebAuthnHandler.AuthenticationFinish)
+		}
+
+		multisigJoinGroup := multisigGroup.Group("/join")
+		{
+			multisigJoinGroup.GET("/:token", webappMultisigJoinHandler.GetByToken)
+			multisigJoinGroup.POST("/:token/members", webappMultisigJoinHandler.AddMember)
+			multisigJoinGroup.POST("/:token/webauthn/register/begin", webappMultisigJoinHandler.RegistrationBegin)
+			multisigJoinGroup.POST("/:token/webauthn/register/finish", webappMultisigJoinHandler.RegistrationFinish)
+			multisigJoinGroup.POST("/:token/webauthn/authenticate/begin", webappMultisigJoinHandler.AuthenticationBegin)
+			multisigJoinGroup.POST("/:token/webauthn/authenticate/finish", webappMultisigJoinHandler.AuthenticationFinish)
+		}
+
+		multisigProposalsGroup := multisigGroup.Group("/proposals")
+		{
+			multisigProposalsGroup.POST("", webappMultisigProposalsHandler.Create)
+			multisigProposalsGroup.GET("", webappMultisigProposalsHandler.List)
+			multisigProposalsGroup.GET("/:id", webappMultisigProposalsHandler.Get)
+			multisigProposalsGroup.POST("/:id/refresh", webappMultisigProposalsHandler.Refresh)
+			multisigProposalsGroup.POST("/:id/execute", webappMultisigProposalsHandler.Execute)
+			multisigProposalsGroup.POST("/:id/approve/webauthn", webappMultisigProposalsHandler.ApproveWebauthn)
+			multisigProposalsGroup.POST("/:id/approve/delegated/begin", webappMultisigProposalsHandler.ApproveDelegatedBegin)
+			multisigProposalsGroup.POST("/:id/approve/delegated/finish", webappMultisigProposalsHandler.ApproveDelegatedFinish)
 		}
 	}
 

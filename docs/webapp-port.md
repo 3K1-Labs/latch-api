@@ -71,55 +71,120 @@ new packages at 100% test coverage; full existing test suite (`-race`), `golangc
 
 ---
 
-## Phase 2 — WebAuthn ceremony + smart account factory/deploy (not started)
+## Phase 2 — WebAuthn ceremony + smart account factory/deploy — ✅ DONE
 
-`/api/webauthn/*`, `/api/smart-account/{webauthn,freighter,factory}`, `/api/accounts*`. Ports
-`lib/webauthn-server.ts` (RP/origin resolution, multi-candidate RPID for the chrome-extension
-quirk, COSE→raw-P256 conversion), `lib/smart-account-factory-{webauthn,multisig}.ts`,
-`lib/bundler-config.ts`.
+**Scope shipped:** `POST /api/webauthn/registration/{begin,finish}`,
+`POST /api/webauthn/authentication/{begin,finish}`, `GET /api/webauthn/credentials`,
+`GET /api/smart-account/webauthn` (predict), `POST /api/smart-account/webauthn` (deploy),
+`GET /api/accounts`, `POST /api/accounts/set-active`. `/smart-account/{freighter,factory}`
+(legacy Ed25519/delegated factories) were out of scope — only the webauthn factory path was
+needed for this phase.
 
-**Tests:** RP/origin resolution table-driven cases, COSE fixture test, full registration
-round-trip integration test, golden-file contract test against the live Next.js app's exact
-response shape.
+**Key decision — no `go-webauthn/webauthn` dependency:** researched whether the library's
+low-level `protocol` functions could support the extension's multi-candidate RPID requirement
+(confirmed: yes, `Verify()` accepts RPID as a parameter, so a loop over candidates works).
+Decided against adopting it anyway: the ceremony's attestation format is always `"none"` (no
+attestation statement crypto to verify — the library's main value-add), it would still require
+the same manual multi-candidate loop, and this repo already has a proven hand-rolled P-256
+ECDSA verification implementation (`internal/service/webauthn_signin.go`, mobile passkey
+sign-in) to extend the same pattern from. Added `github.com/fxamacker/cbor/v2` instead — a
+minimal, widely-used CBOR codec (also a `go-webauthn` dependency internally) needed to decode
+COSE keys and `attestationObject`/`authenticatorData` — this is a codec, not a crypto-primitive
+replacement, so it doesn't conflict with the "no third-party crypto" rule.
+
+**RP/origin resolution** (`internal/service/webapp/webauthn_rpid.go`) ports
+`resolveWebauthnCeremonyContext`/`resolveWebauthnFinishVerification`/
+`getExpectedRpidsForVerification` from `lib/webauthn-server.ts`: multi-source chrome-extension
+ID precedence (JSON body → header → Origin → Referer) with conflict detection, dev-mode LAN
+override, and — critically — the finish-side resolution must happen *inside* the service (not
+the handler) because it needs the stored challenge's rpID/origin for the non-extension case;
+this also fixed a discovered discrepancy versus an earlier draft where the challenge was being
+deleted before verification even ran — now it's only consumed after successful verification
+(mirrors the TS source, and means a failed attempt doesn't burn the challenge).
+
+**Soroban factory calls** (`internal/service/webapp/{smartaccount_service,soroban_scval}.go`)
+hand-build the exact `AccountSignerInit::External(ExternalSignerInit)` ScVal the factory
+contract expects (ported field-for-field from `buildWebauthnAccountInitParams` in
+`lib/smart-account-factory-webauthn.ts`, including exact ScMap key ordering), reusing the
+existing `internal/service/soroban.go` JSON-RPC client rather than a new Stellar SDK dependency.
+One existing shared type gained an additive field: `service.GetTxResult.ResultMetaXdr` (needed
+to extract a deployed contract's return value from `getTransaction`'s response) — the mobile
+relay handler that already uses `GetTxResult` is unaffected since it never reads that field.
+
+**Files:** `internal/service/webapp/{bundler_service,webauthn_rpid,webauthn_service,
+smartaccount_service,soroban_scval,accounts_service}.go`,
+`internal/handler/webapp/{webauthn,smartaccount,accounts,services}.go`,
+`internal/db/queries/webapp_{webauthn,smart_accounts}.sql`, additive fields in
+`internal/config/config.go` (bundler secret, factory address, network passphrase, WebAuthn
+RP/origin/dev-LAN config) and `cmd/server/main.go` (routes are only mounted if
+`BUNDLER_SECRET`/`NEXT_PUBLIC_FACTORY_ADDRESS` are configured and the secret parses as a valid
+Stellar keypair — otherwise this whole route group is skipped with a `slog.Warn`, same pattern
+as Phase 1's config-completeness rule).
+
+**Verified:** full test suite (`-race`) passes with zero regressions; new/changed packages at
+86–100% coverage; `golangci-lint`, `gofmt`, `go vet` all clean.
 
 ---
 
-## Phase 3 — Transaction build/submit + context rules + setup-rules (not started)
+## Phase 3 — Transaction build/submit + context rules + setup-rules — ✅ DONE (pass A)
 
-`/api/transaction/{build,build-send,build-swap,build-delegated,build-sign-demo,prepare-sign,
-submit,submit-webauthn,submit-delegated}`, `/api/smart-account/{balances,context-rules,
-setup-send-rules,setup-swap-rules}`.
+Implemented: `POST /api/transaction/build-send`, `POST /api/transaction/submit-webauthn`,
+`GET /api/smart-account/context-rules`, `GET /api/smart-account/balances`. Ports
+`lib/soroban-transaction-{build,submit}.ts`'s core path (`BuildAuthTransactionResult` field
+names preserved exactly), `lib/soroban-context-rules.ts`, `lib/stellar-assets.ts`,
+`lib/bundler-delegated-auth.ts`, `lib/delegated-native-auth-entry.ts`. Context-rules/balances
+routes are always mounted (pure reads, no bundler needed); build-send/submit-webauthn are
+bundler-gated like Phase 2.
 
-Ports `lib/soroban-transaction-{build,submit}.ts` — preserve every
-`BuildAuthTransactionResult` field name exactly, this is the guide's highest-value,
-highest-traffic function — plus `lib/soroban-context-rules.ts`, `lib/soroban-setup-signers.ts`,
-`lib/bundler-delegated-auth.ts`. Reuses/extends `internal/service/soroban.go`'s existing RPC
-plumbing rather than duplicating it.
+Mounted on a *second* Gin route group also rooted at `/api/transaction` — verified this and the
+mobile `simulate`/`relay` group route independently with zero collision (Gin routes by exact
+path+method).
 
-Mount on a *second* Gin route group also rooted at `/api/transaction` (not the mobile one) —
-sub-paths (`build*`, `submit*`) don't collide with mobile's `simulate`/`relay`, but verify this
-routes correctly as the first integration test of this phase.
+**Deferred to a later pass ("Pass B", not yet scheduled):** `build` (counter demo),
+`build-swap`, `build-delegated`, `submit-delegated`, `prepare-sign`, `setup-send-rules`,
+`setup-swap-rules`, `build-sign-demo` (dev-only).
 
-**Tests:** XDR-fixture unit tests for multi-auth-entry synthesis (passkey-send, passkey-swap,
-Freighter-delegated), `NO_CONTEXT_RULE`/`SIGNER_MISMATCH` cases, golden-file contract tests, one
-live-testnet integration test gated behind a build tag.
+**Verified:** full test suite (`-race`) passes with zero regressions; new packages/files at
+85–100% coverage; `golangci-lint`, `gofmt`, `go vet` all clean.
 
 ---
 
-## Phase 4 — Multisig: drafts/join/proposals/approvals (not started)
+## Phase 4 — Multisig: drafts/join/proposals/approvals — ✅ DONE (pass A)
 
-The largest domain (~30 handlers): `/api/multisig/{accounts,drafts,join/{token},proposals}*`.
-New tables: `multisig_accounts`, `multisig_members`, `multisig_proposals`, `multisig_approvals`
-(`UNIQUE(proposal_id, member_id)`), `multisig_drafts`, `multisig_draft_members`.
+Implemented the full core flow (~29 handlers): `/api/multisig/accounts{,/draft,/deploy,/register}`,
+`/api/multisig/drafts` (create/get-active/get/patch-threshold/predict/deploy/members),
+`/api/multisig/drafts/:id/webauthn/{register,authenticate}/{begin,finish}`,
+`/api/multisig/join/:token` (get/add-member/webauthn ceremony), and
+`/api/multisig/proposals` (create/list/get/refresh/execute/approve-webauthn/
+approve-delegated-{begin,finish}).
 
-Ports `lib/multisig*.ts`, `lib/delegated-{check,native}-auth-entry.ts`. Per-route auth mode
-varies (`session`, `session+creator`, `session+ownership`, `invite_token`) — applied inline per
-handler, not as one group-wide middleware. Member-replace operations wrapped in explicit Go
-transactions (an improvement over the TS delete+insert pattern).
+New tables (migrations 000015–000016): `multisig_accounts`, `multisig_members`,
+`multisig_proposals`, `multisig_approvals` (`UNIQUE(proposal_id, member_id)`), `multisig_drafts`,
+`multisig_draft_members` — UUID PKs, BIGINT-millis timestamps, matching the Phase 1 schema
+convention.
 
-**Tests:** draft lifecycle state-machine tests, approval-upsert idempotency, below-threshold
-execute rejection, DB integration test for the full draft→deploy→proposal→approve→execute
-path, golden fixtures for the `SerializedDraft` and proposal response shapes.
+Ports `lib/multisig*.ts`, `lib/delegated-check-auth-entry.ts` (distinct from Phase 3's
+bundler-owned delegated auth — this is the per-member 2-step off-chain-signature flow),
+`lib/multisig-execute-auth.ts`, `lib/smart-account-factory-multisig.ts`. Reused rather than
+duplicated: `SmartAccountService.PredictAddress/Deploy` (already generic over an
+`AccountInitParams` ScVal), `WebAuthnService`'s ceremony methods (multisig draft/join members
+enroll the same first-class credential a personal wallet would, no purpose-scoping needed since
+`getActiveChallenge` already keys on `userID+purpose` and ceremonies run sequentially per user),
+and a new `TransactionService.SubmitAuthEntries` forwarding method added so
+`MultisigProposalService.ExecuteProposal` reuses the existing enforcing-mode
+simulate/sign/submit/poll pipeline instead of reimplementing it. Member-replace operations
+(register, draft-deploy) wrapped in explicit Go transactions (an improvement over the TS
+delete+insert pattern).
+
+**Deferred to a later pass ("Pass B", not yet scheduled):** none of the core flow was skipped;
+what's absent is UI-adjacent/display-only surface not required by any request/response
+contract observed in the TS source (e.g. `lib/multisig-proposal-display.ts`'s title-formatting
+helper) and the multisig-context-rule *setup* endpoints, which are Phase 3's Pass B scope
+(`setup-send-rules`/`setup-swap-rules`), not Phase 4's.
+
+**Verified:** full test suite (`-race`) passes with zero regressions; new service-layer files at
+81% coverage, new handler files at 82% coverage; `golangci-lint`, `gofmt`, `go vet` all clean.
+Migrations verified up *and* down against the dev database.
 
 ---
 

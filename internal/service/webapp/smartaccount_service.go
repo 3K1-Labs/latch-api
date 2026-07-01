@@ -38,6 +38,7 @@ type sorobanRPC interface {
 	GetTransaction(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error)
 	GetLedgerEntries(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error)
 	GetAccountLedgerSequence(ctx context.Context, rpcURL, address string) (int64, error)
+	GetLatestLedger(ctx context.Context, rpcURL string) (int64, error)
 }
 
 type SmartAccountService struct {
