@@ -35,6 +35,7 @@ import (
 	"github.com/latch/backend/internal/handler"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/store"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -92,6 +93,14 @@ func main() {
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
 
+	// Web app + Chrome extension backend (ported from a separate Next.js
+	// service). Uses the same Postgres pool/pool-derived queries as mobile,
+	// isolated via the `webapp` schema — see migrations/000014_webapp_schema_init.
+	// Phase 1 (foundation): session bootstrap + audit only. No business
+	// routes are mounted yet — this ships dark.
+	webappSessionSvc := webapp.NewSessionService(sqlDB, queries)
+	_ = webapp.NewAuditService(queries)
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
@@ -114,9 +123,15 @@ func main() {
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
+	// crossSiteWebAppCookies controls whether the webapp session cookie is
+	// issued with SameSite=None; Secure (required for the Chrome extension
+	// and any other cross-site caller) or SameSite=Lax (plain same-origin
+	// local development).
+	crossSiteWebAppCookies := isProd || len(cfg.WebAppWebAuthnExtensionIDs) > 0 || hasChromeExtensionOrigin(cfg.WebAppCORSAllowedOrigins)
+
 	// Router
 	r := gin.New()
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORSWithAllowlist(cfg.WebAppCORSAllowedOrigins))
 	r.Use(gin.Logger())
 	if isProd {
 		r.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
@@ -231,6 +246,13 @@ func main() {
 		api.POST("/relay", transactionHandler.Relay)
 	}
 
+	// Web app + Chrome extension session bootstrap. No business routes are
+	// mounted under this group yet (Phase 1 ships dark) — later phases mount
+	// their handlers on webappGroup as they land.
+	webappGroup := r.Group("/api")
+	webappGroup.Use(middleware.EnsureSession(webappSessionSvc, crossSiteWebAppCookies))
+	_ = webappGroup
+
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),
 		Handler:           r,
@@ -266,4 +288,16 @@ func timeoutMiddleware(d time.Duration) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// hasChromeExtensionOrigin reports whether any configured CORS origin is a
+// chrome-extension:// origin, used to decide whether the webapp session
+// cookie must be issued cross-site (SameSite=None; Secure).
+func hasChromeExtensionOrigin(origins []string) bool {
+	for _, o := range origins {
+		if strings.HasPrefix(o, "chrome-extension://") {
+			return true
+		}
+	}
+	return false
 }

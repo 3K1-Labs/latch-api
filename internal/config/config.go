@@ -48,6 +48,15 @@ type Config struct {
 	// from, and which WebAuthn origins (clientDataJSON.origin) are accepted.
 	WalletAuthSorobanURL   string
 	WebAuthnAllowedOrigins []string
+
+	// Web app + Chrome extension backend (ported from a separate Next.js
+	// service). WebAppWebAuthnExtensionIDs is distinct from
+	// WebAuthnAllowedOrigins above: that field verifies an already-created
+	// on-chain passkey signature for mobile wallet sign-in; this one gates
+	// which chrome-extension:// origins may complete the web app's own
+	// browser WebAuthn registration/authentication ceremony.
+	WebAppCORSAllowedOrigins   []string
+	WebAppWebAuthnExtensionIDs []string
 }
 
 func Load() (*Config, error) {
@@ -74,6 +83,9 @@ func Load() (*Config, error) {
 		CoinGeckoAPIKey:        getEnv("COINGECKO_API_KEY", ""),
 		WalletAuthSorobanURL:   getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
 		WebAuthnAllowedOrigins: splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "latch.finance")),
+
+		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
+		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),
 	}
 
 	var err error

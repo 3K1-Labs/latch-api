@@ -103,3 +103,70 @@ type WckBundle struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Uploader  string    `json:"uploader"`
 }
+
+type WebappAccountSigner struct {
+	ID                  uuid.UUID      `json:"id"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+	SignerType          string         `json:"signer_type"`
+	CredentialID        sql.NullString `json:"credential_id"`
+	Label               sql.NullString `json:"label"`
+	CreatedAt           int64          `json:"created_at"`
+}
+
+type WebappAuditLog struct {
+	ID        int64                 `json:"id"`
+	UserID    uuid.NullUUID         `json:"user_id"`
+	Action    string                `json:"action"`
+	IpAddress pqtype.Inet           `json:"ip_address"`
+	UserAgent sql.NullString        `json:"user_agent"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	CreatedAt time.Time             `json:"created_at"`
+}
+
+type WebappSession struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	CreatedAt int64     `json:"created_at"`
+	ExpiresAt int64     `json:"expires_at"`
+}
+
+type WebappSmartAccount struct {
+	ID                  uuid.UUID `json:"id"`
+	UserID              uuid.UUID `json:"user_id"`
+	CredentialID        string    `json:"credential_id"`
+	KeyDataHex          string    `json:"key_data_hex"`
+	SaltHex             string    `json:"salt_hex"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	Deployed            int32     `json:"deployed"`
+	CreatedAt           int64     `json:"created_at"`
+}
+
+type WebappUser struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt int64     `json:"created_at"`
+}
+
+type WebappWebauthnChallenge struct {
+	ID        uuid.UUID     `json:"id"`
+	UserID    uuid.NullUUID `json:"user_id"`
+	Purpose   string        `json:"purpose"`
+	Challenge string        `json:"challenge"`
+	RpID      string        `json:"rp_id"`
+	Origin    string        `json:"origin"`
+	ExpiresAt int64         `json:"expires_at"`
+	CreatedAt int64         `json:"created_at"`
+}
+
+type WebappWebauthnCredential struct {
+	ID                uuid.UUID      `json:"id"`
+	UserID            uuid.UUID      `json:"user_id"`
+	CredentialID      string         `json:"credential_id"`
+	CredentialIDBytes []byte         `json:"credential_id_bytes"`
+	CosePublicKey     []byte         `json:"cose_public_key"`
+	P256RawPublicKey  []byte         `json:"p256_raw_public_key"`
+	SignCount         int64          `json:"sign_count"`
+	Transports        sql.NullString `json:"transports"`
+	DeviceType        sql.NullString `json:"device_type"`
+	BackedUp          int32          `json:"backed_up"`
+	CreatedAt         int64          `json:"created_at"`
+}

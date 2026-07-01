@@ -39,6 +39,36 @@ func TestLoad_WithRequiredEnvVars(t *testing.T) {
 	assert.Equal(t, "9090", cfg.Port)
 }
 
+func TestLoad_WebAppCORSAndExtensionIDs(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	t.Setenv("API_CORS_ALLOWED_ORIGINS", "http://localhost:3000, chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef")
+	t.Setenv("WEBAUTHN_EXTENSION_IDS", "abcdefghijklmnopqrstuvwxyzabcdef")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"http://localhost:3000", "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef"}, cfg.WebAppCORSAllowedOrigins)
+	assert.Equal(t, []string{"abcdefghijklmnopqrstuvwxyzabcdef"}, cfg.WebAppWebAuthnExtensionIDs)
+}
+
+func TestLoad_WebAppCORSAndExtensionIDs_DefaultEmpty(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	os.Unsetenv("API_CORS_ALLOWED_ORIGINS")
+	os.Unsetenv("WEBAUTHN_EXTENSION_IDS")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.Empty(t, cfg.WebAppCORSAllowedOrigins)
+	assert.Empty(t, cfg.WebAppWebAuthnExtensionIDs)
+}
+
 func TestLoad_DefaultPort(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")

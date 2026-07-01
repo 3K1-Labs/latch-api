@@ -23,12 +23,16 @@ type Querier interface {
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetWCKBundle(ctx context.Context, pickupKey string) (WckBundle, error)
+	GetWebappSession(ctx context.Context, id uuid.UUID) (WebappSession, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
 	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
 	InsertPushTokenRegistration(ctx context.Context, arg InsertPushTokenRegistrationParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
 	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
+	InsertWebappAuditLog(ctx context.Context, arg InsertWebappAuditLogParams) error
+	InsertWebappSession(ctx context.Context, arg InsertWebappSessionParams) error
+	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
@@ -36,6 +40,7 @@ type Querier interface {
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)

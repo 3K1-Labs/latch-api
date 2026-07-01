@@ -16,6 +16,7 @@ sql:
       - "migrations/000011_wck_bundles_push_tokens.up.sql"
       - "migrations/000012_wck_bundle_uploader.up.sql"
       - "migrations/000013_wallet_memberships.up.sql"
+      - "migrations/000014_webapp_schema_init.up.sql"
     gen:
       go:
         package: "db"
