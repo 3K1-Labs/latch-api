@@ -25,3 +25,12 @@ func newMockAuditService(t *testing.T) (*AuditService, sqlmock.Sqlmock) {
 	q := db.New(sqlDB)
 	return NewAuditService(q), mock
 }
+
+func newMockWebAuthnService(t *testing.T) (*WebAuthnService, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	q := db.New(sqlDB)
+	return NewWebAuthnService(q), mock
+}

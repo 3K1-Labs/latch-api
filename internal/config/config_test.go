@@ -69,6 +69,73 @@ func TestLoad_WebAppCORSAndExtensionIDs_DefaultEmpty(t *testing.T) {
 	assert.Empty(t, cfg.WebAppWebAuthnExtensionIDs)
 }
 
+func TestLoad_WebAppPhase2Fields(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	t.Setenv("BUNDLER_SECRET", "SSOMESECRETSEED")
+	t.Setenv("LEGACY_DELEGATED_SIGNER_SECRET", "SLEGACYSECRET")
+	t.Setenv("NEXT_PUBLIC_FACTORY_ADDRESS", "CFACTORYADDRESS")
+	t.Setenv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", "CVERIFIERADDRESS")
+	t.Setenv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Public Global Stellar Network ; September 2015")
+	t.Setenv("WEBAUTHN_RP_ID", "localhost")
+	t.Setenv("WEBAUTHN_ORIGIN", "http://localhost:3000")
+	t.Setenv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "1")
+	t.Setenv("ALLOWED_DEV_ORIGINS", "http://192.168.1.5:3000")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "SSOMESECRETSEED", cfg.WebAppBundlerSecret)
+	assert.Equal(t, "SLEGACYSECRET", cfg.WebAppLegacyDelegatedSignerSecret)
+	assert.Equal(t, "CFACTORYADDRESS", cfg.WebAppFactoryAddress)
+	assert.Equal(t, "CVERIFIERADDRESS", cfg.WebAppWebAuthnVerifierAddress)
+	assert.Equal(t, "Public Global Stellar Network ; September 2015", cfg.WebAppNetworkPassphrase)
+	assert.Equal(t, "localhost", cfg.WebAppWebAuthnRPID)
+	assert.Equal(t, "http://localhost:3000", cfg.WebAppWebAuthnOrigin)
+	assert.True(t, cfg.WebAppWebAuthnDevTrustReqHost)
+	assert.Equal(t, []string{"http://192.168.1.5:3000"}, cfg.WebAppAllowedDevOrigins)
+}
+
+func TestLoad_WebAppPhase2Fields_LegacyBundlerSecretFallback(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	os.Unsetenv("LEGACY_DELEGATED_SIGNER_SECRET")
+	t.Setenv("LEGACY_BUNDLER_SECRET", "SFALLBACKSECRET")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "SFALLBACKSECRET", cfg.WebAppLegacyDelegatedSignerSecret)
+}
+
+func TestLoad_WebAppPhase2Fields_DefaultEmpty(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	os.Unsetenv("BUNDLER_SECRET")
+	os.Unsetenv("LEGACY_DELEGATED_SIGNER_SECRET")
+	os.Unsetenv("LEGACY_BUNDLER_SECRET")
+	os.Unsetenv("NEXT_PUBLIC_FACTORY_ADDRESS")
+	os.Unsetenv("WEBAUTHN_RP_ID")
+	os.Unsetenv("WEBAUTHN_ORIGIN")
+	os.Unsetenv("WEBAUTHN_DEV_TRUST_REQUEST_HOST")
+	os.Unsetenv("ALLOWED_DEV_ORIGINS")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.WebAppBundlerSecret)
+	assert.Empty(t, cfg.WebAppLegacyDelegatedSignerSecret)
+	assert.Empty(t, cfg.WebAppFactoryAddress)
+	assert.Equal(t, "Test SDF Network ; September 2015", cfg.WebAppNetworkPassphrase)
+	assert.Empty(t, cfg.WebAppWebAuthnRPID)
+	assert.False(t, cfg.WebAppWebAuthnDevTrustReqHost)
+	assert.Empty(t, cfg.WebAppAllowedDevOrigins)
+}
+
 func TestLoad_DefaultPort(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")

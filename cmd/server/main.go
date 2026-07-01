@@ -33,6 +33,7 @@ import (
 	"github.com/latch/backend/internal/config"
 	db "github.com/latch/backend/internal/db/generated"
 	"github.com/latch/backend/internal/handler"
+	webapphandler "github.com/latch/backend/internal/handler/webapp"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
@@ -96,10 +97,31 @@ func main() {
 	// Web app + Chrome extension backend (ported from a separate Next.js
 	// service). Uses the same Postgres pool/pool-derived queries as mobile,
 	// isolated via the `webapp` schema — see migrations/000014_webapp_schema_init.
-	// Phase 1 (foundation): session bootstrap + audit only. No business
-	// routes are mounted yet — this ships dark.
 	webappSessionSvc := webapp.NewSessionService(sqlDB, queries)
-	_ = webapp.NewAuditService(queries)
+	webappAuditSvc := webapp.NewAuditService(queries)
+	webappWebauthnSvc := webapp.NewWebAuthnService(queries)
+	webappAccountsSvc := webapp.NewAccountsService(queries)
+
+	// Smart-account operations need a valid bundler keypair and factory
+	// address. Missing/invalid config disables only this route group (logged
+	// below) rather than crashing the server — mobile traffic must keep
+	// flowing regardless of webapp config completeness.
+	var webappSmartAccountSvc *webapp.SmartAccountService
+	switch {
+	case cfg.WebAppBundlerSecret == "":
+		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account routes disabled")
+	case cfg.WebAppFactoryAddress == "":
+		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account routes disabled")
+	default:
+		if bundlerSvc, err := webapp.NewBundlerService(cfg.WebAppBundlerSecret, cfg.WebAppLegacyDelegatedSignerSecret); err != nil {
+			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account routes disabled", "err", err)
+		} else {
+			webappSmartAccountSvc = webapp.NewSmartAccountService(
+				sorobanSvc, bundlerSvc, queries,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress,
+			)
+		}
+	}
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
@@ -246,12 +268,35 @@ func main() {
 		api.POST("/relay", transactionHandler.Relay)
 	}
 
-	// Web app + Chrome extension session bootstrap. No business routes are
-	// mounted under this group yet (Phase 1 ships dark) — later phases mount
-	// their handlers on webappGroup as they land.
+	// Web app + Chrome extension routes.
 	webappGroup := r.Group("/api")
 	webappGroup.Use(middleware.EnsureSession(webappSessionSvc, crossSiteWebAppCookies))
-	_ = webappGroup
+
+	webappAccountsHandler := webapphandler.NewAccountsHandler(webappAccountsSvc, crossSiteWebAppCookies)
+	accountsGroup := webappGroup.Group("/accounts")
+	{
+		accountsGroup.GET("", webappAccountsHandler.List)
+		accountsGroup.POST("/set-active", webappAccountsHandler.SetActive)
+	}
+
+	if webappSmartAccountSvc != nil {
+		webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAuditSvc, cfg)
+		webauthnGroup := webappGroup.Group("/webauthn")
+		{
+			webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
+			webauthnGroup.POST("/registration/finish", webappWebauthnHandler.RegistrationFinish)
+			webauthnGroup.POST("/authentication/begin", webappWebauthnHandler.AuthenticationBegin)
+			webauthnGroup.POST("/authentication/finish", webappWebauthnHandler.AuthenticationFinish)
+			webauthnGroup.GET("/credentials", webappWebauthnHandler.Credentials)
+		}
+
+		webappSmartAccountHandler := webapphandler.NewSmartAccountHandler(webappSmartAccountSvc)
+		smartAccountGroup := webappGroup.Group("/smart-account")
+		{
+			smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
+			smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),

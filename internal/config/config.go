@@ -57,6 +57,25 @@ type Config struct {
 	// browser WebAuthn registration/authentication ceremony.
 	WebAppCORSAllowedOrigins   []string
 	WebAppWebAuthnExtensionIDs []string
+
+	// BUNDLER_SECRET pays Soroban transaction fees on behalf of webapp/extension
+	// users and signs bundler-side transactions. Missing or invalid must disable
+	// the dependent route groups (logged at startup), not crash the server —
+	// mobile traffic must keep flowing regardless of webapp config completeness.
+	WebAppBundlerSecret               string
+	WebAppLegacyDelegatedSignerSecret string
+
+	WebAppFactoryAddress          string
+	WebAppWebAuthnVerifierAddress string
+	WebAppNetworkPassphrase       string
+
+	// Browser WebAuthn (passkey) ceremony config — distinct from
+	// WebAuthnAllowedOrigins/WalletAuthSorobanURL above, which serve mobile's
+	// passkey wallet-sign-in signature verification, a different flow.
+	WebAppWebAuthnRPID            string
+	WebAppWebAuthnOrigin          string
+	WebAppWebAuthnDevTrustReqHost bool
+	WebAppAllowedDevOrigins       []string
 }
 
 func Load() (*Config, error) {
@@ -86,6 +105,18 @@ func Load() (*Config, error) {
 
 		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
 		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),
+
+		WebAppBundlerSecret:               getEnv("BUNDLER_SECRET", ""),
+		WebAppLegacyDelegatedSignerSecret: getEnv("LEGACY_DELEGATED_SIGNER_SECRET", getEnv("LEGACY_BUNDLER_SECRET", "")),
+
+		WebAppFactoryAddress:          getEnv("NEXT_PUBLIC_FACTORY_ADDRESS", ""),
+		WebAppWebAuthnVerifierAddress: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", ""),
+		WebAppNetworkPassphrase:       getEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"),
+
+		WebAppWebAuthnRPID:            getEnv("WEBAUTHN_RP_ID", ""),
+		WebAppWebAuthnOrigin:          getEnv("WEBAUTHN_ORIGIN", ""),
+		WebAppWebAuthnDevTrustReqHost: getEnv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "") != "",
+		WebAppAllowedDevOrigins:       splitCSV(getEnv("ALLOWED_DEV_ORIGINS", "")),
 	}
 
 	var err error

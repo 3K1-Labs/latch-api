@@ -15,15 +15,20 @@ type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
+	DeleteWebauthnChallenge(ctx context.Context, id uuid.UUID) error
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
 	GetCosignRequest(ctx context.Context, id uuid.UUID) (CosignRequest, error)
+	GetLatestWebauthnChallenge(ctx context.Context, arg GetLatestWebauthnChallengeParams) (WebappWebauthnChallenge, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
+	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
+	GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetWCKBundle(ctx context.Context, pickupKey string) (WckBundle, error)
 	GetWebappSession(ctx context.Context, id uuid.UUID) (WebappSession, error)
+	GetWebauthnCredentialByCredentialID(ctx context.Context, credentialID string) (WebappWebauthnCredential, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
 	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
@@ -33,23 +38,30 @@ type Querier interface {
 	InsertWebappAuditLog(ctx context.Context, arg InsertWebappAuditLogParams) error
 	InsertWebappSession(ctx context.Context, arg InsertWebappSessionParams) error
 	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
+	InsertWebauthnChallenge(ctx context.Context, arg InsertWebauthnChallengeParams) error
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
+	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
+	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
+	UpdateWebauthnCredentialSignCount(ctx context.Context, arg UpdateWebauthnCredentialSignCountParams) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)
+	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
 	// The conflict update is guarded by uploader: only the original uploader (or a
 	// legacy '' row) can replace a bundle. A mismatched uploader yields no row,
 	// which the service maps to a conflict error.
 	UpsertWCKBundle(ctx context.Context, arg UpsertWCKBundleParams) (WckBundle, error)
 	UpsertWalletMembership(ctx context.Context, arg UpsertWalletMembershipParams) error
+	UpsertWebauthnCredential(ctx context.Context, arg UpsertWebauthnCredentialParams) (uuid.UUID, error)
 	VerifyUserEmail(ctx context.Context, email string) (uuid.UUID, error)
 }
 
