@@ -15,6 +15,7 @@ import (
 type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
+	ConsumeSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	// Retention / garbage collection. Background sweeps that bound table growth.
 	// The cosign queue is high-churn (every multisig tx creates a request with a
 	// ~23h TTL); without this it grows unbounded. wck_bundles and wallet_memberships
@@ -23,39 +24,94 @@ type Querier interface {
 	// so one cutoff reaps expired-pending, submitted, and cancelled rows alike.
 	// cosign_signatures rows are removed by ON DELETE CASCADE.
 	DeleteExpiredCosignRequests(ctx context.Context, before time.Time) (int64, error)
+	DeleteMultisigApprovalsForProposal(ctx context.Context, proposalID uuid.UUID) error
+	DeleteMultisigDraftMember(ctx context.Context, arg DeleteMultisigDraftMemberParams) error
+	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
 	DeleteStaleWCKBundles(ctx context.Context, before time.Time) (int64, error)
 	DeleteStaleWalletMemberships(ctx context.Context, before time.Time) (int64, error)
+	DeleteWebauthnChallenge(ctx context.Context, id uuid.UUID) error
+	GetAccountSignerIntent(ctx context.Context, arg GetAccountSignerIntentParams) (WebappAccountSigner, error)
+	GetActiveMultisigDraftForUser(ctx context.Context, creatorUserID uuid.UUID) (WebappMultisigDraft, error)
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
 	GetCosignRequest(ctx context.Context, id uuid.UUID) (CosignRequest, error)
+	GetLatestWebauthnChallenge(ctx context.Context, arg GetLatestWebauthnChallengeParams) (WebappWebauthnChallenge, error)
+	GetMultisigAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappMultisigAccount, error)
+	GetMultisigAccountByID(ctx context.Context, id uuid.UUID) (WebappMultisigAccount, error)
+	GetMultisigApprovalByProposalAndMember(ctx context.Context, arg GetMultisigApprovalByProposalAndMemberParams) (WebappMultisigApproval, error)
+	GetMultisigDraftByIDForCreator(ctx context.Context, arg GetMultisigDraftByIDForCreatorParams) (WebappMultisigDraft, error)
+	GetMultisigDraftByInviteToken(ctx context.Context, inviteToken string) (WebappMultisigDraft, error)
+	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error)
+	GetMultisigProposalByID(ctx context.Context, id uuid.UUID) (WebappMultisigProposal, error)
+	GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (WebappOnRampIntent, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
+	GetSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
+	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
+	GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetWCKBundle(ctx context.Context, pickupKey string) (WckBundle, error)
+	GetWebappSession(ctx context.Context, id uuid.UUID) (WebappSession, error)
+	GetWebauthnCredentialByCredentialID(ctx context.Context, credentialID string) (WebappWebauthnCredential, error)
+	InsertAccountSignerIntent(ctx context.Context, arg InsertAccountSignerIntentParams) (uuid.UUID, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
 	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
+	InsertMultisigDraft(ctx context.Context, arg InsertMultisigDraftParams) (uuid.UUID, error)
+	InsertMultisigDraftMember(ctx context.Context, arg InsertMultisigDraftMemberParams) (uuid.UUID, error)
+	InsertMultisigMember(ctx context.Context, arg InsertMultisigMemberParams) error
+	InsertMultisigProposal(ctx context.Context, arg InsertMultisigProposalParams) (uuid.UUID, error)
+	InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntentParams) (uuid.UUID, error)
 	InsertPushTokenRegistration(ctx context.Context, arg InsertPushTokenRegistrationParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InsertSignPayload(ctx context.Context, arg InsertSignPayloadParams) error
 	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
+	InsertWebappAuditLog(ctx context.Context, arg InsertWebappAuditLogParams) error
+	InsertWebappSession(ctx context.Context, arg InsertWebappSessionParams) error
+	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
+	InsertWebauthnChallenge(ctx context.Context, arg InsertWebauthnChallengeParams) error
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
+	ListMultisigAccountsWithProposalCountForUser(ctx context.Context, userID uuid.UUID) ([]ListMultisigAccountsWithProposalCountForUserRow, error)
+	ListMultisigApprovalsWithMemberForProposal(ctx context.Context, proposalID uuid.UUID) ([]ListMultisigApprovalsWithMemberForProposalRow, error)
+	ListMultisigDraftMembersForDraft(ctx context.Context, draftID uuid.UUID) ([]WebappMultisigDraftMember, error)
+	ListMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) ([]WebappMultisigMember, error)
+	ListMultisigProposalsWithApprovalCountForAccount(ctx context.Context, multisigAccountID uuid.UUID) ([]ListMultisigProposalsWithApprovalCountForAccountRow, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
+	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
+	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
+	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
+	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
+	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error
+	UpdateMultisigDraftDeployed(ctx context.Context, arg UpdateMultisigDraftDeployedParams) error
+	UpdateMultisigDraftPredictedAddress(ctx context.Context, arg UpdateMultisigDraftPredictedAddressParams) error
+	UpdateMultisigDraftThreshold(ctx context.Context, arg UpdateMultisigDraftThresholdParams) error
+	UpdateMultisigProposalExecuted(ctx context.Context, arg UpdateMultisigProposalExecutedParams) error
+	UpdateMultisigProposalRebuild(ctx context.Context, arg UpdateMultisigProposalRebuildParams) error
+	UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error)
+	UpdateWebauthnCredentialSignCount(ctx context.Context, arg UpdateWebauthnCredentialSignCountParams) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)
+	UpsertMultisigAccount(ctx context.Context, arg UpsertMultisigAccountParams) (uuid.UUID, error)
+	UpsertMultisigApprovalDelegatedBegin(ctx context.Context, arg UpsertMultisigApprovalDelegatedBeginParams) (uuid.UUID, error)
+	UpsertMultisigApprovalWebauthn(ctx context.Context, arg UpsertMultisigApprovalWebauthnParams) (uuid.UUID, error)
+	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
 	// The conflict update is guarded by uploader: only the original uploader (or a
 	// legacy '' row) can replace a bundle. A mismatched uploader yields no row,
 	// which the service maps to a conflict error.
 	UpsertWCKBundle(ctx context.Context, arg UpsertWCKBundleParams) (WckBundle, error)
 	UpsertWalletMembership(ctx context.Context, arg UpsertWalletMembershipParams) error
+	UpsertWebauthnCredential(ctx context.Context, arg UpsertWebauthnCredentialParams) (uuid.UUID, error)
 	VerifyUserEmail(ctx context.Context, email string) (uuid.UUID, error)
 }
 

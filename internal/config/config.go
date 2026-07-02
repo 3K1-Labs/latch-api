@@ -50,6 +50,55 @@ type Config struct {
 	WalletAuthSorobanURL   string
 	WebAuthnAllowedOrigins []string
 
+	// Web app + Chrome extension backend (ported from a separate Next.js
+	// service). WebAppWebAuthnExtensionIDs is distinct from
+	// WebAuthnAllowedOrigins above: that field verifies an already-created
+	// on-chain passkey signature for mobile wallet sign-in; this one gates
+	// which chrome-extension:// origins may complete the web app's own
+	// browser WebAuthn registration/authentication ceremony.
+	WebAppCORSAllowedOrigins   []string
+	WebAppWebAuthnExtensionIDs []string
+
+	// BUNDLER_SECRET pays Soroban transaction fees on behalf of webapp/extension
+	// users and signs bundler-side transactions. Missing or invalid must disable
+	// the dependent route groups (logged at startup), not crash the server —
+	// mobile traffic must keep flowing regardless of webapp config completeness.
+	WebAppBundlerSecret               string
+	WebAppLegacyDelegatedSignerSecret string
+
+	WebAppFactoryAddress          string
+	WebAppWebAuthnVerifierAddress string
+	WebAppNetworkPassphrase       string
+
+	// Browser WebAuthn (passkey) ceremony config — distinct from
+	// WebAuthnAllowedOrigins/WalletAuthSorobanURL above, which serve mobile's
+	// passkey wallet-sign-in signature verification, a different flow.
+	WebAppWebAuthnRPID            string
+	WebAppWebAuthnOrigin          string
+	WebAppWebAuthnDevTrustReqHost bool
+	WebAppAllowedDevOrigins       []string
+
+	// Asset catalog for balances/transfers. Native XLM reuses
+	// NativeSACIDTestnet/Mainnet above (same contract regardless of caller);
+	// USDC has no existing mobile equivalent, so it gets its own field.
+	WebAppUSDCSACAddressTestnet string
+	WebAppAssetAllowlistJSON    string
+
+	// Demo counter contract used by GET /api/counter and the multisig demo
+	// proposal flow (operationKind "counter_increment").
+	WebAppCounterContractAddress string
+
+	// MoonPay on-ramp — dev-only, /api/on-ramp/* returns 403 in production
+	// regardless of whether these are configured.
+	WebAppMoonPaySecretKey         string
+	WebAppMoonPayPublishableKey    string
+	WebAppMoonPayIntegrationMode   string // "auto" | "widget" | "platform"
+	WebAppMoonPayAPIBase           string
+	WebAppMoonPayWidgetBuyURL      string // override for the buy.moonpay.com base, mainly for tests
+	WebAppMoonPayPoolGAddress      string
+	WebAppMoonPayDefaultFiatAmount string
+	WebAppMoonPayDefaultFiatCode   string
+
 	// Retention / GC: a background sweep bounds growth of the multisig tables.
 	CleanupEnabled            bool
 	CleanupInterval           time.Duration // between sweeps
@@ -82,6 +131,35 @@ func Load() (*Config, error) {
 		CoinGeckoAPIKey:        getEnv("COINGECKO_API_KEY", ""),
 		WalletAuthSorobanURL:   getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
 		WebAuthnAllowedOrigins: splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "latch.finance")),
+
+		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
+		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),
+
+		WebAppBundlerSecret:               getEnv("BUNDLER_SECRET", ""),
+		WebAppLegacyDelegatedSignerSecret: getEnv("LEGACY_DELEGATED_SIGNER_SECRET", getEnv("LEGACY_BUNDLER_SECRET", "")),
+
+		WebAppFactoryAddress:          getEnv("NEXT_PUBLIC_FACTORY_ADDRESS", ""),
+		WebAppWebAuthnVerifierAddress: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", ""),
+		WebAppNetworkPassphrase:       getEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"),
+
+		WebAppWebAuthnRPID:            getEnv("WEBAUTHN_RP_ID", ""),
+		WebAppWebAuthnOrigin:          getEnv("WEBAUTHN_ORIGIN", ""),
+		WebAppWebAuthnDevTrustReqHost: getEnv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "") != "",
+		WebAppAllowedDevOrigins:       splitCSV(getEnv("ALLOWED_DEV_ORIGINS", "")),
+
+		WebAppUSDCSACAddressTestnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS", "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"),
+		WebAppAssetAllowlistJSON:    getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
+
+		WebAppCounterContractAddress: getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
+
+		WebAppMoonPaySecretKey:         getEnv("MOONPAY_SECRET_KEY", ""),
+		WebAppMoonPayPublishableKey:    getEnv("MOONPAY_PUBLISHABLE_KEY", ""),
+		WebAppMoonPayIntegrationMode:   getEnv("MOONPAY_INTEGRATION_MODE", "auto"),
+		WebAppMoonPayAPIBase:           getEnv("MOONPAY_API_BASE", "https://api.moonpay.com"),
+		WebAppMoonPayWidgetBuyURL:      getEnv("MOONPAY_WIDGET_BUY_URL", ""),
+		WebAppMoonPayPoolGAddress:      getEnv("MOONPAY_POOL_G_ADDRESS", ""),
+		WebAppMoonPayDefaultFiatAmount: getEnv("MOONPAY_DEFAULT_FIAT_AMOUNT", "25"),
+		WebAppMoonPayDefaultFiatCode:   getEnv("MOONPAY_DEFAULT_FIAT_CODE", "USD"),
 
 		CleanupEnabled:            getEnvBool("CLEANUP_ENABLED", true),
 		CleanupInterval:           time.Duration(getEnvInt("CLEANUP_INTERVAL_MIN", 60)) * time.Minute,

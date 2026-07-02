@@ -6,6 +6,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -102,4 +103,169 @@ type WckBundle struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Uploader  string    `json:"uploader"`
+}
+
+type WebappAccountSigner struct {
+	ID                  uuid.UUID      `json:"id"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+	SignerType          string         `json:"signer_type"`
+	CredentialID        sql.NullString `json:"credential_id"`
+	Label               sql.NullString `json:"label"`
+	CreatedAt           int64          `json:"created_at"`
+}
+
+type WebappAuditLog struct {
+	ID        int64                 `json:"id"`
+	UserID    uuid.NullUUID         `json:"user_id"`
+	Action    string                `json:"action"`
+	IpAddress pqtype.Inet           `json:"ip_address"`
+	UserAgent sql.NullString        `json:"user_agent"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	CreatedAt time.Time             `json:"created_at"`
+}
+
+type WebappMultisigAccount struct {
+	ID                  uuid.UUID `json:"id"`
+	UserID              uuid.UUID `json:"user_id"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	Threshold           int32     `json:"threshold"`
+	AccountSaltHex      string    `json:"account_salt_hex"`
+	CreatedAt           int64     `json:"created_at"`
+}
+
+type WebappMultisigApproval struct {
+	ID                             uuid.UUID      `json:"id"`
+	ProposalID                     uuid.UUID      `json:"proposal_id"`
+	MemberID                       uuid.UUID      `json:"member_id"`
+	ApprovalType                   string         `json:"approval_type"`
+	WebauthnSigDataXdrHex          sql.NullString `json:"webauthn_sig_data_xdr_hex"`
+	DelegatedEntryTemplateXdr      sql.NullString `json:"delegated_entry_template_xdr"`
+	DelegatedSignedAuthEntryBase64 sql.NullString `json:"delegated_signed_auth_entry_base64"`
+	DelegatedSignerAddress         sql.NullString `json:"delegated_signer_address"`
+	CreatedAt                      int64          `json:"created_at"`
+}
+
+type WebappMultisigDraft struct {
+	ID                  uuid.UUID      `json:"id"`
+	CreatorUserID       uuid.UUID      `json:"creator_user_id"`
+	Threshold           int32          `json:"threshold"`
+	AccountSaltHex      string         `json:"account_salt_hex"`
+	InviteToken         string         `json:"invite_token"`
+	Status              string         `json:"status"`
+	PredictedAddress    sql.NullString `json:"predicted_address"`
+	SmartAccountAddress sql.NullString `json:"smart_account_address"`
+	CreatedAt           int64          `json:"created_at"`
+	ExpiresAt           sql.NullInt64  `json:"expires_at"`
+}
+
+type WebappMultisigDraftMember struct {
+	ID           uuid.UUID      `json:"id"`
+	DraftID      uuid.UUID      `json:"draft_id"`
+	Label        string         `json:"label"`
+	MemberType   string         `json:"member_type"`
+	GAddress     sql.NullString `json:"g_address"`
+	KeyDataHex   sql.NullString `json:"key_data_hex"`
+	CredentialID sql.NullString `json:"credential_id"`
+	PublicKeyHex sql.NullString `json:"public_key_hex"`
+	Source       string         `json:"source"`
+	CreatedAt    int64          `json:"created_at"`
+}
+
+type WebappMultisigMember struct {
+	ID                uuid.UUID      `json:"id"`
+	MultisigAccountID uuid.UUID      `json:"multisig_account_id"`
+	MemberType        string         `json:"member_type"`
+	Label             sql.NullString `json:"label"`
+	KeyDataHex        sql.NullString `json:"key_data_hex"`
+	CredentialID      sql.NullString `json:"credential_id"`
+	GAddress          sql.NullString `json:"g_address"`
+	CreatedAt         int64          `json:"created_at"`
+}
+
+type WebappMultisigProposal struct {
+	ID                         uuid.UUID      `json:"id"`
+	MultisigAccountID          uuid.UUID      `json:"multisig_account_id"`
+	CreatedByUserID            uuid.UUID      `json:"created_by_user_id"`
+	TargetContractID           string         `json:"target_contract_id"`
+	OperationKind              string         `json:"operation_kind"`
+	OperationParamsJson        string         `json:"operation_params_json"`
+	TxXdr                      string         `json:"tx_xdr"`
+	AuthEntriesXdrJson         string         `json:"auth_entries_xdr_json"`
+	SmartAccountAuthEntryIndex int32          `json:"smart_account_auth_entry_index"`
+	ContextRuleID              int32          `json:"context_rule_id"`
+	AuthDigestHex              string         `json:"auth_digest_hex"`
+	SignaturePayloadHex        string         `json:"signature_payload_hex"`
+	ValidUntilLedger           int32          `json:"valid_until_ledger"`
+	Status                     string         `json:"status"`
+	ExecutedTxHash             sql.NullString `json:"executed_tx_hash"`
+	CreatedAt                  int64          `json:"created_at"`
+}
+
+type WebappOnRampIntent struct {
+	ID                   uuid.UUID      `json:"id"`
+	MemoID               string         `json:"memo_id"`
+	DestinationCAddress  string         `json:"destination_c_address"`
+	ExternalCustomerID   string         `json:"external_customer_id"`
+	MoonpayTransactionID sql.NullString `json:"moonpay_transaction_id"`
+	Status               string         `json:"status"`
+	FiatAmount           string         `json:"fiat_amount"`
+	FiatCode             string         `json:"fiat_code"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+}
+
+type WebappSession struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	CreatedAt int64     `json:"created_at"`
+	ExpiresAt int64     `json:"expires_at"`
+}
+
+type WebappSignPayload struct {
+	ID         string          `json:"id"`
+	Payload    json.RawMessage `json:"payload"`
+	ExpiresAt  time.Time       `json:"expires_at"`
+	ConsumedAt sql.NullTime    `json:"consumed_at"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+type WebappSmartAccount struct {
+	ID                  uuid.UUID `json:"id"`
+	UserID              uuid.UUID `json:"user_id"`
+	CredentialID        string    `json:"credential_id"`
+	KeyDataHex          string    `json:"key_data_hex"`
+	SaltHex             string    `json:"salt_hex"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	Deployed            int32     `json:"deployed"`
+	CreatedAt           int64     `json:"created_at"`
+}
+
+type WebappUser struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt int64     `json:"created_at"`
+}
+
+type WebappWebauthnChallenge struct {
+	ID        uuid.UUID     `json:"id"`
+	UserID    uuid.NullUUID `json:"user_id"`
+	Purpose   string        `json:"purpose"`
+	Challenge string        `json:"challenge"`
+	RpID      string        `json:"rp_id"`
+	Origin    string        `json:"origin"`
+	ExpiresAt int64         `json:"expires_at"`
+	CreatedAt int64         `json:"created_at"`
+}
+
+type WebappWebauthnCredential struct {
+	ID                uuid.UUID      `json:"id"`
+	UserID            uuid.UUID      `json:"user_id"`
+	CredentialID      string         `json:"credential_id"`
+	CredentialIDBytes []byte         `json:"credential_id_bytes"`
+	CosePublicKey     []byte         `json:"cose_public_key"`
+	P256RawPublicKey  []byte         `json:"p256_raw_public_key"`
+	SignCount         int64          `json:"sign_count"`
+	Transports        sql.NullString `json:"transports"`
+	DeviceType        sql.NullString `json:"device_type"`
+	BackedUp          int32          `json:"backed_up"`
+	CreatedAt         int64          `json:"created_at"`
 }

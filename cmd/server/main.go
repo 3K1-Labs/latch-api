@@ -33,8 +33,10 @@ import (
 	"github.com/latch/backend/internal/config"
 	db "github.com/latch/backend/internal/db/generated"
 	"github.com/latch/backend/internal/handler"
+	webapphandler "github.com/latch/backend/internal/handler/webapp"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/store"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -93,6 +95,65 @@ func main() {
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
 
+	// Web app + Chrome extension backend (ported from a separate Next.js
+	// service). Uses the same Postgres pool/pool-derived queries as mobile,
+	// isolated via the `webapp` schema — see migrations/000014_webapp_schema_init.
+	webappSessionSvc := webapp.NewSessionService(sqlDB, queries)
+	webappAuditSvc := webapp.NewAuditService(queries)
+	webappWebauthnSvc := webapp.NewWebAuthnService(queries)
+	webappAccountsSvc := webapp.NewAccountsService(queries)
+	webappContextRulesSvc := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
+	webappBalancesSvc := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
+
+	// Sign-payload, on-ramp, backup-passkey, and the counter demo are all
+	// pure reads/writes over the webapp schema (or read-only Soroban
+	// simulation) with no bundler dependency, so — unlike the block below —
+	// they're always constructed and their routes always registered.
+	webappSignPayloadSvc := webapp.NewSignPayloadService(queries)
+	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.WebAppCounterContractAddress)
+	webappBackupPasskeySvc := webapp.NewBackupPasskeyService(queries)
+	webappOnRampSvc := webapp.NewOnRampService(
+		queries, cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
+		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
+		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
+	)
+
+	// Smart-account and transaction build/submit operations need a valid
+	// bundler keypair and factory address. Missing/invalid config disables
+	// only these route groups (logged below) rather than crashing the
+	// server — mobile traffic must keep flowing regardless of webapp config
+	// completeness.
+	var webappSmartAccountSvc *webapp.SmartAccountService
+	var webappTransactionSvc *webapp.TransactionService
+	var webappMultisigDraftSvc *webapp.MultisigDraftService
+	var webappMultisigAccountsSvc *webapp.MultisigAccountsService
+	var webappMultisigProposalSvc *webapp.MultisigProposalService
+	switch {
+	case cfg.WebAppBundlerSecret == "":
+		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
+	case cfg.WebAppFactoryAddress == "":
+		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
+	default:
+		if bundlerSvc, err := webapp.NewBundlerService(cfg.WebAppBundlerSecret, cfg.WebAppLegacyDelegatedSignerSecret); err != nil {
+			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account/transaction/multisig routes disabled", "err", err)
+		} else {
+			webappSmartAccountSvc = webapp.NewSmartAccountService(
+				sorobanSvc, bundlerSvc, queries,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress,
+			)
+			webappTransactionSvc = webapp.NewTransactionService(
+				sorobanSvc, bundlerSvc, webappContextRulesSvc,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
+			)
+			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
+			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)
+			webappMultisigProposalSvc = webapp.NewMultisigProposalService(
+				sorobanSvc, bundlerSvc, webappContextRulesSvc, webappBalancesSvc, webappTransactionSvc, queries,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
+			)
+		}
+	}
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
@@ -115,9 +176,15 @@ func main() {
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
+	// crossSiteWebAppCookies controls whether the webapp session cookie is
+	// issued with SameSite=None; Secure (required for the Chrome extension
+	// and any other cross-site caller) or SameSite=Lax (plain same-origin
+	// local development).
+	crossSiteWebAppCookies := isProd || len(cfg.WebAppWebAuthnExtensionIDs) > 0 || hasChromeExtensionOrigin(cfg.WebAppCORSAllowedOrigins)
+
 	// Router
 	r := gin.New()
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORSWithAllowlist(cfg.WebAppCORSAllowedOrigins))
 	r.Use(gin.Logger())
 	if isProd {
 		r.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
@@ -232,6 +299,138 @@ func main() {
 		api.POST("/relay", transactionHandler.Relay)
 	}
 
+	// Web app + Chrome extension routes. This is deliberately a separate
+	// *gin.RouterGroup from `api` above (both happen to be rooted at
+	// "/api/transaction" once Phase 3 mounts a sub-group here) rather than
+	// reusing it, so mobile's /api/transaction/{simulate,relay} registration
+	// is never touched as this surface grows.
+	webappGroup := r.Group("/api")
+	webappGroup.Use(middleware.EnsureSession(webappSessionSvc, crossSiteWebAppCookies))
+
+	webappAccountsHandler := webapphandler.NewAccountsHandler(webappAccountsSvc, crossSiteWebAppCookies)
+	accountsGroup := webappGroup.Group("/accounts")
+	{
+		accountsGroup.GET("", webappAccountsHandler.List)
+		accountsGroup.POST("/set-active", webappAccountsHandler.SetActive)
+	}
+
+	// Context-rules/balances are pure reads and never touch the bundler, so
+	// they're always mounted regardless of bundler config completeness.
+	webappSmartAccountHandler := webapphandler.NewSmartAccountHandler(webappSmartAccountSvc, webappContextRulesSvc, webappBalancesSvc, cfg)
+	smartAccountGroup := webappGroup.Group("/smart-account")
+	{
+		smartAccountGroup.GET("/context-rules", webappSmartAccountHandler.ContextRules)
+		smartAccountGroup.GET("/balances", webappSmartAccountHandler.Balances)
+	}
+
+	if webappSmartAccountSvc != nil {
+		webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAuditSvc, cfg)
+		webauthnGroup := webappGroup.Group("/webauthn")
+		{
+			webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
+			webauthnGroup.POST("/registration/finish", webappWebauthnHandler.RegistrationFinish)
+			webauthnGroup.POST("/authentication/begin", webappWebauthnHandler.AuthenticationBegin)
+			webauthnGroup.POST("/authentication/finish", webappWebauthnHandler.AuthenticationFinish)
+			webauthnGroup.GET("/credentials", webappWebauthnHandler.Credentials)
+		}
+
+		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
+		smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
+	}
+
+	if webappTransactionSvc != nil {
+		webappTransactionHandler := webapphandler.NewTransactionHandler(webappTransactionSvc, cfg)
+		transactionGroup := webappGroup.Group("/transaction")
+		{
+			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)
+			transactionGroup.POST("/submit-webauthn", webappTransactionHandler.SubmitWebAuthn)
+		}
+	}
+
+	// Multisig (Safe-style multi-signer smart accounts): drafts (pre-deployment
+	// member collection), deployed accounts, invite-token join flow, and
+	// proposal build/approve/execute. Gated on the same bundler/factory config
+	// as webauthn/smart-account/transaction above, since deploying a multisig
+	// account and building/executing its proposals both need the bundler.
+	if webappMultisigDraftSvc != nil {
+		webappMultisigAccountsHandler := webapphandler.NewMultisigAccountsHandler(webappMultisigAccountsSvc)
+		webappMultisigDraftsHandler := webapphandler.NewMultisigDraftsHandler(webappMultisigDraftSvc)
+		webappMultisigDraftWebAuthnHandler := webapphandler.NewMultisigDraftWebAuthnHandler(webappMultisigDraftSvc, webappWebauthnSvc, cfg)
+		webappMultisigJoinHandler := webapphandler.NewMultisigJoinHandler(webappMultisigDraftSvc, webappWebauthnSvc, cfg)
+		webappMultisigProposalsHandler := webapphandler.NewMultisigProposalsHandler(webappMultisigProposalSvc, cfg)
+
+		multisigGroup := webappGroup.Group("/multisig")
+
+		multisigAccountsGroup := multisigGroup.Group("/accounts")
+		{
+			multisigAccountsGroup.GET("", webappMultisigAccountsHandler.List)
+			multisigAccountsGroup.POST("/draft", webappMultisigAccountsHandler.Draft)
+			multisigAccountsGroup.POST("/deploy", webappMultisigAccountsHandler.Deploy)
+			multisigAccountsGroup.POST("/register", webappMultisigAccountsHandler.Register)
+		}
+
+		multisigDraftsGroup := multisigGroup.Group("/drafts")
+		{
+			multisigDraftsGroup.POST("", webappMultisigDraftsHandler.Create)
+			multisigDraftsGroup.GET("", webappMultisigDraftsHandler.GetActive)
+			multisigDraftsGroup.GET("/:id", webappMultisigDraftsHandler.Get)
+			multisigDraftsGroup.PATCH("/:id", webappMultisigDraftsHandler.UpdateThreshold)
+			multisigDraftsGroup.POST("/:id/predict", webappMultisigDraftsHandler.Predict)
+			multisigDraftsGroup.POST("/:id/deploy", webappMultisigDraftsHandler.Deploy)
+			multisigDraftsGroup.POST("/:id/members", webappMultisigDraftsHandler.AddMember)
+			multisigDraftsGroup.DELETE("/:id/members/:memberId", webappMultisigDraftsHandler.DeleteMember)
+			multisigDraftsGroup.POST("/:id/webauthn/register/begin", webappMultisigDraftWebAuthnHandler.RegistrationBegin)
+			multisigDraftsGroup.POST("/:id/webauthn/register/finish", webappMultisigDraftWebAuthnHandler.RegistrationFinish)
+			multisigDraftsGroup.POST("/:id/webauthn/authenticate/begin", webappMultisigDraftWebAuthnHandler.AuthenticationBegin)
+			multisigDraftsGroup.POST("/:id/webauthn/authenticate/finish", webappMultisigDraftWebAuthnHandler.AuthenticationFinish)
+		}
+
+		multisigJoinGroup := multisigGroup.Group("/join")
+		{
+			multisigJoinGroup.GET("/:token", webappMultisigJoinHandler.GetByToken)
+			multisigJoinGroup.POST("/:token/members", webappMultisigJoinHandler.AddMember)
+			multisigJoinGroup.POST("/:token/webauthn/register/begin", webappMultisigJoinHandler.RegistrationBegin)
+			multisigJoinGroup.POST("/:token/webauthn/register/finish", webappMultisigJoinHandler.RegistrationFinish)
+			multisigJoinGroup.POST("/:token/webauthn/authenticate/begin", webappMultisigJoinHandler.AuthenticationBegin)
+			multisigJoinGroup.POST("/:token/webauthn/authenticate/finish", webappMultisigJoinHandler.AuthenticationFinish)
+		}
+
+		multisigProposalsGroup := multisigGroup.Group("/proposals")
+		{
+			multisigProposalsGroup.POST("", webappMultisigProposalsHandler.Create)
+			multisigProposalsGroup.GET("", webappMultisigProposalsHandler.List)
+			multisigProposalsGroup.GET("/:id", webappMultisigProposalsHandler.Get)
+			multisigProposalsGroup.POST("/:id/refresh", webappMultisigProposalsHandler.Refresh)
+			multisigProposalsGroup.POST("/:id/execute", webappMultisigProposalsHandler.Execute)
+			multisigProposalsGroup.POST("/:id/approve/webauthn", webappMultisigProposalsHandler.ApproveWebauthn)
+			multisigProposalsGroup.POST("/:id/approve/delegated/begin", webappMultisigProposalsHandler.ApproveDelegatedBegin)
+			multisigProposalsGroup.POST("/:id/approve/delegated/finish", webappMultisigProposalsHandler.ApproveDelegatedFinish)
+		}
+	}
+
+	// Sign-payload, on-ramp, backup-passkey, and the counter demo: no bundler
+	// dependency, so routes are always registered (unlike the bundler-gated
+	// blocks above). On-ramp additionally 403s per-request in production via
+	// OnRampHandler's own devOnlyGuard, regardless of environment.
+	webappSignPayloadHandler := webapphandler.NewSignPayloadHandler(webappSignPayloadSvc)
+	webappGroup.POST("/sign-payload", webappSignPayloadHandler.Create)
+	webappGroup.GET("/sign-payload/:payloadRef", webappSignPayloadHandler.Get)
+
+	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, cfg)
+	onRampGroup := webappGroup.Group("/on-ramp")
+	{
+		onRampGroup.POST("/session", webappOnRampHandler.Session)
+		onRampGroup.GET("/intent/:id", webappOnRampHandler.GetIntent)
+		onRampGroup.PATCH("/intent/:id", webappOnRampHandler.UpdateIntent)
+		onRampGroup.GET("/pool", webappOnRampHandler.Pool)
+	}
+
+	webappRecoveryHandler := webapphandler.NewRecoveryHandler(webappBackupPasskeySvc)
+	webappGroup.POST("/recovery/backup-passkey", webappRecoveryHandler.BackupPasskey)
+
+	webappCounterHandler := webapphandler.NewCounterHandler(webappCounterSvc)
+	webappGroup.GET("/counter", webappCounterHandler.Get)
+
 	// Background retention sweep. Stops when ctx is cancelled on shutdown.
 	if cfg.CleanupEnabled {
 		go runCleanupScheduler(ctx, cleanupSvc, cfg.CleanupInterval)
@@ -303,4 +502,16 @@ func timeoutMiddleware(d time.Duration) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// hasChromeExtensionOrigin reports whether any configured CORS origin is a
+// chrome-extension:// origin, used to decide whether the webapp session
+// cookie must be issued cross-site (SameSite=None; Secure).
+func hasChromeExtensionOrigin(origins []string) bool {
+	for _, o := range origins {
+		if strings.HasPrefix(o, "chrome-extension://") {
+			return true
+		}
+	}
+	return false
 }

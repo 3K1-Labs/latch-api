@@ -97,6 +97,15 @@ references/freighter-mobile/ # Freighter React Native wallet
 - Per-wallet: 100 req/min on authenticated routes (JWT subject; key `rl:sub:`) so users sharing one IP don't collide
 - Per-email: 3 OTPs/hour, 3 recovery initiations/24h
 
+### Web App + Chrome Extension Port
+
+A phased effort is underway to port the Latch web app + Chrome extension's separate Next.js
+`/api/*` backend (cookie-session auth, different response envelope) into this service, so it
+stops maintaining its own database connection. New tables live in a dedicated `webapp` Postgres
+schema; everything is additive to the mobile-serving code. See
+[`docs/webapp-port.md`](docs/webapp-port.md) for the phase-by-phase plan, key decisions, and
+current status.
+
 ## Reference Projects
 
 These projects live in `references/` and must be consulted when designing or changing any API surface, auth flow, or data shape — the backend must stay compatible with how these clients consume it.

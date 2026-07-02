@@ -1,30 +1,57 @@
 basePath: /
 definitions:
+  github_com_latch_backend_internal_service.PushRegistration:
+    properties:
+      blind_signer_id:
+        type: string
+      queue_index:
+        type: string
+    type: object
+  github_com_latch_backend_internal_service.RPCResourceConfig:
+    properties:
+      instructionLeeway:
+        type: integer
+    type: object
+  github_com_latch_backend_internal_service.RestorePreamble:
+    properties:
+      minResourceFee:
+        type: string
+      transactionData:
+        description: base64 XDR SorobanTransactionData for the restore tx
+        type: string
+    type: object
   github_com_latch_backend_internal_service.SimResultEntry:
     properties:
       auth:
-        description: base64 XDR auth entries
+        description: base64 XDR SorobanAuthorizationEntry values
         items:
           type: string
         type: array
       xdr:
-        description: base64 XDR return value
+        description: base64 XDR return value (ScVal)
         type: string
     type: object
-  internal_handler.CredentialBlob:
+  internal_handler.addSignatureRequest:
     properties:
-      credential_id:
+      auth_entry_xdr:
         type: string
-      key_data_hex:
+      blind_signer_id:
         type: string
-      mnemonic:
+    required:
+    - auth_entry_xdr
+    - blind_signer_id
+    type: object
+  internal_handler.announceMembershipRequest:
+    properties:
+      member_blind_ids:
+        items:
+          type: string
+        type: array
+      wallet_ref:
         type: string
-      passkey_private_key:
-        type: string
-      smart_account:
-        type: string
-      version:
-        type: string
+    required:
+    - member_blind_ids
+    - wallet_ref
     type: object
   internal_handler.apiErrorBody:
     properties:
@@ -54,13 +81,42 @@ definitions:
   internal_handler.blobDataResponse:
     properties:
       data:
-        $ref: '#/definitions/internal_handler.blobResponse'
+        $ref: '#/definitions/internal_handler.encryptedBlobResponse'
     type: object
-  internal_handler.blobResponse:
+  internal_handler.clientEncryptedBlob:
     properties:
-      blob:
-        additionalProperties: {}
-        type: object
+      authTag:
+        type: string
+      ciphertext:
+        type: string
+      iv:
+        type: string
+      salt:
+        type: string
+      version:
+        type: string
+    type: object
+  internal_handler.createCosignRequest:
+    properties:
+      network:
+        type: string
+      queue_index:
+        type: string
+      threshold:
+        minimum: 1
+        type: integer
+      unsigned_tx_xdr:
+        type: string
+    required:
+    - network
+    - queue_index
+    - threshold
+    - unsigned_tx_xdr
+    type: object
+  internal_handler.encryptedBlobResponse:
+    properties:
+      encrypted_blob:
+        $ref: '#/definitions/internal_handler.clientEncryptedBlob'
     type: object
   internal_handler.historyDataInner:
     properties:
@@ -92,6 +148,13 @@ definitions:
         type: string
     required:
     - refresh_token
+    type: object
+  internal_handler.markSubmittedRequest:
+    properties:
+      tx_hash:
+        type: string
+    required:
+    - tx_hash
     type: object
   internal_handler.messageDataResponse:
     properties:
@@ -132,6 +195,18 @@ definitions:
     required:
     - refresh_token
     type: object
+  internal_handler.registerPushTokenRequest:
+    properties:
+      push_token:
+        type: string
+      registrations:
+        items:
+          $ref: '#/definitions/github_com_latch_backend_internal_service.PushRegistration'
+        type: array
+    required:
+    - push_token
+    - registrations
+    type: object
   internal_handler.registerRequest:
     properties:
       email:
@@ -139,6 +214,24 @@ definitions:
         type: string
     required:
     - email
+    type: object
+  internal_handler.relayRequest:
+    properties:
+      network:
+        type: string
+      xdr:
+        type: string
+    required:
+    - xdr
+    type: object
+  internal_handler.relayResponse:
+    properties:
+      error:
+        type: string
+      hash:
+        type: string
+      status:
+        type: string
     type: object
   internal_handler.simulateDataResponse:
     properties:
@@ -149,6 +242,8 @@ definitions:
     properties:
       network:
         type: string
+      resourceConfig:
+        $ref: '#/definitions/github_com_latch_backend_internal_service.RPCResourceConfig'
       xdr:
         type: string
     required:
@@ -158,8 +253,16 @@ definitions:
     properties:
       error:
         type: string
+      events:
+        items:
+          type: string
+        type: array
+      latest_ledger:
+        type: integer
       min_resource_fee:
         type: string
+      restore_preamble:
+        $ref: '#/definitions/github_com_latch_backend_internal_service.RestorePreamble'
       results:
         items:
           $ref: '#/definitions/github_com_latch_backend_internal_service.SimResultEntry'
@@ -169,10 +272,19 @@ definitions:
     type: object
   internal_handler.storeBackupRequest:
     properties:
-      blob:
-        $ref: '#/definitions/internal_handler.CredentialBlob'
+      encrypted_blob:
+        $ref: '#/definitions/internal_handler.clientEncryptedBlob'
       smart_account_address:
         type: string
+    required:
+    - smart_account_address
+    type: object
+  internal_handler.storeWCKBundleRequest:
+    properties:
+      bundle:
+        type: string
+    required:
+    - bundle
     type: object
   internal_handler.tokenDataResponse:
     properties:
@@ -213,6 +325,529 @@ definitions:
     - email
     - otp
     type: object
+  internal_handler.walletChallengeRequest:
+    properties:
+      key_type:
+        type: string
+      wallet:
+        type: string
+    required:
+    - key_type
+    - wallet
+    type: object
+  internal_handler.walletSignInRequest:
+    properties:
+      authenticator_data:
+        description: Passkey (WebAuthn) assertion fields — all standard base64.
+        type: string
+      client_data_json:
+        type: string
+      key_type:
+        type: string
+      nonce:
+        type: string
+      passkey_signature:
+        description: ASN.1 DER P-256 signature
+        type: string
+      signature:
+        description: base64 ed25519 signature over the raw nonce bytes
+        type: string
+      wallet:
+        type: string
+    required:
+    - key_type
+    - nonce
+    - wallet
+    type: object
+  internal_handler_webapp.approveDelegatedBeginRequest:
+    properties:
+      memberId:
+        type: string
+    required:
+    - memberId
+    type: object
+  internal_handler_webapp.approveDelegatedFinishRequest:
+    properties:
+      memberId:
+        type: string
+      signedAuthEntryBase64:
+        type: string
+      signerAddress:
+        type: string
+    required:
+    - memberId
+    - signedAuthEntryBase64
+    - signerAddress
+    type: object
+  internal_handler_webapp.approveWebauthnRequest:
+    properties:
+      memberId:
+        type: string
+      sigDataXdrHex:
+        type: string
+    required:
+    - memberId
+    - sigDataXdrHex
+    type: object
+  internal_handler_webapp.backupPasskeyRequest:
+    properties:
+      label:
+        example: my phone
+        type: string
+      smartAccountAddress:
+        example: CABC...XYZ
+        type: string
+    required:
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.backupPasskeyResponse:
+    properties:
+      next:
+        example: Call /api/webauthn/registration/* to register a second passkey, then
+          attach it on-chain in a future step.
+        type: string
+      ok:
+        example: true
+        type: boolean
+    type: object
+  internal_handler_webapp.beginCeremonyRequest:
+    properties:
+      chromeExtensionId:
+        type: string
+      displayName:
+        type: string
+    type: object
+  internal_handler_webapp.buildSendRequest:
+    properties:
+      amount:
+        type: string
+      assetId:
+        type: string
+      contractId:
+        type: string
+      recipient:
+        type: string
+      signerG:
+        type: string
+      signerType:
+        type: string
+      smartAccountAddress:
+        type: string
+    required:
+    - amount
+    - recipient
+    - signerType
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.counterResponse:
+    properties:
+      value:
+        example: 7
+        type: integer
+    type: object
+  internal_handler_webapp.createOnRampSessionRequest:
+    properties:
+      destinationCAddress:
+        example: CABC...XYZ
+        type: string
+      fiatAmount:
+        example: "25"
+        type: string
+      fiatCode:
+        example: USD
+        type: string
+    required:
+    - destinationCAddress
+    type: object
+  internal_handler_webapp.createProposalRequest:
+    properties:
+      amount:
+        type: string
+      assetId:
+        type: string
+      operationKind:
+        type: string
+      recipient:
+        type: string
+      requireMatchedContextRule:
+        type: boolean
+      smartAccountAddress:
+        type: string
+      targetContractId:
+        type: string
+      tokenContractId:
+        type: string
+    required:
+    - operationKind
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.createSignPayloadRequest:
+    properties:
+      callback:
+        example: https://example.com/callback
+        type: string
+      network:
+        example: testnet
+        type: string
+      origin:
+        example: https://example.com
+        type: string
+      requestId:
+        example: req-123
+        type: string
+      smartAccountAddress:
+        example: CABC...XYZ
+        type: string
+      submit:
+        example: true
+        type: boolean
+      ttlSeconds:
+        example: 600
+        type: integer
+      unsignedTxXdr:
+        example: AAAAAgAAAAA...
+        type: string
+    required:
+    - callback
+    - network
+    - smartAccountAddress
+    - unsignedTxXdr
+    type: object
+  internal_handler_webapp.createSignPayloadResponse:
+    properties:
+      expiresAt:
+        example: "2026-07-02T12:10:00Z"
+        type: string
+      payloadRef:
+        example: sp_1a2b3c4d5e6f7890abcdef1234567890
+        type: string
+    type: object
+  internal_handler_webapp.deployAccountRequest:
+    properties:
+      accountSaltHex:
+        type: string
+      signers:
+        items:
+          $ref: '#/definitions/internal_handler_webapp.multisigSignerInitRequest'
+        type: array
+      threshold:
+        type: integer
+    required:
+    - accountSaltHex
+    - signers
+    - threshold
+    type: object
+  internal_handler_webapp.deploySmartAccountRequest:
+    properties:
+      credentialId:
+        type: string
+      keyDataHex:
+        type: string
+    required:
+    - credentialId
+    - keyDataHex
+    type: object
+  internal_handler_webapp.draftAccountRequest:
+    properties:
+      accountSaltHex:
+        type: string
+      signers:
+        items:
+          $ref: '#/definitions/internal_handler_webapp.multisigSignerInitRequest'
+        type: array
+      threshold:
+        type: integer
+    required:
+    - signers
+    - threshold
+    type: object
+  internal_handler_webapp.draftMemberRequest:
+    properties:
+      credentialId:
+        type: string
+      gAddress:
+        type: string
+      keyDataHex:
+        type: string
+      label:
+        type: string
+      memberType:
+        type: string
+      publicKeyHex:
+        type: string
+    required:
+    - label
+    - memberType
+    type: object
+  internal_handler_webapp.finishAuthenticationRequest:
+    properties:
+      chromeExtensionId:
+        type: string
+      response:
+        $ref: '#/definitions/internal_handler_webapp.publicKeyCredentialJSON'
+    required:
+    - response
+    type: object
+  internal_handler_webapp.finishRegistrationRequest:
+    properties:
+      chromeExtensionId:
+        type: string
+      response:
+        $ref: '#/definitions/internal_handler_webapp.publicKeyCredentialJSON'
+    required:
+    - response
+    type: object
+  internal_handler_webapp.multisigSignerInitRequest:
+    properties:
+      gAddress:
+        type: string
+      keyDataHex:
+        type: string
+      label:
+        type: string
+      type:
+        type: string
+    required:
+    - type
+    type: object
+  internal_handler_webapp.onRampIntentResponse:
+    properties:
+      createdAt:
+        example: "2026-07-02T12:00:00Z"
+        type: string
+      destinationCAddress:
+        example: CABC...XYZ
+        type: string
+      fiatAmount:
+        example: "25"
+        type: string
+      fiatCode:
+        example: USD
+        type: string
+      id:
+        example: 9c1e1c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b
+        type: string
+      memoId:
+        example: "1234567890"
+        type: string
+      moonpayTransactionId:
+        example: tx_abc123
+        type: string
+      moonpayTransactionStatus:
+        example: completed
+        type: string
+      status:
+        enum:
+        - created
+        - pending
+        - completed
+        - failed
+        example: pending
+        type: string
+      updatedAt:
+        example: "2026-07-02T12:05:00Z"
+        type: string
+    type: object
+  internal_handler_webapp.onRampPoolResponse:
+    properties:
+      network:
+        example: testnet
+        type: string
+      poolAddress:
+        example: GPOOL...XYZ
+        type: string
+      recentTransactions:
+        items:
+          $ref: '#/definitions/internal_handler_webapp.onRampPoolTransactionResponse'
+        type: array
+      xlmBalance:
+        example: "1234.5000000"
+        type: string
+    type: object
+  internal_handler_webapp.onRampPoolTransactionResponse:
+    properties:
+      createdAt:
+        example: "2026-07-02T12:00:00Z"
+        type: string
+      memo:
+        example: "1234567890"
+        type: string
+      memoType:
+        example: text
+        type: string
+      successful:
+        example: true
+        type: boolean
+      transactionId:
+        example: a1b2c3...
+        type: string
+    type: object
+  internal_handler_webapp.onRampSessionResponse:
+    properties:
+      destinationCAddress:
+        example: CABC...XYZ
+        type: string
+      fiatAmount:
+        example: "25"
+        type: string
+      fiatCode:
+        example: USD
+        type: string
+      integrationMode:
+        enum:
+        - widget
+        - platform
+        example: widget
+        type: string
+      intentId:
+        example: 9c1e1c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b
+        type: string
+      memoId:
+        example: "1234567890"
+        type: string
+      platformFallback:
+        example: true
+        type: boolean
+      poolAddress:
+        example: GPOOL...XYZ
+        type: string
+      sessionToken:
+        example: eyJhbGciOi...
+        type: string
+      widgetUrl:
+        example: https://buy.moonpay.com?apiKey=...&signature=...
+        type: string
+    type: object
+  internal_handler_webapp.publicKeyCredentialJSON:
+    properties:
+      id:
+        type: string
+      rawId:
+        type: string
+      response:
+        $ref: '#/definitions/internal_handler_webapp.publicKeyCredentialResponseJSON'
+      transports:
+        items:
+          type: string
+        type: array
+      type:
+        type: string
+    required:
+    - id
+    - rawId
+    - response
+    type: object
+  internal_handler_webapp.publicKeyCredentialResponseJSON:
+    properties:
+      attestationObject:
+        type: string
+      authenticatorData:
+        type: string
+      clientDataJSON:
+        type: string
+      signature:
+        type: string
+    required:
+    - clientDataJSON
+    type: object
+  internal_handler_webapp.registerAccountRequest:
+    properties:
+      accountSaltHex:
+        type: string
+      members:
+        items:
+          $ref: '#/definitions/internal_handler_webapp.registerMemberRequest'
+        type: array
+      smartAccountAddress:
+        type: string
+      threshold:
+        type: integer
+    required:
+    - accountSaltHex
+    - members
+    - smartAccountAddress
+    - threshold
+    type: object
+  internal_handler_webapp.registerMemberRequest:
+    properties:
+      credentialId:
+        type: string
+      gAddress:
+        type: string
+      keyDataHex:
+        type: string
+      label:
+        type: string
+      type:
+        type: string
+    required:
+    - type
+    type: object
+  internal_handler_webapp.setActiveAccountRequest:
+    properties:
+      smartAccountAddress:
+        type: string
+    required:
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.submitWebAuthnRequest:
+    properties:
+      authEntriesXdr:
+        items:
+          type: string
+        type: array
+      authEntryXdr:
+        type: string
+      contextRuleId:
+        type: integer
+      delegatedGAuthEntrySynthesized:
+        type: boolean
+      keyDataHex:
+        type: string
+      sigDataXdr:
+        type: string
+      smartAccountAuthEntryIndex:
+        type: integer
+      txXdr:
+        type: string
+    required:
+    - keyDataHex
+    - sigDataXdr
+    - txXdr
+    type: object
+  internal_handler_webapp.updateDraftThresholdRequest:
+    properties:
+      threshold:
+        type: integer
+    required:
+    - threshold
+    type: object
+  internal_handler_webapp.updateOnRampIntentRequest:
+    properties:
+      moonpayTransactionId:
+        example: tx_abc123
+        type: string
+      status:
+        enum:
+        - created
+        - pending
+        - completed
+        - failed
+        example: pending
+        type: string
+    type: object
+  internal_handler_webapp.webappErrorResponse:
+    properties:
+      code:
+        example: internal_error
+        type: string
+      error:
+        example: internal error
+        type: string
+      message:
+        example: internal error
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -221,6 +856,1507 @@ info:
   title: Latch API
   version: "1.0"
 paths:
+  /api/accounts:
+    get:
+      description: Returns every smart account (seed and passkey wallets) owned by
+        the session user.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: List the session user's smart accounts
+      tags:
+      - accounts
+  /api/accounts/set-active:
+    post:
+      consumes:
+      - application/json
+      description: Sets a client-readable cookie recording which smart account is
+        active. Purely a cookie write — no server-side persistence.
+      parameters:
+      - description: Smart account address to mark active
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.setActiveAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Set the active smart account cookie
+      tags:
+      - accounts
+  /api/counter:
+    get:
+      description: Simulates the demo counter contract's get() function on testnet.
+        Returns 0 if the simulation doesn't return a success result (e.g. an unset
+        counter).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.counterResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get the demo counter value
+      tags:
+      - counter
+  /api/multisig/accounts:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: List the session user's deployed multisig accounts
+      tags:
+      - multisig-accounts
+  /api/multisig/accounts/deploy:
+    post:
+      consumes:
+      - application/json
+      description: 'Deploys the multisig smart account for the given threshold, signer
+        set, and salt via the factory contract. Idempotent: returns alreadyDeployed=true
+        if it''s already live.'
+      parameters:
+      - description: Threshold, signer set, and account salt
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.deployAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Deploy a multisig account on-chain
+      tags:
+      - multisig-accounts
+  /api/multisig/accounts/draft:
+    post:
+      consumes:
+      - application/json
+      description: Computes the deterministic smart account address and factory deploy
+        params for a given threshold and signer set, without persisting anything or
+        deploying on-chain.
+      parameters:
+      - description: Threshold and signer set
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.draftAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Predict a multisig account address from signers
+      tags:
+      - multisig-accounts
+  /api/multisig/accounts/register:
+    post:
+      consumes:
+      - application/json
+      description: Persists the multisig account and its members for the session user
+        after on-chain deploy, so it appears in List.
+      parameters:
+      - description: Deployed account address, threshold, salt, and members
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.registerAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Register a deployed multisig account for the session user
+      tags:
+      - multisig-accounts
+  /api/multisig/drafts:
+    get:
+      description: Returns the session user's in-progress (collecting) draft, or {"draft":null}
+        if none exists.
+      parameters:
+      - description: Must be 1
+        in: query
+        name: active
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get the session user's active multisig draft
+      tags:
+      - multisig-drafts
+    post:
+      description: Starts a new multisig account draft owned by the session user,
+        generating an invite token other members join with.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Create a new multisig draft
+      tags:
+      - multisig-drafts
+  /api/multisig/drafts/{id}:
+    get:
+      description: Fetches a draft owned by the session user. 404 if it doesn't exist
+        or belongs to someone else.
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get a multisig draft by ID
+      tags:
+      - multisig-drafts
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New threshold
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.updateDraftThresholdRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Update a multisig draft's signature threshold
+      tags:
+      - multisig-drafts
+  /api/multisig/drafts/{id}/deploy:
+    post:
+      description: 'Deploys the draft''s smart account via the factory contract using
+        its current threshold and members. Idempotent: returns alreadyDeployed=true
+        if it''s already live.'
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Deploy a multisig draft on-chain
+      tags:
+      - multisig-drafts
+  /api/multisig/drafts/{id}/members:
+    post:
+      consumes:
+      - application/json
+      description: Adds a signer (passkey, seed/G-address, or delegated key) to the
+        session user's own draft.
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Member to add
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.draftMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Add a member to a multisig draft
+      tags:
+      - multisig-drafts
+  /api/multisig/drafts/{id}/members/{memberId}:
+    delete:
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Member ID
+        in: path
+        name: memberId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Remove a member from a multisig draft
+      tags:
+      - multisig-drafts
+  /api/multisig/drafts/{id}/predict:
+    post:
+      description: Computes the deterministic smart account address and factory deploy
+        params for the draft's current threshold and members, without deploying.
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Predict a draft's deploy address
+      tags:
+      - multisig-drafts
+  /api/multisig/drafts/{id}/webauthn/authenticate/begin:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional chrome extension id
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.beginCeremonyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin a draft passkey authentication ceremony
+      tags:
+      - multisig-draft-webauthn
+  /api/multisig/drafts/{id}/webauthn/authenticate/finish:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: WebAuthn assertion response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.finishAuthenticationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish a draft passkey authentication ceremony
+      tags:
+      - multisig-draft-webauthn
+  /api/multisig/drafts/{id}/webauthn/register/begin:
+    post:
+      consumes:
+      - application/json
+      description: Runs the WebAuthn registration ceremony for the draft creator's
+        own device. Requires the draft to be owned by the session user and still collecting.
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional chrome extension id
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.beginCeremonyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin enrolling a passkey signer for a draft
+      tags:
+      - multisig-draft-webauthn
+  /api/multisig/drafts/{id}/webauthn/register/finish:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the WebAuthn ceremony and returns {credentialId, keyDataHex}
+        for the caller to add as a draft member via POST /api/multisig/drafts/{id}/members.
+        No smart account is deployed here.
+      parameters:
+      - description: Draft ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: WebAuthn attestation response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.finishRegistrationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish enrolling a passkey signer for a draft
+      tags:
+      - multisig-draft-webauthn
+  /api/multisig/join/{token}:
+    get:
+      description: No ownership check — only requires the token resolve to a still-collecting,
+        unexpired draft. Used by invitees to inspect a draft before joining.
+      parameters:
+      - description: Invite token
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get a draft's public view by invite token
+      tags:
+      - multisig-join
+  /api/multisig/join/{token}/members:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Invite token
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Member to add
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.draftMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Join a draft as a member via invite token
+      tags:
+      - multisig-join
+  /api/multisig/join/{token}/webauthn/authenticate/begin:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Invite token
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Optional chrome extension id
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.beginCeremonyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin a passkey authentication ceremony via invite token
+      tags:
+      - multisig-join
+  /api/multisig/join/{token}/webauthn/authenticate/finish:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Invite token
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: WebAuthn assertion response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.finishAuthenticationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish a passkey authentication ceremony via invite token
+      tags:
+      - multisig-join
+  /api/multisig/join/{token}/webauthn/register/begin:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Invite token
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Optional chrome extension id
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.beginCeremonyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin enrolling a passkey signer via invite token
+      tags:
+      - multisig-join
+  /api/multisig/join/{token}/webauthn/register/finish:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the WebAuthn ceremony and returns {credentialId, keyDataHex}
+        for the caller to add as a member via POST /api/multisig/join/{token}/members.
+      parameters:
+      - description: Invite token
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: WebAuthn attestation response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.finishRegistrationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish enrolling a passkey signer via invite token
+      tags:
+      - multisig-join
+  /api/multisig/proposals:
+    get:
+      parameters:
+      - description: Multisig smart account address
+        in: query
+        name: account
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: List proposals for a multisig account
+      tags:
+      - multisig-proposals
+    post:
+      consumes:
+      - application/json
+      description: Builds an unsigned operation (send or contract call) against a
+        multisig smart account and stores it as a pending proposal awaiting signer
+        approvals.
+      parameters:
+      - description: Proposal operation parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.createProposalRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Create a multisig transaction proposal
+      tags:
+      - multisig-proposals
+  /api/multisig/proposals/{id}:
+    get:
+      description: Returns the proposal, its multisig account, member list, and recorded
+        approvals.
+      parameters:
+      - description: Proposal ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get a multisig proposal's full detail
+      tags:
+      - multisig-proposals
+  /api/multisig/proposals/{id}/approve/delegated/begin:
+    post:
+      consumes:
+      - application/json
+      description: Returns the preimage and entry template XDR for a delegated signer
+        to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger
+        to sign against.
+      parameters:
+      - description: Proposal ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Member ID
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.approveDelegatedBeginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin a delegated (G-address) proposal approval
+      tags:
+      - multisig-proposals
+  /api/multisig/proposals/{id}/approve/delegated/finish:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the externally-signed auth entry against the template
+        from ApproveDelegatedBegin and records the approval.
+      parameters:
+      - description: Proposal ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Member ID, signed auth entry, and signer address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.approveDelegatedFinishRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish a delegated (G-address) proposal approval
+      tags:
+      - multisig-proposals
+  /api/multisig/proposals/{id}/approve/webauthn:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Proposal ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Member ID and WebAuthn signature
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.approveWebauthnRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Approve a proposal with a passkey signature
+      tags:
+      - multisig-proposals
+  /api/multisig/proposals/{id}/execute:
+    post:
+      description: Submits the proposal's transaction to the network once its approval
+        threshold has been met.
+      parameters:
+      - description: Proposal ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Execute a fully-approved multisig proposal
+      tags:
+      - multisig-proposals
+  /api/multisig/proposals/{id}/refresh:
+    post:
+      description: Re-simulates the proposal's operation against current chain state
+        and updates validUntilLedger/authDigestHex. Clears all existing approvals
+        — signers must approve again.
+      parameters:
+      - description: Proposal ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Refresh a proposal's simulation and auth digest
+      tags:
+      - multisig-proposals
+  /api/on-ramp/intent/{id}:
+    get:
+      description: Dev-only (403 in production). Fetches an on-ramp intent by id,
+        including its live MoonPay transaction status if one is attached.
+      parameters:
+      - description: On-ramp intent ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.onRampIntentResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get an on-ramp intent
+      tags:
+      - on-ramp
+    patch:
+      consumes:
+      - application/json
+      description: 'Dev-only (403 in production). Partial update: at least one of
+        status or moonpayTransactionId is required. Returns the updated intent with
+        its live MoonPay transaction status.'
+      parameters:
+      - description: On-ramp intent ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.updateOnRampIntentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.onRampIntentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Update an on-ramp intent
+      tags:
+      - on-ramp
+  /api/on-ramp/pool:
+    get:
+      description: Dev-only (403 in production). Returns the on-ramp pool account's
+        XLM balance and up to 20 recent transactions, optionally filtered to a single
+        memo.
+      parameters:
+      - description: Filter recent transactions to this memo (e.g. an intent's memoId)
+        in: query
+        name: memo
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.onRampPoolResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get the on-ramp pool account snapshot
+      tags:
+      - on-ramp
+  /api/on-ramp/session:
+    post:
+      consumes:
+      - application/json
+      description: Dev-only (403 in production). Creates a MoonPay on-ramp intent
+        for destinationCAddress and returns either a Platform API session token or
+        a signed widget URL depending on MOONPAY_INTEGRATION_MODE ("auto" falls back
+        to a widget URL if the Platform API returns 404).
+      parameters:
+      - description: Destination contract address and optional fiat amount/code
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.createOnRampSessionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.onRampSessionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Create an on-ramp session
+      tags:
+      - on-ramp
+  /api/recovery/backup-passkey:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the session user owns smartAccountAddress, then records
+        (upserts) intent to add a backup passkey signer. Today this only stores metadata;
+        a future step wires it to an on-chain second-signer flow. The session cookie
+        is set automatically if missing.
+      parameters:
+      - description: Smart account address and optional label
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.backupPasskeyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.backupPasskeyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Record intent to add a backup passkey signer
+      tags:
+      - recovery
+  /api/sign-payload:
+    post:
+      consumes:
+      - application/json
+      description: 'Stores an unsigned transaction XDR plus a callback URL under a
+        single-use, TTL-bounded reference (60s-3600s, default 600s). The referenced
+        payload is deleted-on-read: GET consumes it exactly once. callback must be
+        https://, or http://localhost / http://127.0.0.1 for local development.'
+      parameters:
+      - description: Sign payload to store
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.createSignPayloadRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.createSignPayloadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Store a sign payload for out-of-band signing
+      tags:
+      - sign-payload
+  /api/sign-payload/{payloadRef}:
+    get:
+      description: Fetches and permanently consumes (single-use) the sign payload
+        for payloadRef. Returns 404 if the reference never existed or was already
+        consumed, 410 if it expired.
+      parameters:
+      - description: Payload reference, e.g. sp_1a2b3c4d5e6f7890abcdef1234567890
+        in: path
+        name: payloadRef
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.createSignPayloadRequest'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Consume a stored sign payload
+      tags:
+      - sign-payload
+  /api/smart-account/balances:
+    get:
+      description: Fetches balances for every asset in the configured catalog. Zero
+        balances are omitted unless all=1.
+      parameters:
+      - description: Smart account address
+        in: query
+        name: smartAccountAddress
+        required: true
+        type: string
+      - description: Include zero balances when set to 1
+        in: query
+        name: all
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Get a smart account's asset balances
+      tags:
+      - smart-account
+  /api/smart-account/context-rules:
+    get:
+      description: Fetches the on-chain context rules (spending policies and their
+        signers) configured for a smart account.
+      parameters:
+      - description: Smart account address
+        in: query
+        name: address
+        required: true
+        type: string
+      - default: testnet
+        description: Network
+        in: query
+        name: network
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: List a smart account's context rules
+      tags:
+      - smart-account
+  /api/smart-account/webauthn:
+    get:
+      description: Pure computation over client-supplied key material (no session,
+        no persistence). Returns the deterministic smart account address for the given
+        credential/key data and whether it's already deployed.
+      parameters:
+      - description: WebAuthn credential ID
+        in: query
+        name: credentialId
+        required: true
+        type: string
+      - description: Hex-encoded public key + credential ID
+        in: query
+        name: keyDataHex
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Derive a smart account address from WebAuthn key material
+      tags:
+      - smart-account
+    post:
+      consumes:
+      - application/json
+      description: Standalone deploy endpoint over client-supplied key material —
+        does not persist a webapp.smart_accounts row (that only happens via the registration-finish
+        flow, which is tied to a session user).
+      parameters:
+      - description: WebAuthn key data and credential ID
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.deploySmartAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Deploy a smart account from WebAuthn key material
+      tags:
+      - smart-account
+  /api/transaction/build-send:
+    post:
+      consumes:
+      - application/json
+      description: Builds an unsigned send transaction (XLM or a cataloged asset)
+        from a smart account, along with the auth entries and signature payload the
+        client needs to sign next.
+      parameters:
+      - description: Send parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.buildSendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Build a send transaction
+      tags:
+      - transaction
+  /api/transaction/relay:
+    post:
+      consumes:
+      - application/json
+      description: Submits a signed transaction envelope to the Soroban RPC, polls
+        for confirmation (up to 20 s), and returns the final status.
+      parameters:
+      - description: Signed XDR transaction envelope and optional network
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.relayRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.relayResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      summary: Submit and confirm a Soroban transaction
+      tags:
+      - transaction
   /api/transaction/simulate:
     post:
       consumes:
@@ -256,6 +2392,206 @@ paths:
       summary: Simulate Soroban transaction
       tags:
       - transaction
+  /api/transaction/submit-webauthn:
+    post:
+      consumes:
+      - application/json
+      description: Attaches the client's WebAuthn signature to the built transaction's
+        auth entry/entries and submits it to the network.
+      parameters:
+      - description: Signed transaction and auth entries
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.submitWebAuthnRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Submit a WebAuthn-signed transaction
+      tags:
+      - transaction
+  /api/webauthn/authentication/begin:
+    post:
+      consumes:
+      - application/json
+      description: Returns PublicKeyCredentialRequestOptions for the session user
+        to pass to navigator.credentials.get().
+      parameters:
+      - description: Optional chrome extension id
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.beginCeremonyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin a WebAuthn authentication ceremony
+      tags:
+      - webauthn
+  /api/webauthn/authentication/finish:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the WebAuthn assertion against the stored credential and
+        returns the credential ID on success.
+      parameters:
+      - description: WebAuthn assertion response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.finishAuthenticationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish a WebAuthn authentication ceremony
+      tags:
+      - webauthn
+  /api/webauthn/credentials:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: List the session user's WebAuthn credentials
+      tags:
+      - webauthn
+  /api/webauthn/registration/begin:
+    post:
+      consumes:
+      - application/json
+      description: Returns PublicKeyCredentialCreationOptions for the session user
+        to pass to navigator.credentials.create(). The session cookie is set automatically
+        if missing.
+      parameters:
+      - description: Optional display name / chrome extension id
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.beginCeremonyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Begin a WebAuthn registration ceremony
+      tags:
+      - webauthn
+  /api/webauthn/registration/finish:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the WebAuthn ceremony, then deploys the resulting passkey's
+        smart account via the factory contract. Returns credentialId, keyDataHex,
+        saltHex, smartAccountAddress, deployed, alreadyDeployed, and a determinism
+        check.
+      parameters:
+      - description: WebAuthn attestation response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.finishRegistrationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Finish a WebAuthn registration ceremony
+      tags:
+      - webauthn
+  /v1/auth/challenge:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Wallet address + key_type
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.walletChallengeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      summary: Request a wallet sign-in challenge
+      tags:
+      - auth
   /v1/auth/logout:
     post:
       consumes:
@@ -354,6 +2690,40 @@ paths:
       summary: Register / resend OTP
       tags:
       - auth
+  /v1/auth/sign-in:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Signed challenge
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.walletSignInRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      summary: Complete wallet sign-in
+      tags:
+      - auth
   /v1/auth/verify:
     post:
       consumes:
@@ -416,10 +2786,12 @@ paths:
     post:
       consumes:
       - application/json
-      description: Encrypts the credential blob server-side and upserts it. POST and
-        PUT are identical — both upsert.
+      description: |-
+        Stores an opaque credential blob that the mobile client has already encrypted
+        with Argon2id + AES-256-GCM. The backend never decrypts it.
+        POST and PUT are identical — both upsert.
       parameters:
-      - description: Credential blob and smart account address
+      - description: Client-encrypted blob and smart account address
         in: body
         name: body
         required: true
@@ -446,16 +2818,18 @@ paths:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
-      summary: Store encrypted backup
+      summary: Store client-encrypted backup
       tags:
       - backup
     put:
       consumes:
       - application/json
-      description: Encrypts the credential blob server-side and upserts it. POST and
-        PUT are identical — both upsert.
+      description: |-
+        Stores an opaque credential blob that the mobile client has already encrypted
+        with Argon2id + AES-256-GCM. The backend never decrypts it.
+        POST and PUT are identical — both upsert.
       parameters:
-      - description: Credential blob and smart account address
+      - description: Client-encrypted blob and smart account address
         in: body
         name: body
         required: true
@@ -482,9 +2856,230 @@ paths:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
-      summary: Store encrypted backup
+      summary: Store client-encrypted backup
       tags:
       - backup
+  /v1/cosign/requests:
+    get:
+      parameters:
+      - description: Blind queue index
+        in: query
+        name: queue_index
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List pending cosign requests for a queue
+      tags:
+      - cosign
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Blind queue index + encrypted tx + threshold
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.createCosignRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Propose a cosign request
+      tags:
+      - cosign
+  /v1/cosign/requests/{id}:
+    delete:
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageDataResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel a pending cosign request (idempotent)
+      tags:
+      - cosign
+    get:
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a cosign request with its signatures
+      tags:
+      - cosign
+  /v1/cosign/requests/{id}/signatures:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Blind signer id + encrypted auth entry
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.addSignatureRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Attach a partial signature
+      tags:
+      - cosign
+  /v1/cosign/requests/{id}/submission:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Request ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: On-chain tx hash
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.markSubmittedRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Record the on-chain submission hash
+      tags:
+      - cosign
   /v1/history:
     get:
       description: Returns the transaction history for the given Stellar account.
@@ -535,6 +3130,74 @@ paths:
       summary: Transaction history
       tags:
       - wallet
+  /v1/memberships:
+    get:
+      parameters:
+      - description: Member blind id (hex64)
+        in: query
+        name: member_blind_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List wallets announced for a member blind id
+      tags:
+      - memberships
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Wallet C-address + member blind ids
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.announceMembershipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Announce shared-wallet membership for a set of member blind ids
+      tags:
+      - memberships
   /v1/prices:
     get:
       description: Returns the current USD price for each requested Stellar asset.
@@ -559,10 +3222,78 @@ paths:
       summary: Live USD prices
       tags:
       - market
+  /v1/push-tokens:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Push token + blind queue registrations
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.registerPushTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replace all queue registrations for a push token
+      tags:
+      - push-tokens
+  /v1/push-tokens/{token}:
+    delete:
+      parameters:
+      - description: Push token
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remove all registrations for a push token (logout hygiene)
+      tags:
+      - push-tokens
   /v1/recovery/blob:
     get:
-      description: Decrypts and returns the credential blob. Requires a recovery-scoped
-        JWT (from POST /v1/recovery/verify).
+      description: |-
+        Returns the opaque client-encrypted blob. The mobile client decrypts it
+        locally using the recovery password. Requires a recovery-scoped JWT.
       produces:
       - application/json
       responses:
@@ -584,7 +3315,7 @@ paths:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - RecoveryAuth: []
-      summary: Fetch decrypted credential blob
+      summary: Fetch encrypted credential blob
       tags:
       - recovery
   /v1/recovery/initiate:
@@ -649,6 +3380,87 @@ paths:
       summary: Verify recovery OTP
       tags:
       - recovery
+  /v1/wck-bundles/{pickup_key}:
+    get:
+      parameters:
+      - description: Pickup key (hex64)
+        in: path
+        name: pickup_key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Fetch the sealed WCK bundle for a pickup key
+      tags:
+      - wck-bundles
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pickup key (hex64, derived from the wallet C-address)
+        in: path
+        name: pickup_key
+        required: true
+        type: string
+      - description: Sealed bundle (server-opaque)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.storeWCKBundleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload a sealed WCK bundle for member pickup
+      tags:
+      - wck-bundles
 securityDefinitions:
   BearerAuth:
     description: 'Enter: Bearer <access_token>'

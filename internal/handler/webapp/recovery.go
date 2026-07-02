@@ -1,0 +1,61 @@
+package webapp
+
+import (
+	"errors"
+	"log/slog"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/middleware"
+	"github.com/latch/backend/internal/service/webapp"
+	"github.com/latch/backend/internal/webappx"
+)
+
+type RecoveryHandler struct {
+	backupPasskeySvc backupPasskeyService
+}
+
+func NewRecoveryHandler(backupPasskeySvc backupPasskeyService) *RecoveryHandler {
+	return &RecoveryHandler{backupPasskeySvc: backupPasskeySvc}
+}
+
+type backupPasskeyRequest struct {
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required" example:"CABC...XYZ"`
+	Label               string `json:"label,omitempty" example:"my phone"`
+}
+
+// BackupPasskey godoc
+// @Summary      Record intent to add a backup passkey signer
+// @Description  Verifies the session user owns smartAccountAddress, then records (upserts) intent to add a backup passkey signer. Today this only stores metadata; a future step wires it to an on-chain second-signer flow. The session cookie is set automatically if missing.
+// @Tags         recovery
+// @Accept       json
+// @Produce      json
+// @Param        body body backupPasskeyRequest true "Smart account address and optional label"
+// @Success      200 {object} backupPasskeyResponse
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/recovery/backup-passkey [post]
+func (h *RecoveryHandler) BackupPasskey(c *gin.Context) {
+	var req backupPasskeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "Missing smartAccountAddress")
+		return
+	}
+
+	userID := middleware.SessionUserIDFromContext(c.Request.Context())
+	if err := h.backupPasskeySvc.RecordIntent(c.Request.Context(), userID, req.SmartAccountAddress, req.Label); err != nil {
+		if errors.Is(err, webapp.ErrBackupPasskeySmartAccountNotFound) {
+			webappx.Fail(c, http.StatusNotFound, webappx.ErrInternal, "Unknown account for this session user")
+			return
+		}
+		slog.Error("record backup passkey intent", "userID", userID, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"ok":   true,
+		"next": "Call /api/webauthn/registration/* to register a second passkey, then attach it on-chain in a future step.",
+	})
+}

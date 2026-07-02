@@ -219,6 +219,7 @@ func (s *SorobanService) SendTransaction(ctx context.Context, rpcURL, txXDR stri
 type GetTxResult struct {
 	Status         string `json:"status"`
 	ResultXdr      string `json:"resultXdr,omitempty"`
+	ResultMetaXdr  string `json:"resultMetaXdr,omitempty"` // TransactionMeta XDR; holds the invoked contract's return value
 	ErrorResultXdr string `json:"errorResultXdr,omitempty"`
 }
 
