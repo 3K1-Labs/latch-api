@@ -35,7 +35,13 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
-// List handles GET /api/multisig/accounts.
+// List godoc
+// @Summary      List the session user's deployed multisig accounts
+// @Tags         multisig-accounts
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/multisig/accounts [get]
 func (h *MultisigAccountsHandler) List(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -93,7 +99,16 @@ type draftAccountRequest struct {
 	AccountSaltHex string                      `json:"accountSaltHex,omitempty"`
 }
 
-// Draft handles POST /api/multisig/accounts/draft.
+// Draft godoc
+// @Summary      Predict a multisig account address from signers
+// @Description  Computes the deterministic smart account address and factory deploy params for a given threshold and signer set, without persisting anything or deploying on-chain.
+// @Tags         multisig-accounts
+// @Accept       json
+// @Produce      json
+// @Param        body body draftAccountRequest true "Threshold and signer set"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/multisig/accounts/draft [post]
 func (h *MultisigAccountsHandler) Draft(c *gin.Context) {
 	var req draftAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -122,7 +137,16 @@ type deployAccountRequest struct {
 	AccountSaltHex string                      `json:"accountSaltHex" binding:"required"`
 }
 
-// Deploy handles POST /api/multisig/accounts/deploy.
+// Deploy godoc
+// @Summary      Deploy a multisig account on-chain
+// @Description  Deploys the multisig smart account for the given threshold, signer set, and salt via the factory contract. Idempotent: returns alreadyDeployed=true if it's already live.
+// @Tags         multisig-accounts
+// @Accept       json
+// @Produce      json
+// @Param        body body deployAccountRequest true "Threshold, signer set, and account salt"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/multisig/accounts/deploy [post]
 func (h *MultisigAccountsHandler) Deploy(c *gin.Context) {
 	var req deployAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -162,7 +186,16 @@ type registerAccountRequest struct {
 	Members             []registerMemberRequest `json:"members" binding:"required"`
 }
 
-// Register handles POST /api/multisig/accounts/register.
+// Register godoc
+// @Summary      Register a deployed multisig account for the session user
+// @Description  Persists the multisig account and its members for the session user after on-chain deploy, so it appears in List.
+// @Tags         multisig-accounts
+// @Accept       json
+// @Produce      json
+// @Param        body body registerAccountRequest true "Deployed account address, threshold, salt, and members"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/multisig/accounts/register [post]
 func (h *MultisigAccountsHandler) Register(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 

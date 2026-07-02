@@ -55,7 +55,17 @@ func assetCatalogConfig(cfg *config.Config) webapp.AssetCatalogConfig {
 	}
 }
 
-// BuildSend handles POST /api/transaction/build-send.
+// BuildSend godoc
+// @Summary      Build a send transaction
+// @Description  Builds an unsigned send transaction (XLM or a cataloged asset) from a smart account, along with the auth entries and signature payload the client needs to sign next.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body buildSendRequest true "Send parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/transaction/build-send [post]
 func (h *TransactionHandler) BuildSend(c *gin.Context) {
 	var req buildSendRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -128,7 +138,16 @@ type submitWebAuthnRequest struct {
 	DelegatedGAuthEntrySynthesized bool     `json:"delegatedGAuthEntrySynthesized,omitempty"`
 }
 
-// SubmitWebAuthn handles POST /api/transaction/submit-webauthn.
+// SubmitWebAuthn godoc
+// @Summary      Submit a WebAuthn-signed transaction
+// @Description  Attaches the client's WebAuthn signature to the built transaction's auth entry/entries and submits it to the network.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body submitWebAuthnRequest true "Signed transaction and auth entries"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/transaction/submit-webauthn [post]
 func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 	var req submitWebAuthnRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

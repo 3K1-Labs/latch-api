@@ -58,7 +58,17 @@ type beginCeremonyRequest struct {
 	ChromeExtensionID string `json:"chromeExtensionId,omitempty"`
 }
 
-// RegistrationBegin handles POST /api/webauthn/registration/begin.
+// RegistrationBegin godoc
+// @Summary      Begin a WebAuthn registration ceremony
+// @Description  Returns PublicKeyCredentialCreationOptions for the session user to pass to navigator.credentials.create(). The session cookie is set automatically if missing.
+// @Tags         webauthn
+// @Accept       json
+// @Produce      json
+// @Param        body body beginCeremonyRequest false "Optional display name / chrome extension id"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/webauthn/registration/begin [post]
 func (h *WebAuthnHandler) RegistrationBegin(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -115,11 +125,17 @@ type finishRegistrationRequest struct {
 	ChromeExtensionID string                  `json:"chromeExtensionId,omitempty"`
 }
 
-// RegistrationFinish handles POST /api/webauthn/registration/finish. It
-// verifies the WebAuthn ceremony, then deploys the resulting passkey's smart
-// account via the factory contract, matching the combined response shape
-// the extension already expects (credentialId, keyDataHex, saltHex,
-// smartAccountAddress, deployed, alreadyDeployed, determinismCheck).
+// RegistrationFinish godoc
+// @Summary      Finish a WebAuthn registration ceremony
+// @Description  Verifies the WebAuthn ceremony, then deploys the resulting passkey's smart account via the factory contract. Returns credentialId, keyDataHex, saltHex, smartAccountAddress, deployed, alreadyDeployed, and a determinism check.
+// @Tags         webauthn
+// @Accept       json
+// @Produce      json
+// @Param        body body finishRegistrationRequest true "WebAuthn attestation response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/webauthn/registration/finish [post]
 func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -189,7 +205,17 @@ type finishAuthenticationRequest struct {
 	ChromeExtensionID string                  `json:"chromeExtensionId,omitempty"`
 }
 
-// AuthenticationBegin handles POST /api/webauthn/authentication/begin.
+// AuthenticationBegin godoc
+// @Summary      Begin a WebAuthn authentication ceremony
+// @Description  Returns PublicKeyCredentialRequestOptions for the session user to pass to navigator.credentials.get().
+// @Tags         webauthn
+// @Accept       json
+// @Produce      json
+// @Param        body body beginCeremonyRequest false "Optional chrome extension id"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/webauthn/authentication/begin [post]
 func (h *WebAuthnHandler) AuthenticationBegin(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -229,7 +255,16 @@ func (h *WebAuthnHandler) AuthenticationBegin(c *gin.Context) {
 	}})
 }
 
-// AuthenticationFinish handles POST /api/webauthn/authentication/finish.
+// AuthenticationFinish godoc
+// @Summary      Finish a WebAuthn authentication ceremony
+// @Description  Verifies the WebAuthn assertion against the stored credential and returns the credential ID on success.
+// @Tags         webauthn
+// @Accept       json
+// @Produce      json
+// @Param        body body finishAuthenticationRequest true "WebAuthn assertion response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/webauthn/authentication/finish [post]
 func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -281,7 +316,13 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 	})
 }
 
-// Credentials handles GET /api/webauthn/credentials.
+// Credentials godoc
+// @Summary      List the session user's WebAuthn credentials
+// @Tags         webauthn
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/webauthn/credentials [get]
 func (h *WebAuthnHandler) Credentials(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 

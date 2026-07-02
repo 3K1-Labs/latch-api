@@ -31,9 +31,17 @@ func NewSmartAccountHandler(smartAccountSvc smartAccountService, contextRulesSvc
 	}
 }
 
-// Query handles GET /api/smart-account/webauthn?credentialId=&keyDataHex=.
-// This is a pure computation over client-supplied key material — no
-// session, no persistence.
+// Query godoc
+// @Summary      Derive a smart account address from WebAuthn key material
+// @Description  Pure computation over client-supplied key material (no session, no persistence). Returns the deterministic smart account address for the given credential/key data and whether it's already deployed.
+// @Tags         smart-account
+// @Produce      json
+// @Param        credentialId query string true "WebAuthn credential ID"
+// @Param        keyDataHex query string true "Hex-encoded public key + credential ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account/webauthn [get]
 func (h *SmartAccountHandler) Query(c *gin.Context) {
 	credentialID := c.Query("credentialId")
 	keyDataHex := c.Query("keyDataHex")
@@ -60,10 +68,17 @@ type deploySmartAccountRequest struct {
 	CredentialID string `json:"credentialId" binding:"required"`
 }
 
-// Deploy handles POST /api/smart-account/webauthn. This is a standalone
-// deploy endpoint over client-supplied key material — it does not persist a
-// webapp.smart_accounts row (that only happens via the registration-finish
-// flow, which is tied to a session user).
+// Deploy godoc
+// @Summary      Deploy a smart account from WebAuthn key material
+// @Description  Standalone deploy endpoint over client-supplied key material — does not persist a webapp.smart_accounts row (that only happens via the registration-finish flow, which is tied to a session user).
+// @Tags         smart-account
+// @Accept       json
+// @Produce      json
+// @Param        body body deploySmartAccountRequest true "WebAuthn key data and credential ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account/webauthn [post]
 func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 	var req deploySmartAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -88,7 +103,17 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 	})
 }
 
-// ContextRules handles GET /api/smart-account/context-rules?address=&network=.
+// ContextRules godoc
+// @Summary      List a smart account's context rules
+// @Description  Fetches the on-chain context rules (spending policies and their signers) configured for a smart account.
+// @Tags         smart-account
+// @Produce      json
+// @Param        address query string true "Smart account address"
+// @Param        network query string false "Network" default(testnet)
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account/context-rules [get]
 func (h *SmartAccountHandler) ContextRules(c *gin.Context) {
 	address := c.Query("address")
 	if address == "" {
@@ -131,7 +156,17 @@ func (h *SmartAccountHandler) ContextRules(c *gin.Context) {
 	})
 }
 
-// Balances handles GET /api/smart-account/balances?smartAccountAddress=&all=1.
+// Balances godoc
+// @Summary      Get a smart account's asset balances
+// @Description  Fetches balances for every asset in the configured catalog. Zero balances are omitted unless all=1.
+// @Tags         smart-account
+// @Produce      json
+// @Param        smartAccountAddress query string true "Smart account address"
+// @Param        all query string false "Include zero balances when set to 1"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account/balances [get]
 func (h *SmartAccountHandler) Balances(c *gin.Context) {
 	address := c.Query("smartAccountAddress")
 	if address == "" {

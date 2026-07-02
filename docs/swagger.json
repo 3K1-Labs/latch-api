@@ -9,6 +9,74 @@
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/api/accounts": {
+            "get": {
+                "description": "Returns every smart account (seed and passkey wallets) owned by the session user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "List the session user's smart accounts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/accounts/set-active": {
+            "post": {
+                "description": "Sets a client-readable cookie recording which smart account is active. Purely a cookie write — no server-side persistence.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Set the active smart account cookie",
+                "parameters": [
+                    {
+                        "description": "Smart account address to mark active",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.setActiveAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/counter": {
             "get": {
                 "description": "Simulates the demo counter contract's get() function on testnet. Returns 0 if the simulation doesn't return a success result (e.g. an unset counter).",
@@ -28,6 +96,1458 @@
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/accounts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-accounts"
+                ],
+                "summary": "List the session user's deployed multisig accounts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/accounts/deploy": {
+            "post": {
+                "description": "Deploys the multisig smart account for the given threshold, signer set, and salt via the factory contract. Idempotent: returns alreadyDeployed=true if it's already live.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-accounts"
+                ],
+                "summary": "Deploy a multisig account on-chain",
+                "parameters": [
+                    {
+                        "description": "Threshold, signer set, and account salt",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.deployAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/accounts/draft": {
+            "post": {
+                "description": "Computes the deterministic smart account address and factory deploy params for a given threshold and signer set, without persisting anything or deploying on-chain.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-accounts"
+                ],
+                "summary": "Predict a multisig account address from signers",
+                "parameters": [
+                    {
+                        "description": "Threshold and signer set",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.draftAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/accounts/register": {
+            "post": {
+                "description": "Persists the multisig account and its members for the session user after on-chain deploy, so it appears in List.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-accounts"
+                ],
+                "summary": "Register a deployed multisig account for the session user",
+                "parameters": [
+                    {
+                        "description": "Deployed account address, threshold, salt, and members",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.registerAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts": {
+            "get": {
+                "description": "Returns the session user's in-progress (collecting) draft, or {\"draft\":null} if none exists.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Get the session user's active multisig draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Must be 1",
+                        "name": "active",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Starts a new multisig account draft owned by the session user, generating an invite token other members join with.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Create a new multisig draft",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}": {
+            "get": {
+                "description": "Fetches a draft owned by the session user. 404 if it doesn't exist or belongs to someone else.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Get a multisig draft by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Update a multisig draft's signature threshold",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New threshold",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.updateDraftThresholdRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/deploy": {
+            "post": {
+                "description": "Deploys the draft's smart account via the factory contract using its current threshold and members. Idempotent: returns alreadyDeployed=true if it's already live.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Deploy a multisig draft on-chain",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/members": {
+            "post": {
+                "description": "Adds a signer (passkey, seed/G-address, or delegated key) to the session user's own draft.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Add a member to a multisig draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Member to add",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.draftMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/members/{memberId}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Remove a member from a multisig draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Member ID",
+                        "name": "memberId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/predict": {
+            "post": {
+                "description": "Computes the deterministic smart account address and factory deploy params for the draft's current threshold and members, without deploying.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-drafts"
+                ],
+                "summary": "Predict a draft's deploy address",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/webauthn/authenticate/begin": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-draft-webauthn"
+                ],
+                "summary": "Begin a draft passkey authentication ceremony",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional chrome extension id",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.beginCeremonyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/webauthn/authenticate/finish": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-draft-webauthn"
+                ],
+                "summary": "Finish a draft passkey authentication ceremony",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "WebAuthn assertion response",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.finishAuthenticationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/webauthn/register/begin": {
+            "post": {
+                "description": "Runs the WebAuthn registration ceremony for the draft creator's own device. Requires the draft to be owned by the session user and still collecting.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-draft-webauthn"
+                ],
+                "summary": "Begin enrolling a passkey signer for a draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional chrome extension id",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.beginCeremonyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/drafts/{id}/webauthn/register/finish": {
+            "post": {
+                "description": "Verifies the WebAuthn ceremony and returns {credentialId, keyDataHex} for the caller to add as a draft member via POST /api/multisig/drafts/{id}/members. No smart account is deployed here.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-draft-webauthn"
+                ],
+                "summary": "Finish enrolling a passkey signer for a draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "WebAuthn attestation response",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.finishRegistrationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/join/{token}": {
+            "get": {
+                "description": "No ownership check — only requires the token resolve to a still-collecting, unexpired draft. Used by invitees to inspect a draft before joining.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-join"
+                ],
+                "summary": "Get a draft's public view by invite token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Invite token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/join/{token}/members": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-join"
+                ],
+                "summary": "Join a draft as a member via invite token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Invite token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Member to add",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.draftMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/join/{token}/webauthn/authenticate/begin": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-join"
+                ],
+                "summary": "Begin a passkey authentication ceremony via invite token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Invite token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional chrome extension id",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.beginCeremonyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/join/{token}/webauthn/authenticate/finish": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-join"
+                ],
+                "summary": "Finish a passkey authentication ceremony via invite token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Invite token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "WebAuthn assertion response",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.finishAuthenticationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/join/{token}/webauthn/register/begin": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-join"
+                ],
+                "summary": "Begin enrolling a passkey signer via invite token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Invite token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional chrome extension id",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.beginCeremonyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/join/{token}/webauthn/register/finish": {
+            "post": {
+                "description": "Verifies the WebAuthn ceremony and returns {credentialId, keyDataHex} for the caller to add as a member via POST /api/multisig/join/{token}/members.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-join"
+                ],
+                "summary": "Finish enrolling a passkey signer via invite token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Invite token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "WebAuthn attestation response",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.finishRegistrationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "List proposals for a multisig account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Multisig smart account address",
+                        "name": "account",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Builds an unsigned operation (send or contract call) against a multisig smart account and stores it as a pending proposal awaiting signer approvals.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Create a multisig transaction proposal",
+                "parameters": [
+                    {
+                        "description": "Proposal operation parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.createProposalRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals/{id}": {
+            "get": {
+                "description": "Returns the proposal, its multisig account, member list, and recorded approvals.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Get a multisig proposal's full detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals/{id}/approve/delegated/begin": {
+            "post": {
+                "description": "Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger to sign against.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Begin a delegated (G-address) proposal approval",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Member ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.approveDelegatedBeginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals/{id}/approve/delegated/finish": {
+            "post": {
+                "description": "Verifies the externally-signed auth entry against the template from ApproveDelegatedBegin and records the approval.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Finish a delegated (G-address) proposal approval",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Member ID, signed auth entry, and signer address",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.approveDelegatedFinishRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals/{id}/approve/webauthn": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Approve a proposal with a passkey signature",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Member ID and WebAuthn signature",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.approveWebauthnRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals/{id}/execute": {
+            "post": {
+                "description": "Submits the proposal's transaction to the network once its approval threshold has been met.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Execute a fully-approved multisig proposal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multisig/proposals/{id}/refresh": {
+            "post": {
+                "description": "Re-simulates the proposal's operation against current chain state and updates validUntilLedger/authDigestHex. Clears all existing approvals — signers must approve again.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "multisig-proposals"
+                ],
+                "summary": "Refresh a proposal's simulation and auth digest",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
@@ -388,6 +1908,244 @@
                 }
             }
         },
+        "/api/smart-account/balances": {
+            "get": {
+                "description": "Fetches balances for every asset in the configured catalog. Zero balances are omitted unless all=1.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Get a smart account's asset balances",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Smart account address",
+                        "name": "smartAccountAddress",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Include zero balances when set to 1",
+                        "name": "all",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/smart-account/context-rules": {
+            "get": {
+                "description": "Fetches the on-chain context rules (spending policies and their signers) configured for a smart account.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "List a smart account's context rules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Smart account address",
+                        "name": "address",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "testnet",
+                        "description": "Network",
+                        "name": "network",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/smart-account/webauthn": {
+            "get": {
+                "description": "Pure computation over client-supplied key material (no session, no persistence). Returns the deterministic smart account address for the given credential/key data and whether it's already deployed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Derive a smart account address from WebAuthn key material",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "WebAuthn credential ID",
+                        "name": "credentialId",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Hex-encoded public key + credential ID",
+                        "name": "keyDataHex",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Standalone deploy endpoint over client-supplied key material — does not persist a webapp.smart_accounts row (that only happens via the registration-finish flow, which is tied to a session user).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy a smart account from WebAuthn key material",
+                "parameters": [
+                    {
+                        "description": "WebAuthn key data and credential ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.deploySmartAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/build-send": {
+            "post": {
+                "description": "Builds an unsigned send transaction (XLM or a cataloged asset) from a smart account, along with the auth entries and signature payload the client needs to sign next.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Build a send transaction",
+                "parameters": [
+                    {
+                        "description": "Send parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.buildSendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/transaction/relay": {
             "post": {
                 "description": "Submits a signed transaction envelope to the Soroban RPC, polls for confirmation (up to 20 s), and returns the final status.",
@@ -481,6 +2239,253 @@
                         "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/submit-webauthn": {
+            "post": {
+                "description": "Attaches the client's WebAuthn signature to the built transaction's auth entry/entries and submits it to the network.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Submit a WebAuthn-signed transaction",
+                "parameters": [
+                    {
+                        "description": "Signed transaction and auth entries",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.submitWebAuthnRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/webauthn/authentication/begin": {
+            "post": {
+                "description": "Returns PublicKeyCredentialRequestOptions for the session user to pass to navigator.credentials.get().",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webauthn"
+                ],
+                "summary": "Begin a WebAuthn authentication ceremony",
+                "parameters": [
+                    {
+                        "description": "Optional chrome extension id",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.beginCeremonyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/webauthn/authentication/finish": {
+            "post": {
+                "description": "Verifies the WebAuthn assertion against the stored credential and returns the credential ID on success.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webauthn"
+                ],
+                "summary": "Finish a WebAuthn authentication ceremony",
+                "parameters": [
+                    {
+                        "description": "WebAuthn assertion response",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.finishAuthenticationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/webauthn/credentials": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webauthn"
+                ],
+                "summary": "List the session user's WebAuthn credentials",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/webauthn/registration/begin": {
+            "post": {
+                "description": "Returns PublicKeyCredentialCreationOptions for the session user to pass to navigator.credentials.create(). The session cookie is set automatically if missing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webauthn"
+                ],
+                "summary": "Begin a WebAuthn registration ceremony",
+                "parameters": [
+                    {
+                        "description": "Optional display name / chrome extension id",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.beginCeremonyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/webauthn/registration/finish": {
+            "post": {
+                "description": "Verifies the WebAuthn ceremony, then deploys the resulting passkey's smart account via the factory contract. Returns credentialId, keyDataHex, saltHex, smartAccountAddress, deployed, alreadyDeployed, and a determinism check.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webauthn"
+                ],
+                "summary": "Finish a WebAuthn registration ceremony",
+                "parameters": [
+                    {
+                        "description": "WebAuthn attestation response",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.finishRegistrationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
                     }
                 }
@@ -2408,6 +4413,51 @@
                 }
             }
         },
+        "internal_handler_webapp.approveDelegatedBeginRequest": {
+            "type": "object",
+            "required": [
+                "memberId"
+            ],
+            "properties": {
+                "memberId": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.approveDelegatedFinishRequest": {
+            "type": "object",
+            "required": [
+                "memberId",
+                "signedAuthEntryBase64",
+                "signerAddress"
+            ],
+            "properties": {
+                "memberId": {
+                    "type": "string"
+                },
+                "signedAuthEntryBase64": {
+                    "type": "string"
+                },
+                "signerAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.approveWebauthnRequest": {
+            "type": "object",
+            "required": [
+                "memberId",
+                "sigDataXdrHex"
+            ],
+            "properties": {
+                "memberId": {
+                    "type": "string"
+                },
+                "sigDataXdrHex": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler_webapp.backupPasskeyRequest": {
             "type": "object",
             "required": [
@@ -2437,6 +4487,49 @@
                 }
             }
         },
+        "internal_handler_webapp.beginCeremonyRequest": {
+            "type": "object",
+            "properties": {
+                "chromeExtensionId": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.buildSendRequest": {
+            "type": "object",
+            "required": [
+                "amount",
+                "recipient",
+                "signerType",
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "assetId": {
+                    "type": "string"
+                },
+                "contractId": {
+                    "type": "string"
+                },
+                "recipient": {
+                    "type": "string"
+                },
+                "signerG": {
+                    "type": "string"
+                },
+                "signerType": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler_webapp.counterResponse": {
             "type": "object",
             "properties": {
@@ -2463,6 +4556,39 @@
                 "fiatCode": {
                     "type": "string",
                     "example": "USD"
+                }
+            }
+        },
+        "internal_handler_webapp.createProposalRequest": {
+            "type": "object",
+            "required": [
+                "operationKind",
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "assetId": {
+                    "type": "string"
+                },
+                "operationKind": {
+                    "type": "string"
+                },
+                "recipient": {
+                    "type": "string"
+                },
+                "requireMatchedContextRule": {
+                    "type": "boolean"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                },
+                "targetContractId": {
+                    "type": "string"
+                },
+                "tokenContractId": {
+                    "type": "string"
                 }
             }
         },
@@ -2519,6 +4645,139 @@
                 "payloadRef": {
                     "type": "string",
                     "example": "sp_1a2b3c4d5e6f7890abcdef1234567890"
+                }
+            }
+        },
+        "internal_handler_webapp.deployAccountRequest": {
+            "type": "object",
+            "required": [
+                "accountSaltHex",
+                "signers",
+                "threshold"
+            ],
+            "properties": {
+                "accountSaltHex": {
+                    "type": "string"
+                },
+                "signers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_webapp.multisigSignerInitRequest"
+                    }
+                },
+                "threshold": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler_webapp.deploySmartAccountRequest": {
+            "type": "object",
+            "required": [
+                "credentialId",
+                "keyDataHex"
+            ],
+            "properties": {
+                "credentialId": {
+                    "type": "string"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.draftAccountRequest": {
+            "type": "object",
+            "required": [
+                "signers",
+                "threshold"
+            ],
+            "properties": {
+                "accountSaltHex": {
+                    "type": "string"
+                },
+                "signers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_webapp.multisigSignerInitRequest"
+                    }
+                },
+                "threshold": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler_webapp.draftMemberRequest": {
+            "type": "object",
+            "required": [
+                "label",
+                "memberType"
+            ],
+            "properties": {
+                "credentialId": {
+                    "type": "string"
+                },
+                "gAddress": {
+                    "type": "string"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "memberType": {
+                    "type": "string"
+                },
+                "publicKeyHex": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.finishAuthenticationRequest": {
+            "type": "object",
+            "required": [
+                "response"
+            ],
+            "properties": {
+                "chromeExtensionId": {
+                    "type": "string"
+                },
+                "response": {
+                    "$ref": "#/definitions/internal_handler_webapp.publicKeyCredentialJSON"
+                }
+            }
+        },
+        "internal_handler_webapp.finishRegistrationRequest": {
+            "type": "object",
+            "required": [
+                "response"
+            ],
+            "properties": {
+                "chromeExtensionId": {
+                    "type": "string"
+                },
+                "response": {
+                    "$ref": "#/definitions/internal_handler_webapp.publicKeyCredentialJSON"
+                }
+            }
+        },
+        "internal_handler_webapp.multisigSignerInitRequest": {
+            "type": "object",
+            "required": [
+                "type"
+            ],
+            "properties": {
+                "gAddress": {
+                    "type": "string"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
                 }
             }
         },
@@ -2667,6 +4926,162 @@
                 "widgetUrl": {
                     "type": "string",
                     "example": "https://buy.moonpay.com?apiKey=...\u0026signature=..."
+                }
+            }
+        },
+        "internal_handler_webapp.publicKeyCredentialJSON": {
+            "type": "object",
+            "required": [
+                "id",
+                "rawId",
+                "response"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "rawId": {
+                    "type": "string"
+                },
+                "response": {
+                    "$ref": "#/definitions/internal_handler_webapp.publicKeyCredentialResponseJSON"
+                },
+                "transports": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.publicKeyCredentialResponseJSON": {
+            "type": "object",
+            "required": [
+                "clientDataJSON"
+            ],
+            "properties": {
+                "attestationObject": {
+                    "type": "string"
+                },
+                "authenticatorData": {
+                    "type": "string"
+                },
+                "clientDataJSON": {
+                    "type": "string"
+                },
+                "signature": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.registerAccountRequest": {
+            "type": "object",
+            "required": [
+                "accountSaltHex",
+                "members",
+                "smartAccountAddress",
+                "threshold"
+            ],
+            "properties": {
+                "accountSaltHex": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_webapp.registerMemberRequest"
+                    }
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                },
+                "threshold": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler_webapp.registerMemberRequest": {
+            "type": "object",
+            "required": [
+                "type"
+            ],
+            "properties": {
+                "credentialId": {
+                    "type": "string"
+                },
+                "gAddress": {
+                    "type": "string"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.setActiveAccountRequest": {
+            "type": "object",
+            "required": [
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.submitWebAuthnRequest": {
+            "type": "object",
+            "required": [
+                "keyDataHex",
+                "sigDataXdr",
+                "txXdr"
+            ],
+            "properties": {
+                "authEntriesXdr": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "authEntryXdr": {
+                    "type": "string"
+                },
+                "contextRuleId": {
+                    "type": "integer"
+                },
+                "delegatedGAuthEntrySynthesized": {
+                    "type": "boolean"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                },
+                "sigDataXdr": {
+                    "type": "string"
+                },
+                "smartAccountAuthEntryIndex": {
+                    "type": "integer"
+                },
+                "txXdr": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.updateDraftThresholdRequest": {
+            "type": "object",
+            "required": [
+                "threshold"
+            ],
+            "properties": {
+                "threshold": {
+                    "type": "integer"
                 }
             }
         },

@@ -70,7 +70,14 @@ func serializedDraftJSON(d webapp.SerializedDraft) gin.H {
 	}
 }
 
-// Create handles POST /api/multisig/drafts.
+// Create godoc
+// @Summary      Create a new multisig draft
+// @Description  Starts a new multisig account draft owned by the session user, generating an invite token other members join with.
+// @Tags         multisig-drafts
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/multisig/drafts [post]
 func (h *MultisigDraftsHandler) Create(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -85,7 +92,16 @@ func (h *MultisigDraftsHandler) Create(c *gin.Context) {
 	})
 }
 
-// GetActive handles GET /api/multisig/drafts?active=1.
+// GetActive godoc
+// @Summary      Get the session user's active multisig draft
+// @Description  Returns the session user's in-progress (collecting) draft, or {"draft":null} if none exists.
+// @Tags         multisig-drafts
+// @Produce      json
+// @Param        active query string true "Must be 1"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/drafts [get]
 func (h *MultisigDraftsHandler) GetActive(c *gin.Context) {
 	if c.Query("active") != "1" {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "expected ?active=1")
@@ -108,7 +124,15 @@ func (h *MultisigDraftsHandler) GetActive(c *gin.Context) {
 	})
 }
 
-// Get handles GET /api/multisig/drafts/:id.
+// Get godoc
+// @Summary      Get a multisig draft by ID
+// @Description  Fetches a draft owned by the session user. 404 if it doesn't exist or belongs to someone else.
+// @Tags         multisig-drafts
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id} [get]
 func (h *MultisigDraftsHandler) Get(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -127,7 +151,17 @@ type updateDraftThresholdRequest struct {
 	Threshold int `json:"threshold" binding:"required"`
 }
 
-// UpdateThreshold handles PATCH /api/multisig/drafts/:id.
+// UpdateThreshold godoc
+// @Summary      Update a multisig draft's signature threshold
+// @Tags         multisig-drafts
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        body body updateDraftThresholdRequest true "New threshold"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id} [patch]
 func (h *MultisigDraftsHandler) UpdateThreshold(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -148,7 +182,16 @@ func (h *MultisigDraftsHandler) UpdateThreshold(c *gin.Context) {
 	})
 }
 
-// Predict handles POST /api/multisig/drafts/:id/predict.
+// Predict godoc
+// @Summary      Predict a draft's deploy address
+// @Description  Computes the deterministic smart account address and factory deploy params for the draft's current threshold and members, without deploying.
+// @Tags         multisig-drafts
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/predict [post]
 func (h *MultisigDraftsHandler) Predict(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -164,7 +207,17 @@ func (h *MultisigDraftsHandler) Predict(c *gin.Context) {
 	})
 }
 
-// Deploy handles POST /api/multisig/drafts/:id/deploy.
+// Deploy godoc
+// @Summary      Deploy a multisig draft on-chain
+// @Description  Deploys the draft's smart account via the factory contract using its current threshold and members. Idempotent: returns alreadyDeployed=true if it's already live.
+// @Tags         multisig-drafts
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/deploy [post]
 func (h *MultisigDraftsHandler) Deploy(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -200,7 +253,19 @@ func (r draftMemberRequest) toDomain() webapp.DraftMultisigMember {
 	}
 }
 
-// AddMember handles POST /api/multisig/drafts/:id/members.
+// AddMember godoc
+// @Summary      Add a member to a multisig draft
+// @Description  Adds a signer (passkey, seed/G-address, or delegated key) to the session user's own draft.
+// @Tags         multisig-drafts
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        body body draftMemberRequest true "Member to add"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/members [post]
 func (h *MultisigDraftsHandler) AddMember(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -218,7 +283,15 @@ func (h *MultisigDraftsHandler) AddMember(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, gin.H{"draft": serializedDraftJSON(draft)})
 }
 
-// DeleteMember handles DELETE /api/multisig/drafts/:id/members/:memberId.
+// DeleteMember godoc
+// @Summary      Remove a member from a multisig draft
+// @Tags         multisig-drafts
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        memberId path string true "Member ID"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/members/{memberId} [delete]
 func (h *MultisigDraftsHandler) DeleteMember(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 

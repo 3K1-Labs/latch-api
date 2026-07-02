@@ -55,7 +55,20 @@ func (h *MultisigDraftWebAuthnHandler) requireOwnedDraft(c *gin.Context, userID 
 	return true
 }
 
-// RegistrationBegin handles POST /api/multisig/drafts/:id/webauthn/register/begin.
+// RegistrationBegin godoc
+// @Summary      Begin enrolling a passkey signer for a draft
+// @Description  Runs the WebAuthn registration ceremony for the draft creator's own device. Requires the draft to be owned by the session user and still collecting.
+// @Tags         multisig-draft-webauthn
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        body body beginCeremonyRequest false "Optional chrome extension id"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/webauthn/register/begin [post]
 func (h *MultisigDraftWebAuthnHandler) RegistrationBegin(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 	if !h.requireOwnedDraft(c, userID) {
@@ -97,7 +110,19 @@ func (h *MultisigDraftWebAuthnHandler) RegistrationBegin(c *gin.Context) {
 	})
 }
 
-// RegistrationFinish handles POST /api/multisig/drafts/:id/webauthn/register/finish.
+// RegistrationFinish godoc
+// @Summary      Finish enrolling a passkey signer for a draft
+// @Description  Verifies the WebAuthn ceremony and returns {credentialId, keyDataHex} for the caller to add as a draft member via POST /api/multisig/drafts/{id}/members. No smart account is deployed here.
+// @Tags         multisig-draft-webauthn
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        body body finishRegistrationRequest true "WebAuthn attestation response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/webauthn/register/finish [post]
 func (h *MultisigDraftWebAuthnHandler) RegistrationFinish(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 	if !h.requireOwnedDraft(c, userID) {
@@ -142,7 +167,19 @@ func (h *MultisigDraftWebAuthnHandler) RegistrationFinish(c *gin.Context) {
 	})
 }
 
-// AuthenticationBegin handles POST /api/multisig/drafts/:id/webauthn/authenticate/begin.
+// AuthenticationBegin godoc
+// @Summary      Begin a draft passkey authentication ceremony
+// @Tags         multisig-draft-webauthn
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        body body beginCeremonyRequest false "Optional chrome extension id"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/webauthn/authenticate/begin [post]
 func (h *MultisigDraftWebAuthnHandler) AuthenticationBegin(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 	if !h.requireOwnedDraft(c, userID) {
@@ -186,7 +223,18 @@ func (h *MultisigDraftWebAuthnHandler) AuthenticationBegin(c *gin.Context) {
 	})
 }
 
-// AuthenticationFinish handles POST /api/multisig/drafts/:id/webauthn/authenticate/finish.
+// AuthenticationFinish godoc
+// @Summary      Finish a draft passkey authentication ceremony
+// @Tags         multisig-draft-webauthn
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Draft ID"
+// @Param        body body finishAuthenticationRequest true "WebAuthn assertion response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/drafts/{id}/webauthn/authenticate/finish [post]
 func (h *MultisigDraftWebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 	if !h.requireOwnedDraft(c, userID) {

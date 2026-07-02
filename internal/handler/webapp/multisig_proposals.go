@@ -31,7 +31,18 @@ type createProposalRequest struct {
 	RequireMatchedContextRule bool           `json:"requireMatchedContextRule,omitempty"`
 }
 
-// Create handles POST /api/multisig/proposals.
+// Create godoc
+// @Summary      Create a multisig transaction proposal
+// @Description  Builds an unsigned operation (send or contract call) against a multisig smart account and stores it as a pending proposal awaiting signer approvals.
+// @Tags         multisig-proposals
+// @Accept       json
+// @Produce      json
+// @Param        body body createProposalRequest true "Proposal operation parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/proposals [post]
 func (h *MultisigProposalsHandler) Create(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -88,7 +99,15 @@ func proposalListItemJSON(p webapp.ProposalListItem) gin.H {
 	}
 }
 
-// List handles GET /api/multisig/proposals?account=:address.
+// List godoc
+// @Summary      List proposals for a multisig account
+// @Tags         multisig-proposals
+// @Produce      json
+// @Param        account query string true "Multisig smart account address"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/proposals [get]
 func (h *MultisigProposalsHandler) List(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 	account := c.Query("account")
@@ -110,7 +129,15 @@ func (h *MultisigProposalsHandler) List(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, gin.H{"threshold": threshold, "proposals": out})
 }
 
-// Get handles GET /api/multisig/proposals/:id.
+// Get godoc
+// @Summary      Get a multisig proposal's full detail
+// @Description  Returns the proposal, its multisig account, member list, and recorded approvals.
+// @Tags         multisig-proposals
+// @Produce      json
+// @Param        id path string true "Proposal ID"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/proposals/{id} [get]
 func (h *MultisigProposalsHandler) Get(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -168,7 +195,16 @@ func (h *MultisigProposalsHandler) Get(c *gin.Context) {
 	})
 }
 
-// Refresh handles POST /api/multisig/proposals/:id/refresh.
+// Refresh godoc
+// @Summary      Refresh a proposal's simulation and auth digest
+// @Description  Re-simulates the proposal's operation against current chain state and updates validUntilLedger/authDigestHex. Clears all existing approvals — signers must approve again.
+// @Tags         multisig-proposals
+// @Produce      json
+// @Param        id path string true "Proposal ID"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/proposals/{id}/refresh [post]
 func (h *MultisigProposalsHandler) Refresh(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -186,7 +222,16 @@ func (h *MultisigProposalsHandler) Refresh(c *gin.Context) {
 	})
 }
 
-// Execute handles POST /api/multisig/proposals/:id/execute.
+// Execute godoc
+// @Summary      Execute a fully-approved multisig proposal
+// @Description  Submits the proposal's transaction to the network once its approval threshold has been met.
+// @Tags         multisig-proposals
+// @Produce      json
+// @Param        id path string true "Proposal ID"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/proposals/{id}/execute [post]
 func (h *MultisigProposalsHandler) Execute(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -204,7 +249,18 @@ type approveWebauthnRequest struct {
 	SigDataXdrHex string `json:"sigDataXdrHex" binding:"required"`
 }
 
-// ApproveWebauthn handles POST /api/multisig/proposals/:id/approve/webauthn.
+// ApproveWebauthn godoc
+// @Summary      Approve a proposal with a passkey signature
+// @Tags         multisig-proposals
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Proposal ID"
+// @Param        body body approveWebauthnRequest true "Member ID and WebAuthn signature"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/proposals/{id}/approve/webauthn [post]
 func (h *MultisigProposalsHandler) ApproveWebauthn(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -226,7 +282,19 @@ type approveDelegatedBeginRequest struct {
 	MemberID string `json:"memberId" binding:"required"`
 }
 
-// ApproveDelegatedBegin handles POST /api/multisig/proposals/:id/approve/delegated/begin.
+// ApproveDelegatedBegin godoc
+// @Summary      Begin a delegated (G-address) proposal approval
+// @Description  Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger to sign against.
+// @Tags         multisig-proposals
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Proposal ID"
+// @Param        body body approveDelegatedBeginRequest true "Member ID"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/proposals/{id}/approve/delegated/begin [post]
 func (h *MultisigProposalsHandler) ApproveDelegatedBegin(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -257,7 +325,19 @@ type approveDelegatedFinishRequest struct {
 	SignerAddress         string `json:"signerAddress" binding:"required"`
 }
 
-// ApproveDelegatedFinish handles POST /api/multisig/proposals/:id/approve/delegated/finish.
+// ApproveDelegatedFinish godoc
+// @Summary      Finish a delegated (G-address) proposal approval
+// @Description  Verifies the externally-signed auth entry against the template from ApproveDelegatedBegin and records the approval.
+// @Tags         multisig-proposals
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Proposal ID"
+// @Param        body body approveDelegatedFinishRequest true "Member ID, signed auth entry, and signer address"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/proposals/{id}/approve/delegated/finish [post]
 func (h *MultisigProposalsHandler) ApproveDelegatedFinish(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 

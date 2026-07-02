@@ -70,7 +70,15 @@ func joinPath(token string) string {
 	return "/multisig/join/" + token
 }
 
-// GetByToken handles GET /api/multisig/join/:token.
+// GetByToken godoc
+// @Summary      Get a draft's public view by invite token
+// @Description  No ownership check — only requires the token resolve to a still-collecting, unexpired draft. Used by invitees to inspect a draft before joining.
+// @Tags         multisig-join
+// @Produce      json
+// @Param        token path string true "Invite token"
+// @Success      200 {object} map[string]any
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/join/{token} [get]
 func (h *MultisigJoinHandler) GetByToken(c *gin.Context) {
 	token := c.Param("token")
 	view, err := h.draftSvc.GetPublicDraftByToken(c.Request.Context(), token)
@@ -85,7 +93,18 @@ func (h *MultisigJoinHandler) GetByToken(c *gin.Context) {
 	})
 }
 
-// AddMember handles POST /api/multisig/join/:token/members.
+// AddMember godoc
+// @Summary      Join a draft as a member via invite token
+// @Tags         multisig-join
+// @Accept       json
+// @Produce      json
+// @Param        token path string true "Invite token"
+// @Param        body body draftMemberRequest true "Member to add"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/multisig/join/{token}/members [post]
 func (h *MultisigJoinHandler) AddMember(c *gin.Context) {
 	token := c.Param("token")
 
@@ -122,7 +141,18 @@ func (h *MultisigJoinHandler) requireValidInvite(c *gin.Context, token string) b
 	return true
 }
 
-// RegistrationBegin handles POST /api/multisig/join/:token/webauthn/register/begin.
+// RegistrationBegin godoc
+// @Summary      Begin enrolling a passkey signer via invite token
+// @Tags         multisig-join
+// @Accept       json
+// @Produce      json
+// @Param        token path string true "Invite token"
+// @Param        body body beginCeremonyRequest false "Optional chrome extension id"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/multisig/join/{token}/webauthn/register/begin [post]
 func (h *MultisigJoinHandler) RegistrationBegin(c *gin.Context) {
 	token := c.Param("token")
 	if !h.requireValidInvite(c, token) {
@@ -164,7 +194,18 @@ func (h *MultisigJoinHandler) RegistrationBegin(c *gin.Context) {
 	})
 }
 
-// RegistrationFinish handles POST /api/multisig/join/:token/webauthn/register/finish.
+// RegistrationFinish godoc
+// @Summary      Finish enrolling a passkey signer via invite token
+// @Description  Verifies the WebAuthn ceremony and returns {credentialId, keyDataHex} for the caller to add as a member via POST /api/multisig/join/{token}/members.
+// @Tags         multisig-join
+// @Accept       json
+// @Produce      json
+// @Param        token path string true "Invite token"
+// @Param        body body finishRegistrationRequest true "WebAuthn attestation response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/join/{token}/webauthn/register/finish [post]
 func (h *MultisigJoinHandler) RegistrationFinish(c *gin.Context) {
 	token := c.Param("token")
 	if !h.requireValidInvite(c, token) {
@@ -210,7 +251,18 @@ func (h *MultisigJoinHandler) RegistrationFinish(c *gin.Context) {
 	})
 }
 
-// AuthenticationBegin handles POST /api/multisig/join/:token/webauthn/authenticate/begin.
+// AuthenticationBegin godoc
+// @Summary      Begin a passkey authentication ceremony via invite token
+// @Tags         multisig-join
+// @Accept       json
+// @Produce      json
+// @Param        token path string true "Invite token"
+// @Param        body body beginCeremonyRequest false "Optional chrome extension id"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/multisig/join/{token}/webauthn/authenticate/begin [post]
 func (h *MultisigJoinHandler) AuthenticationBegin(c *gin.Context) {
 	token := c.Param("token")
 	if !h.requireValidInvite(c, token) {
@@ -254,7 +306,17 @@ func (h *MultisigJoinHandler) AuthenticationBegin(c *gin.Context) {
 	})
 }
 
-// AuthenticationFinish handles POST /api/multisig/join/:token/webauthn/authenticate/finish.
+// AuthenticationFinish godoc
+// @Summary      Finish a passkey authentication ceremony via invite token
+// @Tags         multisig-join
+// @Accept       json
+// @Produce      json
+// @Param        token path string true "Invite token"
+// @Param        body body finishAuthenticationRequest true "WebAuthn assertion response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/multisig/join/{token}/webauthn/authenticate/finish [post]
 func (h *MultisigJoinHandler) AuthenticationFinish(c *gin.Context) {
 	token := c.Param("token")
 	if !h.requireValidInvite(c, token) {

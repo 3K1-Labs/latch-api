@@ -20,7 +20,14 @@ func NewAccountsHandler(accountsSvc accountsService, crossSiteCookies bool) *Acc
 	return &AccountsHandler{accountsSvc: accountsSvc, crossSiteCookies: crossSiteCookies}
 }
 
-// List handles GET /api/accounts.
+// List godoc
+// @Summary      List the session user's smart accounts
+// @Description  Returns every smart account (seed and passkey wallets) owned by the session user.
+// @Tags         accounts
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/accounts [get]
 func (h *AccountsHandler) List(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
@@ -49,9 +56,16 @@ type setActiveAccountRequest struct {
 
 const activeAccountCookieMaxAge = 60 * 60 * 24 * 30 // 30 days, matches crossSiteCookieAttrs()'s maxAge in the TS source
 
-// SetActive handles POST /api/accounts/set-active. This is purely a
-// client-readable cookie with no server-side persistence, matching
-// app/api/accounts/set-active/route.ts exactly.
+// SetActive godoc
+// @Summary      Set the active smart account cookie
+// @Description  Sets a client-readable cookie recording which smart account is active. Purely a cookie write — no server-side persistence.
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        body body setActiveAccountRequest true "Smart account address to mark active"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/accounts/set-active [post]
 func (h *AccountsHandler) SetActive(c *gin.Context) {
 	var req setActiveAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.SmartAccountAddress == "" {
