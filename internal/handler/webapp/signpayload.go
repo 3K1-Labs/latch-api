@@ -22,17 +22,27 @@ func NewSignPayloadHandler(signPayloadSvc signPayloadService) *SignPayloadHandle
 }
 
 type createSignPayloadRequest struct {
-	Network             string `json:"network" binding:"required"`
-	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
-	UnsignedTxXdr       string `json:"unsignedTxXdr" binding:"required"`
-	Callback            string `json:"callback" binding:"required"`
-	RequestID           string `json:"requestId"`
-	Origin              string `json:"origin"`
-	Submit              *bool  `json:"submit"`
-	TTLSeconds          *int   `json:"ttlSeconds"`
+	Network             string `json:"network" binding:"required" example:"testnet"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required" example:"CABC...XYZ"`
+	UnsignedTxXdr       string `json:"unsignedTxXdr" binding:"required" example:"AAAAAgAAAAA..."`
+	Callback            string `json:"callback" binding:"required" example:"https://example.com/callback"`
+	RequestID           string `json:"requestId,omitempty" example:"req-123"`
+	Origin              string `json:"origin,omitempty" example:"https://example.com"`
+	Submit              *bool  `json:"submit,omitempty" example:"true"`
+	TTLSeconds          *int   `json:"ttlSeconds,omitempty" example:"600"`
 }
 
-// Create handles POST /api/sign-payload. Ports app/api/sign-payload/route.ts.
+// Create godoc
+// @Summary      Store a sign payload for out-of-band signing
+// @Description  Stores an unsigned transaction XDR plus a callback URL under a single-use, TTL-bounded reference (60s-3600s, default 600s). The referenced payload is deleted-on-read: GET consumes it exactly once. callback must be https://, or http://localhost / http://127.0.0.1 for local development.
+// @Tags         sign-payload
+// @Accept       json
+// @Produce      json
+// @Param        body body createSignPayloadRequest true "Sign payload to store"
+// @Success      201 {object} createSignPayloadResponse
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/sign-payload [post]
 func (h *SignPayloadHandler) Create(c *gin.Context) {
 	var req createSignPayloadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -90,9 +100,17 @@ func (h *SignPayloadHandler) Create(c *gin.Context) {
 	})
 }
 
-// Get handles GET /api/sign-payload/:payloadRef. Ports
-// app/api/sign-payload/[payloadRef]/route.ts: consumes the payload
-// (single-use) and returns its stored contents.
+// Get godoc
+// @Summary      Consume a stored sign payload
+// @Description  Fetches and permanently consumes (single-use) the sign payload for payloadRef. Returns 404 if the reference never existed or was already consumed, 410 if it expired.
+// @Tags         sign-payload
+// @Produce      json
+// @Param        payloadRef path string true "Payload reference, e.g. sp_1a2b3c4d5e6f7890abcdef1234567890"
+// @Success      200 {object} createSignPayloadRequest
+// @Failure      404 {object} webappErrorResponse
+// @Failure      410 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/sign-payload/{payloadRef} [get]
 func (h *SignPayloadHandler) Get(c *gin.Context) {
 	payloadRef := c.Param("payloadRef")
 	if !strings.HasPrefix(payloadRef, "sp_") {

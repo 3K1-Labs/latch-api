@@ -30,3 +30,6 @@ issues:
     - path: internal/handler/types.go
       linters:
         - unused
+    - path: internal/handler/webapp/swagger_types.go
+      linters:
+        - unused

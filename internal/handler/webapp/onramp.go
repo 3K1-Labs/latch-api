@@ -36,13 +36,24 @@ func (h *OnRampHandler) devOnlyGuard(c *gin.Context) bool {
 }
 
 type createOnRampSessionRequest struct {
-	DestinationCAddress string `json:"destinationCAddress" binding:"required"`
-	FiatAmount          string `json:"fiatAmount"`
-	FiatCode            string `json:"fiatCode"`
+	DestinationCAddress string `json:"destinationCAddress" binding:"required" example:"CABC...XYZ"`
+	FiatAmount          string `json:"fiatAmount,omitempty" example:"25"`
+	FiatCode            string `json:"fiatCode,omitempty" example:"USD"`
 }
 
-// Session handles POST /api/on-ramp/session. Ports
-// app/api/on-ramp/session/route.ts.
+// Session godoc
+// @Summary      Create an on-ramp session
+// @Description  Dev-only (403 in production). Creates a MoonPay on-ramp intent for destinationCAddress and returns either a Platform API session token or a signed widget URL depending on MOONPAY_INTEGRATION_MODE ("auto" falls back to a widget URL if the Platform API returns 404).
+// @Tags         on-ramp
+// @Accept       json
+// @Produce      json
+// @Param        body body createOnRampSessionRequest true "Destination contract address and optional fiat amount/code"
+// @Success      200 {object} onRampSessionResponse
+// @Failure      400 {object} webappErrorResponse
+// @Failure      403 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Failure      502 {object} webappErrorResponse
+// @Router       /api/on-ramp/session [post]
 func (h *OnRampHandler) Session(c *gin.Context) {
 	if h.devOnlyGuard(c) {
 		return
@@ -82,8 +93,17 @@ func (h *OnRampHandler) Session(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, resp)
 }
 
-// GetIntent handles GET /api/on-ramp/intent/:id. Ports
-// app/api/on-ramp/intent/[id]/route.ts's GET handler.
+// GetIntent godoc
+// @Summary      Get an on-ramp intent
+// @Description  Dev-only (403 in production). Fetches an on-ramp intent by id, including its live MoonPay transaction status if one is attached.
+// @Tags         on-ramp
+// @Produce      json
+// @Param        id path string true "On-ramp intent ID (UUID)"
+// @Success      200 {object} onRampIntentResponse
+// @Failure      403 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/on-ramp/intent/{id} [get]
 func (h *OnRampHandler) GetIntent(c *gin.Context) {
 	if h.devOnlyGuard(c) {
 		return
@@ -98,12 +118,24 @@ func (h *OnRampHandler) GetIntent(c *gin.Context) {
 }
 
 type updateOnRampIntentRequest struct {
-	Status               *string `json:"status"`
-	MoonpayTransactionID *string `json:"moonpayTransactionId"`
+	Status               *string `json:"status,omitempty" example:"pending" enums:"created,pending,completed,failed"`
+	MoonpayTransactionID *string `json:"moonpayTransactionId,omitempty" example:"tx_abc123"`
 }
 
-// UpdateIntent handles PATCH /api/on-ramp/intent/:id. Ports
-// app/api/on-ramp/intent/[id]/route.ts's PATCH handler.
+// UpdateIntent godoc
+// @Summary      Update an on-ramp intent
+// @Description  Dev-only (403 in production). Partial update: at least one of status or moonpayTransactionId is required. Returns the updated intent with its live MoonPay transaction status.
+// @Tags         on-ramp
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "On-ramp intent ID (UUID)"
+// @Param        body body updateOnRampIntentRequest true "Fields to update"
+// @Success      200 {object} onRampIntentResponse
+// @Failure      400 {object} webappErrorResponse
+// @Failure      403 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/on-ramp/intent/{id} [patch]
 func (h *OnRampHandler) UpdateIntent(c *gin.Context) {
 	if h.devOnlyGuard(c) {
 		return
@@ -135,7 +167,16 @@ func (h *OnRampHandler) UpdateIntent(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, serializeOnRampIntent(intent, moonpayStatus))
 }
 
-// Pool handles GET /api/on-ramp/pool?memo=. Ports app/api/on-ramp/pool/route.ts.
+// Pool godoc
+// @Summary      Get the on-ramp pool account snapshot
+// @Description  Dev-only (403 in production). Returns the on-ramp pool account's XLM balance and up to 20 recent transactions, optionally filtered to a single memo.
+// @Tags         on-ramp
+// @Produce      json
+// @Param        memo query string false "Filter recent transactions to this memo (e.g. an intent's memoId)"
+// @Success      200 {object} onRampPoolResponse
+// @Failure      403 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/on-ramp/pool [get]
 func (h *OnRampHandler) Pool(c *gin.Context) {
 	if h.devOnlyGuard(c) {
 		return

@@ -20,14 +20,22 @@ func NewRecoveryHandler(backupPasskeySvc backupPasskeyService) *RecoveryHandler 
 }
 
 type backupPasskeyRequest struct {
-	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
-	Label               string `json:"label"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required" example:"CABC...XYZ"`
+	Label               string `json:"label,omitempty" example:"my phone"`
 }
 
-// BackupPasskey handles POST /api/recovery/backup-passkey. Ports
-// app/api/recovery/backup-passkey/route.ts: today this only records
-// intent/metadata for adding a backup passkey signer; a future step wires it
-// to an on-chain second-signer flow.
+// BackupPasskey godoc
+// @Summary      Record intent to add a backup passkey signer
+// @Description  Verifies the session user owns smartAccountAddress, then records (upserts) intent to add a backup passkey signer. Today this only stores metadata; a future step wires it to an on-chain second-signer flow. The session cookie is set automatically if missing.
+// @Tags         recovery
+// @Accept       json
+// @Produce      json
+// @Param        body body backupPasskeyRequest true "Smart account address and optional label"
+// @Success      200 {object} backupPasskeyResponse
+// @Failure      400 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/recovery/backup-passkey [post]
 func (h *RecoveryHandler) BackupPasskey(c *gin.Context) {
 	var req backupPasskeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

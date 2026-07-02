@@ -9,6 +9,431 @@
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/api/counter": {
+            "get": {
+                "description": "Simulates the demo counter contract's get() function on testnet. Returns 0 if the simulation doesn't return a success result (e.g. an unset counter).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "counter"
+                ],
+                "summary": "Get the demo counter value",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.counterResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/on-ramp/intent/{id}": {
+            "get": {
+                "description": "Dev-only (403 in production). Fetches an on-ramp intent by id, including its live MoonPay transaction status if one is attached.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "on-ramp"
+                ],
+                "summary": "Get an on-ramp intent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "On-ramp intent ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.onRampIntentResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Dev-only (403 in production). Partial update: at least one of status or moonpayTransactionId is required. Returns the updated intent with its live MoonPay transaction status.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "on-ramp"
+                ],
+                "summary": "Update an on-ramp intent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "On-ramp intent ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.updateOnRampIntentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.onRampIntentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/on-ramp/pool": {
+            "get": {
+                "description": "Dev-only (403 in production). Returns the on-ramp pool account's XLM balance and up to 20 recent transactions, optionally filtered to a single memo.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "on-ramp"
+                ],
+                "summary": "Get the on-ramp pool account snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter recent transactions to this memo (e.g. an intent's memoId)",
+                        "name": "memo",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.onRampPoolResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/on-ramp/session": {
+            "post": {
+                "description": "Dev-only (403 in production). Creates a MoonPay on-ramp intent for destinationCAddress and returns either a Platform API session token or a signed widget URL depending on MOONPAY_INTEGRATION_MODE (\"auto\" falls back to a widget URL if the Platform API returns 404).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "on-ramp"
+                ],
+                "summary": "Create an on-ramp session",
+                "parameters": [
+                    {
+                        "description": "Destination contract address and optional fiat amount/code",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.createOnRampSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.onRampSessionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/recovery/backup-passkey": {
+            "post": {
+                "description": "Verifies the session user owns smartAccountAddress, then records (upserts) intent to add a backup passkey signer. Today this only stores metadata; a future step wires it to an on-chain second-signer flow. The session cookie is set automatically if missing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recovery"
+                ],
+                "summary": "Record intent to add a backup passkey signer",
+                "parameters": [
+                    {
+                        "description": "Smart account address and optional label",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.backupPasskeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.backupPasskeyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sign-payload": {
+            "post": {
+                "description": "Stores an unsigned transaction XDR plus a callback URL under a single-use, TTL-bounded reference (60s-3600s, default 600s). The referenced payload is deleted-on-read: GET consumes it exactly once. callback must be https://, or http://localhost / http://127.0.0.1 for local development.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sign-payload"
+                ],
+                "summary": "Store a sign payload for out-of-band signing",
+                "parameters": [
+                    {
+                        "description": "Sign payload to store",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.createSignPayloadRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.createSignPayloadResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sign-payload/{payloadRef}": {
+            "get": {
+                "description": "Fetches and permanently consumes (single-use) the sign payload for payloadRef. Returns 404 if the reference never existed or was already consumed, 410 if it expired.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sign-payload"
+                ],
+                "summary": "Consume a stored sign payload",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Payload reference, e.g. sp_1a2b3c4d5e6f7890abcdef1234567890",
+                        "name": "payloadRef",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.createSignPayloadRequest"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/relay": {
+            "post": {
+                "description": "Submits a signed transaction envelope to the Soroban RPC, polls for confirmation (up to 20 s), and returns the final status.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Submit and confirm a Soroban transaction",
+                "parameters": [
+                    {
+                        "description": "Signed XDR transaction envelope and optional network",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.relayRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.relayResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/transaction/simulate": {
             "post": {
                 "description": "Simulates a Soroban transaction via the RPC and returns min resource fee, transaction data, and results.",
@@ -54,6 +479,52 @@
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/auth/challenge": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request a wallet sign-in challenge",
+                "parameters": [
+                    {
+                        "description": "Wallet address + key_type",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.walletChallengeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.apiErrorResponse"
                         }
@@ -210,6 +681,58 @@
                 }
             }
         },
+        "/v1/auth/sign-in": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Complete wallet sign-in",
+                "parameters": [
+                    {
+                        "description": "Signed challenge",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.walletSignInRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/auth/verify": {
             "post": {
                 "description": "Verifies the OTP and returns a JWT access token plus a refresh token.",
@@ -304,7 +827,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Encrypts the credential blob server-side and upserts it. POST and PUT are identical — both upsert.",
+                "description": "Stores an opaque credential blob that the mobile client has already encrypted\nwith Argon2id + AES-256-GCM. The backend never decrypts it.\nPOST and PUT are identical — both upsert.",
                 "consumes": [
                     "application/json"
                 ],
@@ -314,10 +837,10 @@
                 "tags": [
                     "backup"
                 ],
-                "summary": "Store encrypted backup",
+                "summary": "Store client-encrypted backup",
                 "parameters": [
                     {
-                        "description": "Credential blob and smart account address",
+                        "description": "Client-encrypted blob and smart account address",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -359,7 +882,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Encrypts the credential blob server-side and upserts it. POST and PUT are identical — both upsert.",
+                "description": "Stores an opaque credential blob that the mobile client has already encrypted\nwith Argon2id + AES-256-GCM. The backend never decrypts it.\nPOST and PUT are identical — both upsert.",
                 "consumes": [
                     "application/json"
                 ],
@@ -369,10 +892,10 @@
                 "tags": [
                     "backup"
                 ],
-                "summary": "Store encrypted backup",
+                "summary": "Store client-encrypted backup",
                 "parameters": [
                     {
-                        "description": "Credential blob and smart account address",
+                        "description": "Client-encrypted blob and smart account address",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -396,6 +919,353 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/cosign/requests": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cosign"
+                ],
+                "summary": "List pending cosign requests for a queue",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Blind queue index",
+                        "name": "queue_index",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cosign"
+                ],
+                "summary": "Propose a cosign request",
+                "parameters": [
+                    {
+                        "description": "Blind queue index + encrypted tx + threshold",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.createCosignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/cosign/requests/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cosign"
+                ],
+                "summary": "Get a cosign request with its signatures",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cosign"
+                ],
+                "summary": "Cancel a pending cosign request (idempotent)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.messageDataResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/cosign/requests/{id}/signatures": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cosign"
+                ],
+                "summary": "Attach a partial signature",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Blind signer id + encrypted auth entry",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.addSignatureRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/cosign/requests/{id}/submission": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cosign"
+                ],
+                "summary": "Record the on-chain submission hash",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "On-chain tx hash",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.markSubmittedRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.messageDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.apiErrorResponse"
                         }
@@ -484,6 +1354,113 @@
                 }
             }
         },
+        "/v1/memberships": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memberships"
+                ],
+                "summary": "List wallets announced for a member blind id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Member blind id (hex64)",
+                        "name": "member_blind_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memberships"
+                ],
+                "summary": "Announce shared-wallet membership for a set of member blind ids",
+                "parameters": [
+                    {
+                        "description": "Wallet C-address + member blind ids",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.announceMembershipRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/prices": {
             "get": {
                 "description": "Returns the current USD price for each requested Stellar asset. Results are Redis-cached for 60 seconds.",
@@ -519,6 +1496,113 @@
                 }
             }
         },
+        "/v1/push-tokens": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "push-tokens"
+                ],
+                "summary": "Replace all queue registrations for a push token",
+                "parameters": [
+                    {
+                        "description": "Push token + blind queue registrations",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.registerPushTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.messageDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/push-tokens/{token}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "push-tokens"
+                ],
+                "summary": "Remove all registrations for a push token (logout hygiene)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Push token",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.messageDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/recovery/blob": {
             "get": {
                 "security": [
@@ -526,14 +1610,14 @@
                         "RecoveryAuth": []
                     }
                 ],
-                "description": "Decrypts and returns the credential blob. Requires a recovery-scoped JWT (from POST /v1/recovery/verify).",
+                "description": "Returns the opaque client-encrypted blob. The mobile client decrypts it\nlocally using the recovery password. Requires a recovery-scoped JWT.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "recovery"
                 ],
-                "summary": "Fetch decrypted credential blob",
+                "summary": "Fetch encrypted credential blob",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -653,44 +1737,211 @@
                     }
                 }
             }
+        },
+        "/v1/wck-bundles/{pickup_key}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "wck-bundles"
+                ],
+                "summary": "Fetch the sealed WCK bundle for a pickup key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pickup key (hex64)",
+                        "name": "pickup_key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "wck-bundles"
+                ],
+                "summary": "Upload a sealed WCK bundle for member pickup",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pickup key (hex64, derived from the wallet C-address)",
+                        "name": "pickup_key",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sealed bundle (server-opaque)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storeWCKBundleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "github_com_latch_backend_internal_service.PushRegistration": {
+            "type": "object",
+            "properties": {
+                "blind_signer_id": {
+                    "type": "string"
+                },
+                "queue_index": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_latch_backend_internal_service.RPCResourceConfig": {
+            "type": "object",
+            "properties": {
+                "instructionLeeway": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_latch_backend_internal_service.RestorePreamble": {
+            "type": "object",
+            "properties": {
+                "minResourceFee": {
+                    "type": "string"
+                },
+                "transactionData": {
+                    "description": "base64 XDR SorobanTransactionData for the restore tx",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_latch_backend_internal_service.SimResultEntry": {
             "type": "object",
             "properties": {
                 "auth": {
-                    "description": "base64 XDR auth entries",
+                    "description": "base64 XDR SorobanAuthorizationEntry values",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
                 "xdr": {
-                    "description": "base64 XDR return value",
+                    "description": "base64 XDR return value (ScVal)",
                     "type": "string"
                 }
             }
         },
-        "internal_handler.CredentialBlob": {
+        "internal_handler.addSignatureRequest": {
             "type": "object",
+            "required": [
+                "auth_entry_xdr",
+                "blind_signer_id"
+            ],
             "properties": {
-                "credential_id": {
+                "auth_entry_xdr": {
                     "type": "string"
                 },
-                "key_data_hex": {
+                "blind_signer_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.announceMembershipRequest": {
+            "type": "object",
+            "required": [
+                "member_blind_ids",
+                "wallet_ref"
+            ],
+            "properties": {
+                "member_blind_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
-                "mnemonic": {
-                    "type": "string"
-                },
-                "passkey_private_key": {
-                    "type": "string"
-                },
-                "smart_account": {
-                    "type": "string"
-                },
-                "version": {
+                "wallet_ref": {
                     "type": "string"
                 }
             }
@@ -737,16 +1988,59 @@
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/internal_handler.blobResponse"
+                    "$ref": "#/definitions/internal_handler.encryptedBlobResponse"
                 }
             }
         },
-        "internal_handler.blobResponse": {
+        "internal_handler.clientEncryptedBlob": {
             "type": "object",
             "properties": {
-                "blob": {
-                    "type": "object",
-                    "additionalProperties": {}
+                "authTag": {
+                    "type": "string"
+                },
+                "ciphertext": {
+                    "type": "string"
+                },
+                "iv": {
+                    "type": "string"
+                },
+                "salt": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.createCosignRequest": {
+            "type": "object",
+            "required": [
+                "network",
+                "queue_index",
+                "threshold",
+                "unsigned_tx_xdr"
+            ],
+            "properties": {
+                "network": {
+                    "type": "string"
+                },
+                "queue_index": {
+                    "type": "string"
+                },
+                "threshold": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "unsigned_tx_xdr": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.encryptedBlobResponse": {
+            "type": "object",
+            "properties": {
+                "encrypted_blob": {
+                    "$ref": "#/definitions/internal_handler.clientEncryptedBlob"
                 }
             }
         },
@@ -793,6 +2087,17 @@
             ],
             "properties": {
                 "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.markSubmittedRequest": {
+            "type": "object",
+            "required": [
+                "tx_hash"
+            ],
+            "properties": {
+                "tx_hash": {
                     "type": "string"
                 }
             }
@@ -857,6 +2162,24 @@
                 }
             }
         },
+        "internal_handler.registerPushTokenRequest": {
+            "type": "object",
+            "required": [
+                "push_token",
+                "registrations"
+            ],
+            "properties": {
+                "push_token": {
+                    "type": "string"
+                },
+                "registrations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_latch_backend_internal_service.PushRegistration"
+                    }
+                }
+            }
+        },
         "internal_handler.registerRequest": {
             "type": "object",
             "required": [
@@ -866,6 +2189,34 @@
                 "email": {
                     "type": "string",
                     "example": "user@example.com"
+                }
+            }
+        },
+        "internal_handler.relayRequest": {
+            "type": "object",
+            "required": [
+                "xdr"
+            ],
+            "properties": {
+                "network": {
+                    "type": "string"
+                },
+                "xdr": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.relayResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -886,6 +2237,9 @@
                 "network": {
                     "type": "string"
                 },
+                "resourceConfig": {
+                    "$ref": "#/definitions/github_com_latch_backend_internal_service.RPCResourceConfig"
+                },
                 "xdr": {
                     "type": "string"
                 }
@@ -897,8 +2251,20 @@
                 "error": {
                     "type": "string"
                 },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "latest_ledger": {
+                    "type": "integer"
+                },
                 "min_resource_fee": {
                     "type": "string"
+                },
+                "restore_preamble": {
+                    "$ref": "#/definitions/github_com_latch_backend_internal_service.RestorePreamble"
                 },
                 "results": {
                     "type": "array",
@@ -913,11 +2279,25 @@
         },
         "internal_handler.storeBackupRequest": {
             "type": "object",
+            "required": [
+                "smart_account_address"
+            ],
             "properties": {
-                "blob": {
-                    "$ref": "#/definitions/internal_handler.CredentialBlob"
+                "encrypted_blob": {
+                    "$ref": "#/definitions/internal_handler.clientEncryptedBlob"
                 },
                 "smart_account_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.storeWCKBundleRequest": {
+            "type": "object",
+            "required": [
+                "bundle"
+            ],
+            "properties": {
+                "bundle": {
                     "type": "string"
                 }
             }
@@ -976,6 +2356,353 @@
                 "otp": {
                     "type": "string",
                     "example": "123456"
+                }
+            }
+        },
+        "internal_handler.walletChallengeRequest": {
+            "type": "object",
+            "required": [
+                "key_type",
+                "wallet"
+            ],
+            "properties": {
+                "key_type": {
+                    "type": "string"
+                },
+                "wallet": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.walletSignInRequest": {
+            "type": "object",
+            "required": [
+                "key_type",
+                "nonce",
+                "wallet"
+            ],
+            "properties": {
+                "authenticator_data": {
+                    "description": "Passkey (WebAuthn) assertion fields — all standard base64.",
+                    "type": "string"
+                },
+                "client_data_json": {
+                    "type": "string"
+                },
+                "key_type": {
+                    "type": "string"
+                },
+                "nonce": {
+                    "type": "string"
+                },
+                "passkey_signature": {
+                    "description": "ASN.1 DER P-256 signature",
+                    "type": "string"
+                },
+                "signature": {
+                    "description": "base64 ed25519 signature over the raw nonce bytes",
+                    "type": "string"
+                },
+                "wallet": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.backupPasskeyRequest": {
+            "type": "object",
+            "required": [
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "example": "my phone"
+                },
+                "smartAccountAddress": {
+                    "type": "string",
+                    "example": "CABC...XYZ"
+                }
+            }
+        },
+        "internal_handler_webapp.backupPasskeyResponse": {
+            "type": "object",
+            "properties": {
+                "next": {
+                    "type": "string",
+                    "example": "Call /api/webauthn/registration/* to register a second passkey, then attach it on-chain in a future step."
+                },
+                "ok": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "internal_handler_webapp.counterResponse": {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "integer",
+                    "example": 7
+                }
+            }
+        },
+        "internal_handler_webapp.createOnRampSessionRequest": {
+            "type": "object",
+            "required": [
+                "destinationCAddress"
+            ],
+            "properties": {
+                "destinationCAddress": {
+                    "type": "string",
+                    "example": "CABC...XYZ"
+                },
+                "fiatAmount": {
+                    "type": "string",
+                    "example": "25"
+                },
+                "fiatCode": {
+                    "type": "string",
+                    "example": "USD"
+                }
+            }
+        },
+        "internal_handler_webapp.createSignPayloadRequest": {
+            "type": "object",
+            "required": [
+                "callback",
+                "network",
+                "smartAccountAddress",
+                "unsignedTxXdr"
+            ],
+            "properties": {
+                "callback": {
+                    "type": "string",
+                    "example": "https://example.com/callback"
+                },
+                "network": {
+                    "type": "string",
+                    "example": "testnet"
+                },
+                "origin": {
+                    "type": "string",
+                    "example": "https://example.com"
+                },
+                "requestId": {
+                    "type": "string",
+                    "example": "req-123"
+                },
+                "smartAccountAddress": {
+                    "type": "string",
+                    "example": "CABC...XYZ"
+                },
+                "submit": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "ttlSeconds": {
+                    "type": "integer",
+                    "example": 600
+                },
+                "unsignedTxXdr": {
+                    "type": "string",
+                    "example": "AAAAAgAAAAA..."
+                }
+            }
+        },
+        "internal_handler_webapp.createSignPayloadResponse": {
+            "type": "object",
+            "properties": {
+                "expiresAt": {
+                    "type": "string",
+                    "example": "2026-07-02T12:10:00Z"
+                },
+                "payloadRef": {
+                    "type": "string",
+                    "example": "sp_1a2b3c4d5e6f7890abcdef1234567890"
+                }
+            }
+        },
+        "internal_handler_webapp.onRampIntentResponse": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string",
+                    "example": "2026-07-02T12:00:00Z"
+                },
+                "destinationCAddress": {
+                    "type": "string",
+                    "example": "CABC...XYZ"
+                },
+                "fiatAmount": {
+                    "type": "string",
+                    "example": "25"
+                },
+                "fiatCode": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "9c1e1c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b"
+                },
+                "memoId": {
+                    "type": "string",
+                    "example": "1234567890"
+                },
+                "moonpayTransactionId": {
+                    "type": "string",
+                    "example": "tx_abc123"
+                },
+                "moonpayTransactionStatus": {
+                    "type": "string",
+                    "example": "completed"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "created",
+                        "pending",
+                        "completed",
+                        "failed"
+                    ],
+                    "example": "pending"
+                },
+                "updatedAt": {
+                    "type": "string",
+                    "example": "2026-07-02T12:05:00Z"
+                }
+            }
+        },
+        "internal_handler_webapp.onRampPoolResponse": {
+            "type": "object",
+            "properties": {
+                "network": {
+                    "type": "string",
+                    "example": "testnet"
+                },
+                "poolAddress": {
+                    "type": "string",
+                    "example": "GPOOL...XYZ"
+                },
+                "recentTransactions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_webapp.onRampPoolTransactionResponse"
+                    }
+                },
+                "xlmBalance": {
+                    "type": "string",
+                    "example": "1234.5000000"
+                }
+            }
+        },
+        "internal_handler_webapp.onRampPoolTransactionResponse": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string",
+                    "example": "2026-07-02T12:00:00Z"
+                },
+                "memo": {
+                    "type": "string",
+                    "example": "1234567890"
+                },
+                "memoType": {
+                    "type": "string",
+                    "example": "text"
+                },
+                "successful": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "transactionId": {
+                    "type": "string",
+                    "example": "a1b2c3..."
+                }
+            }
+        },
+        "internal_handler_webapp.onRampSessionResponse": {
+            "type": "object",
+            "properties": {
+                "destinationCAddress": {
+                    "type": "string",
+                    "example": "CABC...XYZ"
+                },
+                "fiatAmount": {
+                    "type": "string",
+                    "example": "25"
+                },
+                "fiatCode": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "integrationMode": {
+                    "type": "string",
+                    "enum": [
+                        "widget",
+                        "platform"
+                    ],
+                    "example": "widget"
+                },
+                "intentId": {
+                    "type": "string",
+                    "example": "9c1e1c1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b"
+                },
+                "memoId": {
+                    "type": "string",
+                    "example": "1234567890"
+                },
+                "platformFallback": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "poolAddress": {
+                    "type": "string",
+                    "example": "GPOOL...XYZ"
+                },
+                "sessionToken": {
+                    "type": "string",
+                    "example": "eyJhbGciOi..."
+                },
+                "widgetUrl": {
+                    "type": "string",
+                    "example": "https://buy.moonpay.com?apiKey=...\u0026signature=..."
+                }
+            }
+        },
+        "internal_handler_webapp.updateOnRampIntentRequest": {
+            "type": "object",
+            "properties": {
+                "moonpayTransactionId": {
+                    "type": "string",
+                    "example": "tx_abc123"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "created",
+                        "pending",
+                        "completed",
+                        "failed"
+                    ],
+                    "example": "pending"
+                }
+            }
+        },
+        "internal_handler_webapp.webappErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "internal_error"
+                },
+                "error": {
+                    "type": "string",
+                    "example": "internal error"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "internal error"
                 }
             }
         }
