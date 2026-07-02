@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -97,6 +98,13 @@ type Config struct {
 	WebAppMoonPayPoolGAddress      string
 	WebAppMoonPayDefaultFiatAmount string
 	WebAppMoonPayDefaultFiatCode   string
+
+	// Retention / GC: a background sweep bounds growth of the multisig tables.
+	CleanupEnabled            bool
+	CleanupInterval           time.Duration // between sweeps
+	CosignRetention           time.Duration // grace kept past a request's expires_at
+	WCKBundleRetention        time.Duration // 0 disables WCK-bundle GC
+	WalletMembershipRetention time.Duration // 0 disables membership GC
 }
 
 func Load() (*Config, error) {
@@ -152,6 +160,12 @@ func Load() (*Config, error) {
 		WebAppMoonPayPoolGAddress:      getEnv("MOONPAY_POOL_G_ADDRESS", ""),
 		WebAppMoonPayDefaultFiatAmount: getEnv("MOONPAY_DEFAULT_FIAT_AMOUNT", "25"),
 		WebAppMoonPayDefaultFiatCode:   getEnv("MOONPAY_DEFAULT_FIAT_CODE", "USD"),
+
+		CleanupEnabled:            getEnvBool("CLEANUP_ENABLED", true),
+		CleanupInterval:           time.Duration(getEnvInt("CLEANUP_INTERVAL_MIN", 60)) * time.Minute,
+		CosignRetention:           time.Duration(getEnvInt("COSIGN_RETENTION_HOURS", 24)) * time.Hour,
+		WCKBundleRetention:        time.Duration(getEnvInt("WCK_BUNDLE_RETENTION_DAYS", 180)) * 24 * time.Hour,
+		WalletMembershipRetention: time.Duration(getEnvInt("WALLET_MEMBERSHIP_RETENTION_DAYS", 180)) * 24 * time.Hour,
 	}
 
 	var err error
@@ -192,6 +206,27 @@ func requireEnv(key string) string {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// getEnvInt parses an integer env var, falling back on an unset or malformed
+// value. GC tunables are operational knobs, not security-critical, so a bad
+// value degrades to the safe default rather than failing startup.
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return fallback
 }

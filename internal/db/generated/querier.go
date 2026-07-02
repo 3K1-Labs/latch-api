@@ -7,6 +7,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,10 +16,20 @@ type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
 	ConsumeSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
+	// Retention / garbage collection. Background sweeps that bound table growth.
+	// The cosign queue is high-churn (every multisig tx creates a request with a
+	// ~23h TTL); without this it grows unbounded. wck_bundles and wallet_memberships
+	// are long-lived discovery/bootstrap state and are only swept on a far horizon.
+	// Every request carries expires_at (~23h from creation) regardless of status,
+	// so one cutoff reaps expired-pending, submitted, and cancelled rows alike.
+	// cosign_signatures rows are removed by ON DELETE CASCADE.
+	DeleteExpiredCosignRequests(ctx context.Context, before time.Time) (int64, error)
 	DeleteMultisigApprovalsForProposal(ctx context.Context, proposalID uuid.UUID) error
 	DeleteMultisigDraftMember(ctx context.Context, arg DeleteMultisigDraftMemberParams) error
 	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
+	DeleteStaleWCKBundles(ctx context.Context, before time.Time) (int64, error)
+	DeleteStaleWalletMemberships(ctx context.Context, before time.Time) (int64, error)
 	DeleteWebauthnChallenge(ctx context.Context, id uuid.UUID) error
 	GetAccountSignerIntent(ctx context.Context, arg GetAccountSignerIntentParams) (WebappAccountSigner, error)
 	GetActiveMultisigDraftForUser(ctx context.Context, creatorUserID uuid.UUID) (WebappMultisigDraft, error)

@@ -18,6 +18,28 @@ func TestGetEnv_UsesFallback(t *testing.T) {
 	assert.Equal(t, "fallback", getEnv("TEST_KEY_MISSING", "fallback"))
 }
 
+func TestGetEnvInt(t *testing.T) {
+	t.Setenv("TEST_INT_VALID", "42")
+	assert.Equal(t, 42, getEnvInt("TEST_INT_VALID", 7))
+
+	t.Setenv("TEST_INT_BAD", "not-a-number")
+	assert.Equal(t, 7, getEnvInt("TEST_INT_BAD", 7), "malformed value falls back")
+
+	os.Unsetenv("TEST_INT_MISSING")
+	assert.Equal(t, 7, getEnvInt("TEST_INT_MISSING", 7), "unset value falls back")
+}
+
+func TestGetEnvBool(t *testing.T) {
+	t.Setenv("TEST_BOOL_VALID", "false")
+	assert.False(t, getEnvBool("TEST_BOOL_VALID", true))
+
+	t.Setenv("TEST_BOOL_BAD", "maybe")
+	assert.True(t, getEnvBool("TEST_BOOL_BAD", true), "malformed value falls back")
+
+	os.Unsetenv("TEST_BOOL_MISSING")
+	assert.True(t, getEnvBool("TEST_BOOL_MISSING", true), "unset value falls back")
+}
+
 func TestLoad_WithRequiredEnvVars(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")

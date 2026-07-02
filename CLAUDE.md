@@ -182,3 +182,15 @@ Copy `.env.example` to `.env`. Key variables:
 - `RESEND_API_KEY`, `EMAIL_FROM_ADDR`
 - `SERVER_PEPPER` — empty until Phase 2 encryption migration is complete
 - `ENCRYPTION_MASTER_KEY` — currently unused; required by config but not consumed by any service
+
+### Retention / GC
+
+A background sweep (`internal/service/cleanup_service.go`, scheduled in `cmd/server/main.go`) bounds growth of the multisig tables. All optional; sane defaults bake in.
+
+- `CLEANUP_ENABLED` — run the sweep (default `true`)
+- `CLEANUP_INTERVAL_MIN` — minutes between sweeps (default `60`)
+- `COSIGN_RETENTION_HOURS` — grace kept past a cosign request's `expires_at` before it (and its cascaded signatures) is deleted (default `24`)
+- `WCK_BUNDLE_RETENTION_DAYS` — delete WCK bundles untouched this long; `0` disables (default `180`)
+- `WALLET_MEMBERSHIP_RETENTION_DAYS` — delete membership rows older than this; `0` disables (default `180`)
+
+WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.
