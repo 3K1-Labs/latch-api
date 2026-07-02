@@ -14,11 +14,13 @@ import (
 type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
+	ConsumeSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	DeleteMultisigApprovalsForProposal(ctx context.Context, proposalID uuid.UUID) error
 	DeleteMultisigDraftMember(ctx context.Context, arg DeleteMultisigDraftMemberParams) error
 	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
 	DeleteWebauthnChallenge(ctx context.Context, id uuid.UUID) error
+	GetAccountSignerIntent(ctx context.Context, arg GetAccountSignerIntentParams) (WebappAccountSigner, error)
 	GetActiveMultisigDraftForUser(ctx context.Context, creatorUserID uuid.UUID) (WebappMultisigDraft, error)
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
@@ -31,7 +33,9 @@ type Querier interface {
 	GetMultisigDraftByInviteToken(ctx context.Context, inviteToken string) (WebappMultisigDraft, error)
 	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error)
 	GetMultisigProposalByID(ctx context.Context, id uuid.UUID) (WebappMultisigProposal, error)
+	GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (WebappOnRampIntent, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
+	GetSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
 	GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
@@ -40,6 +44,7 @@ type Querier interface {
 	GetWCKBundle(ctx context.Context, pickupKey string) (WckBundle, error)
 	GetWebappSession(ctx context.Context, id uuid.UUID) (WebappSession, error)
 	GetWebauthnCredentialByCredentialID(ctx context.Context, credentialID string) (WebappWebauthnCredential, error)
+	InsertAccountSignerIntent(ctx context.Context, arg InsertAccountSignerIntentParams) (uuid.UUID, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCosignRequest(ctx context.Context, arg InsertCosignRequestParams) (CosignRequest, error)
 	InsertCosignSignature(ctx context.Context, arg InsertCosignSignatureParams) error
@@ -47,8 +52,10 @@ type Querier interface {
 	InsertMultisigDraftMember(ctx context.Context, arg InsertMultisigDraftMemberParams) (uuid.UUID, error)
 	InsertMultisigMember(ctx context.Context, arg InsertMultisigMemberParams) error
 	InsertMultisigProposal(ctx context.Context, arg InsertMultisigProposalParams) (uuid.UUID, error)
+	InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntentParams) (uuid.UUID, error)
 	InsertPushTokenRegistration(ctx context.Context, arg InsertPushTokenRegistrationParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	InsertSignPayload(ctx context.Context, arg InsertSignPayloadParams) error
 	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
 	InsertWebappAuditLog(ctx context.Context, arg InsertWebappAuditLogParams) error
 	InsertWebappSession(ctx context.Context, arg InsertWebappSessionParams) error
@@ -67,15 +74,18 @@ type Querier interface {
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
+	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
+	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
 	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error
 	UpdateMultisigDraftDeployed(ctx context.Context, arg UpdateMultisigDraftDeployedParams) error
 	UpdateMultisigDraftPredictedAddress(ctx context.Context, arg UpdateMultisigDraftPredictedAddressParams) error
 	UpdateMultisigDraftThreshold(ctx context.Context, arg UpdateMultisigDraftThresholdParams) error
 	UpdateMultisigProposalExecuted(ctx context.Context, arg UpdateMultisigProposalExecutedParams) error
 	UpdateMultisigProposalRebuild(ctx context.Context, arg UpdateMultisigProposalRebuildParams) error
+	UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error)
 	UpdateWebauthnCredentialSignCount(ctx context.Context, arg UpdateWebauthnCredentialSignCountParams) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error

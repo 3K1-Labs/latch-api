@@ -104,6 +104,19 @@ func main() {
 	webappContextRulesSvc := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
 	webappBalancesSvc := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
 
+	// Sign-payload, on-ramp, backup-passkey, and the counter demo are all
+	// pure reads/writes over the webapp schema (or read-only Soroban
+	// simulation) with no bundler dependency, so — unlike the block below —
+	// they're always constructed and their routes always registered.
+	webappSignPayloadSvc := webapp.NewSignPayloadService(queries)
+	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.WebAppCounterContractAddress)
+	webappBackupPasskeySvc := webapp.NewBackupPasskeyService(queries)
+	webappOnRampSvc := webapp.NewOnRampService(
+		queries, cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
+		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
+		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
+	)
+
 	// Smart-account and transaction build/submit operations need a valid
 	// bundler keypair and factory address. Missing/invalid config disables
 	// only these route groups (logged below) rather than crashing the
@@ -393,6 +406,29 @@ func main() {
 			multisigProposalsGroup.POST("/:id/approve/delegated/finish", webappMultisigProposalsHandler.ApproveDelegatedFinish)
 		}
 	}
+
+	// Sign-payload, on-ramp, backup-passkey, and the counter demo: no bundler
+	// dependency, so routes are always registered (unlike the bundler-gated
+	// blocks above). On-ramp additionally 403s per-request in production via
+	// OnRampHandler's own devOnlyGuard, regardless of environment.
+	webappSignPayloadHandler := webapphandler.NewSignPayloadHandler(webappSignPayloadSvc)
+	webappGroup.POST("/sign-payload", webappSignPayloadHandler.Create)
+	webappGroup.GET("/sign-payload/:payloadRef", webappSignPayloadHandler.Get)
+
+	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, cfg)
+	onRampGroup := webappGroup.Group("/on-ramp")
+	{
+		onRampGroup.POST("/session", webappOnRampHandler.Session)
+		onRampGroup.GET("/intent/:id", webappOnRampHandler.GetIntent)
+		onRampGroup.PATCH("/intent/:id", webappOnRampHandler.UpdateIntent)
+		onRampGroup.GET("/pool", webappOnRampHandler.Pool)
+	}
+
+	webappRecoveryHandler := webapphandler.NewRecoveryHandler(webappBackupPasskeySvc)
+	webappGroup.POST("/recovery/backup-passkey", webappRecoveryHandler.BackupPasskey)
+
+	webappCounterHandler := webapphandler.NewCounterHandler(webappCounterSvc)
+	webappGroup.GET("/counter", webappCounterHandler.Get)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),

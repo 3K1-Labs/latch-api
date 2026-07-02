@@ -164,6 +164,62 @@ func TestLoad_WebAppAssetCatalogFields_Defaults(t *testing.T) {
 	assert.Empty(t, cfg.WebAppAssetAllowlistJSON)
 }
 
+func TestLoad_WebAppPhase5Fields(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	t.Setenv("NEXT_PUBLIC_COUNTER_ADDRESS", "CCOUNTERADDRESS")
+	t.Setenv("MOONPAY_SECRET_KEY", "sk_test_abc")
+	t.Setenv("MOONPAY_PUBLISHABLE_KEY", "pk_test_abc")
+	t.Setenv("MOONPAY_INTEGRATION_MODE", "widget")
+	t.Setenv("MOONPAY_API_BASE", "https://api.moonpay.example")
+	t.Setenv("MOONPAY_WIDGET_BUY_URL", "https://buy.moonpay.example")
+	t.Setenv("MOONPAY_POOL_G_ADDRESS", "GPOOLADDRESS")
+	t.Setenv("MOONPAY_DEFAULT_FIAT_AMOUNT", "50")
+	t.Setenv("MOONPAY_DEFAULT_FIAT_CODE", "EUR")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "CCOUNTERADDRESS", cfg.WebAppCounterContractAddress)
+	assert.Equal(t, "sk_test_abc", cfg.WebAppMoonPaySecretKey)
+	assert.Equal(t, "pk_test_abc", cfg.WebAppMoonPayPublishableKey)
+	assert.Equal(t, "widget", cfg.WebAppMoonPayIntegrationMode)
+	assert.Equal(t, "https://api.moonpay.example", cfg.WebAppMoonPayAPIBase)
+	assert.Equal(t, "https://buy.moonpay.example", cfg.WebAppMoonPayWidgetBuyURL)
+	assert.Equal(t, "GPOOLADDRESS", cfg.WebAppMoonPayPoolGAddress)
+	assert.Equal(t, "50", cfg.WebAppMoonPayDefaultFiatAmount)
+	assert.Equal(t, "EUR", cfg.WebAppMoonPayDefaultFiatCode)
+}
+
+func TestLoad_WebAppPhase5Fields_Defaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	os.Unsetenv("NEXT_PUBLIC_COUNTER_ADDRESS")
+	os.Unsetenv("MOONPAY_SECRET_KEY")
+	os.Unsetenv("MOONPAY_PUBLISHABLE_KEY")
+	os.Unsetenv("MOONPAY_INTEGRATION_MODE")
+	os.Unsetenv("MOONPAY_API_BASE")
+	os.Unsetenv("MOONPAY_WIDGET_BUY_URL")
+	os.Unsetenv("MOONPAY_POOL_G_ADDRESS")
+	os.Unsetenv("MOONPAY_DEFAULT_FIAT_AMOUNT")
+	os.Unsetenv("MOONPAY_DEFAULT_FIAT_CODE")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.WebAppCounterContractAddress)
+	assert.Empty(t, cfg.WebAppMoonPaySecretKey)
+	assert.Empty(t, cfg.WebAppMoonPayPublishableKey)
+	assert.Equal(t, "auto", cfg.WebAppMoonPayIntegrationMode)
+	assert.Equal(t, "https://api.moonpay.com", cfg.WebAppMoonPayAPIBase)
+	assert.Empty(t, cfg.WebAppMoonPayWidgetBuyURL)
+	assert.Empty(t, cfg.WebAppMoonPayPoolGAddress)
+	assert.Equal(t, "25", cfg.WebAppMoonPayDefaultFiatAmount)
+	assert.Equal(t, "USD", cfg.WebAppMoonPayDefaultFiatCode)
+}
+
 func TestLoad_DefaultPort(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")

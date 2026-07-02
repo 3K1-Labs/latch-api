@@ -82,6 +82,21 @@ type Config struct {
 	// USDC has no existing mobile equivalent, so it gets its own field.
 	WebAppUSDCSACAddressTestnet string
 	WebAppAssetAllowlistJSON    string
+
+	// Demo counter contract used by GET /api/counter and the multisig demo
+	// proposal flow (operationKind "counter_increment").
+	WebAppCounterContractAddress string
+
+	// MoonPay on-ramp — dev-only, /api/on-ramp/* returns 403 in production
+	// regardless of whether these are configured.
+	WebAppMoonPaySecretKey         string
+	WebAppMoonPayPublishableKey    string
+	WebAppMoonPayIntegrationMode   string // "auto" | "widget" | "platform"
+	WebAppMoonPayAPIBase           string
+	WebAppMoonPayWidgetBuyURL      string // override for the buy.moonpay.com base, mainly for tests
+	WebAppMoonPayPoolGAddress      string
+	WebAppMoonPayDefaultFiatAmount string
+	WebAppMoonPayDefaultFiatCode   string
 }
 
 func Load() (*Config, error) {
@@ -126,6 +141,17 @@ func Load() (*Config, error) {
 
 		WebAppUSDCSACAddressTestnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS", "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"),
 		WebAppAssetAllowlistJSON:    getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
+
+		WebAppCounterContractAddress: getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
+
+		WebAppMoonPaySecretKey:         getEnv("MOONPAY_SECRET_KEY", ""),
+		WebAppMoonPayPublishableKey:    getEnv("MOONPAY_PUBLISHABLE_KEY", ""),
+		WebAppMoonPayIntegrationMode:   getEnv("MOONPAY_INTEGRATION_MODE", "auto"),
+		WebAppMoonPayAPIBase:           getEnv("MOONPAY_API_BASE", "https://api.moonpay.com"),
+		WebAppMoonPayWidgetBuyURL:      getEnv("MOONPAY_WIDGET_BUY_URL", ""),
+		WebAppMoonPayPoolGAddress:      getEnv("MOONPAY_POOL_G_ADDRESS", ""),
+		WebAppMoonPayDefaultFiatAmount: getEnv("MOONPAY_DEFAULT_FIAT_AMOUNT", "25"),
+		WebAppMoonPayDefaultFiatCode:   getEnv("MOONPAY_DEFAULT_FIAT_CODE", "USD"),
 	}
 
 	var err error

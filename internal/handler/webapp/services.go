@@ -2,6 +2,8 @@ package webapp
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"github.com/latch/backend/internal/service/webapp"
 )
@@ -70,4 +72,24 @@ type multisigProposalService interface {
 	ApproveWebauthn(ctx context.Context, userID, proposalID, memberID, sigDataXdrHex string) (string, error)
 	ApproveDelegatedBegin(ctx context.Context, userID, proposalID, memberID string) (webapp.DelegatedBeginResult, error)
 	ApproveDelegatedFinish(ctx context.Context, userID, proposalID, memberID, signedAuthEntryBase64, signerAddress string) (string, error)
+}
+
+type signPayloadService interface {
+	Create(ctx context.Context, payload json.RawMessage, ttl time.Duration) (payloadRef string, expiresAt time.Time, err error)
+	Consume(ctx context.Context, id string) (webapp.SignPayload, error)
+}
+
+type onRampService interface {
+	CreateIntent(ctx context.Context, externalCustomerID, deviceIP, destinationCAddress, fiatAmount, fiatCode string) (webapp.OnRampSession, error)
+	GetIntent(ctx context.Context, id string) (webapp.OnRampIntent, string, error)
+	UpdateIntent(ctx context.Context, id string, status, moonpayTransactionID *string) (webapp.OnRampIntent, error)
+	PoolSnapshot(ctx context.Context, memoFilter string) (webapp.PoolAccountSnapshot, error)
+}
+
+type backupPasskeyService interface {
+	RecordIntent(ctx context.Context, userID, smartAccountAddress, label string) error
+}
+
+type counterService interface {
+	GetValue(ctx context.Context) (uint32, error)
 }

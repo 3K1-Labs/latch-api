@@ -2,7 +2,9 @@ package webapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/latch/backend/internal/service/webapp"
 )
@@ -228,4 +230,61 @@ func (s *stubMultisigProposal) ApproveDelegatedBegin(_ context.Context, _, _, _ 
 }
 func (s *stubMultisigProposal) ApproveDelegatedFinish(_ context.Context, _, _, _, _, _ string) (string, error) {
 	return s.finishID, s.finishErr
+}
+
+type stubSignPayload struct {
+	createRef       string
+	createExpiresAt time.Time
+	createErr       error
+	consumeResult   webapp.SignPayload
+	consumeErr      error
+}
+
+func (s *stubSignPayload) Create(_ context.Context, _ json.RawMessage, _ time.Duration) (string, time.Time, error) {
+	return s.createRef, s.createExpiresAt, s.createErr
+}
+func (s *stubSignPayload) Consume(_ context.Context, _ string) (webapp.SignPayload, error) {
+	return s.consumeResult, s.consumeErr
+}
+
+type stubOnRamp struct {
+	createResult webapp.OnRampSession
+	createErr    error
+	getIntent    webapp.OnRampIntent
+	getMoonpay   string
+	getErr       error
+	updateIntent webapp.OnRampIntent
+	updateErr    error
+	poolSnapshot webapp.PoolAccountSnapshot
+	poolErr      error
+}
+
+func (s *stubOnRamp) CreateIntent(_ context.Context, _, _, _, _, _ string) (webapp.OnRampSession, error) {
+	return s.createResult, s.createErr
+}
+func (s *stubOnRamp) GetIntent(_ context.Context, _ string) (webapp.OnRampIntent, string, error) {
+	return s.getIntent, s.getMoonpay, s.getErr
+}
+func (s *stubOnRamp) UpdateIntent(_ context.Context, _ string, _, _ *string) (webapp.OnRampIntent, error) {
+	return s.updateIntent, s.updateErr
+}
+func (s *stubOnRamp) PoolSnapshot(_ context.Context, _ string) (webapp.PoolAccountSnapshot, error) {
+	return s.poolSnapshot, s.poolErr
+}
+
+type stubBackupPasskey struct {
+	err error
+}
+
+func (s *stubBackupPasskey) RecordIntent(_ context.Context, _, _, _ string) error {
+	return s.err
+}
+
+type stubCounter struct {
+	value uint32
+	err   error
+}
+
+func (s *stubCounter) GetValue(_ context.Context) (uint32, error) {
+	return s.value, s.err
 }

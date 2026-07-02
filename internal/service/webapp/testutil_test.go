@@ -38,6 +38,15 @@ func newMockWebAuthnService(t *testing.T) (*WebAuthnService, sqlmock.Sqlmock) {
 	return NewWebAuthnService(q), mock
 }
 
+func newMockSignPayloadService(t *testing.T) (*SignPayloadService, sqlmock.Sqlmock) {
+	t.Helper()
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	q := db.New(sqlDB)
+	return NewSignPayloadService(q), mock
+}
+
 // fakeSmartAccountFactory is a function-field fake for the smartAccountFactory
 // interface, used by multisig draft/account tests that don't need real
 // Soroban RPC plumbing.

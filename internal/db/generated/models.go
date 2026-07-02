@@ -6,6 +6,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -200,11 +201,32 @@ type WebappMultisigProposal struct {
 	CreatedAt                  int64          `json:"created_at"`
 }
 
+type WebappOnRampIntent struct {
+	ID                   uuid.UUID      `json:"id"`
+	MemoID               string         `json:"memo_id"`
+	DestinationCAddress  string         `json:"destination_c_address"`
+	ExternalCustomerID   string         `json:"external_customer_id"`
+	MoonpayTransactionID sql.NullString `json:"moonpay_transaction_id"`
+	Status               string         `json:"status"`
+	FiatAmount           string         `json:"fiat_amount"`
+	FiatCode             string         `json:"fiat_code"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+}
+
 type WebappSession struct {
 	ID        uuid.UUID `json:"id"`
 	UserID    uuid.UUID `json:"user_id"`
 	CreatedAt int64     `json:"created_at"`
 	ExpiresAt int64     `json:"expires_at"`
+}
+
+type WebappSignPayload struct {
+	ID         string          `json:"id"`
+	Payload    json.RawMessage `json:"payload"`
+	ExpiresAt  time.Time       `json:"expires_at"`
+	ConsumedAt sql.NullTime    `json:"consumed_at"`
+	CreatedAt  time.Time       `json:"created_at"`
 }
 
 type WebappSmartAccount struct {
