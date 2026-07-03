@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/latch/backend/internal/metrics"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -118,9 +119,11 @@ func (s *PriceService) GetPrices(ctx context.Context, tokens []string) map[strin
 			var pd PriceData
 			if json.Unmarshal([]byte(val), &pd) == nil {
 				cached[cgID] = &pd
+				metrics.PricesCacheTotal.WithLabelValues("hit").Inc()
 				continue
 			}
 		}
+		metrics.PricesCacheTotal.WithLabelValues("miss").Inc()
 		missing = append(missing, cgID)
 	}
 

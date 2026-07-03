@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/httpx"
+	"github.com/latch/backend/internal/metrics"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 )
@@ -52,6 +53,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	userID, err := h.authSvc.UpsertUser(c.Request.Context(), req.Email)
 	if err != nil {
 		slog.Error("upsert user", "email", req.Email, "err", err)
+		metrics.AuthOTPRequestsTotal.WithLabelValues("error").Inc()
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
@@ -59,9 +61,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	otp, err := h.otpSvc.Generate(c.Request.Context(), req.Email)
 	if err != nil {
 		slog.Error("generate otp", "email", req.Email, "err", err)
+		metrics.AuthOTPRequestsTotal.WithLabelValues("error").Inc()
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
+	metrics.AuthOTPRequestsTotal.WithLabelValues("sent").Inc()
 
 	go func() {
 		defer func() {
@@ -101,10 +105,12 @@ func (h *AuthHandler) Verify(c *gin.Context) {
 	ok, err := h.otpSvc.Verify(c.Request.Context(), req.Email, req.OTP)
 	if err != nil {
 		slog.Error("verify otp", "email", req.Email, "err", err)
+		metrics.AuthVerifyTotal.WithLabelValues("error").Inc()
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 	if !ok {
+		metrics.AuthVerifyTotal.WithLabelValues("invalid").Inc()
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired OTP")
 		return
 	}
@@ -112,6 +118,7 @@ func (h *AuthHandler) Verify(c *gin.Context) {
 	userID, err := h.authSvc.VerifyEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		slog.Error("verify email", "email", req.Email, "err", err)
+		metrics.AuthVerifyTotal.WithLabelValues("error").Inc()
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
@@ -119,9 +126,11 @@ func (h *AuthHandler) Verify(c *gin.Context) {
 	accessToken, refreshToken, err := h.authSvc.IssueTokenPair(c.Request.Context(), userID)
 	if err != nil {
 		slog.Error("issue token pair", "userID", userID, "err", err)
+		metrics.AuthVerifyTotal.WithLabelValues("error").Inc()
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
+	metrics.AuthVerifyTotal.WithLabelValues("success").Inc()
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionEmailVerified), c.ClientIP(), c.Request.UserAgent(), nil)
 
@@ -153,9 +162,11 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	userID, accessToken, refreshToken, err := h.authSvc.RotateRefreshToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
+		metrics.AuthRefreshTotal.WithLabelValues("invalid").Inc()
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired refresh token")
 		return
 	}
+	metrics.AuthRefreshTotal.WithLabelValues("success").Inc()
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionTokenRotated), c.ClientIP(), c.Request.UserAgent(), nil)
 
