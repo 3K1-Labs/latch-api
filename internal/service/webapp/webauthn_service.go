@@ -49,11 +49,12 @@ const (
 )
 
 type WebAuthnService struct {
-	q *db.Queries
+	db *sql.DB
+	q  *db.Queries
 }
 
-func NewWebAuthnService(q *db.Queries) *WebAuthnService {
-	return &WebAuthnService{q: q}
+func NewWebAuthnService(sqlDB *sql.DB, q *db.Queries) *WebAuthnService {
+	return &WebAuthnService{db: sqlDB, q: q}
 }
 
 // ── challenge lifecycle ──────────────────────────────────────────────────────
@@ -386,9 +387,6 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 	if err != nil {
 		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
 	}
-	if cred.UserID.String() != in.UserID {
-		return AuthenticatedCredential{}, fmt.Errorf("%w: credential belongs to a different user", ErrCredentialNotFound)
-	}
 
 	digest := signedDataDigest(in.AuthenticatorData, in.ClientDataJSON)
 	if !verifyP256Signature(cred.P256RawPublicKey, digest, in.Signature) {
@@ -414,7 +412,56 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 		return AuthenticatedCredential{}, fmt.Errorf("update sign count: %w", err)
 	}
 
+	// A verified signature is the actual proof of ownership here — the
+	// session cookie is secondary and may legitimately not match the
+	// credential's original owner (first login from a new browser context,
+	// cookie cleared, registered via the web app and now signing in via the
+	// extension, etc.). Re-bind the credential and its smart account to the
+	// current session rather than rejecting, mirroring
+	// app/api/webauthn/authentication/finish/route.ts's own reassignment.
+	if cred.UserID.String() != in.UserID {
+		newOwnerID, err := uuid.Parse(in.UserID)
+		if err != nil {
+			return AuthenticatedCredential{}, fmt.Errorf("parse user id: %w", err)
+		}
+		if err := s.reassignCredentialOwner(ctx, credentialIDB64, newOwnerID); err != nil {
+			return AuthenticatedCredential{}, fmt.Errorf("reassign credential owner: %w", err)
+		}
+	}
+
 	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: in.UserID}, nil
+}
+
+// reassignCredentialOwner re-binds a webauthn credential and its associated
+// smart account (if any) to newOwnerID in a single transaction. Called by
+// FinishAuthentication after a successful signature verification when the
+// credential's stored owner no longer matches the current session.
+func (s *WebAuthnService) reassignCredentialOwner(ctx context.Context, credentialIDB64 string, newOwnerID uuid.UUID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback on any non-commit path is intentional
+
+	qtx := s.q.WithTx(tx)
+
+	if err := qtx.UpdateWebauthnCredentialUserID(ctx, db.UpdateWebauthnCredentialUserIDParams{
+		CredentialID: credentialIDB64,
+		UserID:       newOwnerID,
+	}); err != nil {
+		return fmt.Errorf("update credential user id: %w", err)
+	}
+	if err := qtx.UpdateSmartAccountUserIDByCredentialID(ctx, db.UpdateSmartAccountUserIDByCredentialIDParams{
+		CredentialID: credentialIDB64,
+		UserID:       newOwnerID,
+	}); err != nil {
+		return fmt.Errorf("update smart account user id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
 }
 
 // ── credentials list ─────────────────────────────────────────────────────────

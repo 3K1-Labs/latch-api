@@ -101,7 +101,7 @@ func main() {
 	// isolated via the `webapp` schema — see migrations/000014_webapp_schema_init.
 	webappSessionSvc := webapp.NewSessionService(sqlDB, queries)
 	webappAuditSvc := webapp.NewAuditService(queries)
-	webappWebauthnSvc := webapp.NewWebAuthnService(queries)
+	webappWebauthnSvc := webapp.NewWebAuthnService(sqlDB, queries)
 	webappAccountsSvc := webapp.NewAccountsService(queries)
 	webappContextRulesSvc := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
 	webappBalancesSvc := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLTestnet)

@@ -108,6 +108,22 @@ func (q *Queries) MarkSmartAccountDeployed(ctx context.Context, smartAccountAddr
 	return err
 }
 
+const updateSmartAccountUserIDByCredentialID = `-- name: UpdateSmartAccountUserIDByCredentialID :exec
+UPDATE webapp.smart_accounts
+SET user_id = $2
+WHERE credential_id = $1
+`
+
+type UpdateSmartAccountUserIDByCredentialIDParams struct {
+	CredentialID string    `json:"credential_id"`
+	UserID       uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) UpdateSmartAccountUserIDByCredentialID(ctx context.Context, arg UpdateSmartAccountUserIDByCredentialIDParams) error {
+	_, err := q.db.ExecContext(ctx, updateSmartAccountUserIDByCredentialID, arg.CredentialID, arg.UserID)
+	return err
+}
+
 const upsertSmartAccount = `-- name: UpsertSmartAccount :one
 INSERT INTO webapp.smart_accounts (id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

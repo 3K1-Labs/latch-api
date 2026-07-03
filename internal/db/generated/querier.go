@@ -97,7 +97,9 @@ type Querier interface {
 	UpdateMultisigProposalExecuted(ctx context.Context, arg UpdateMultisigProposalExecutedParams) error
 	UpdateMultisigProposalRebuild(ctx context.Context, arg UpdateMultisigProposalRebuildParams) error
 	UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error)
+	UpdateSmartAccountUserIDByCredentialID(ctx context.Context, arg UpdateSmartAccountUserIDByCredentialIDParams) error
 	UpdateWebauthnCredentialSignCount(ctx context.Context, arg UpdateWebauthnCredentialSignCountParams) error
+	UpdateWebauthnCredentialUserID(ctx context.Context, arg UpdateWebauthnCredentialUserIDParams) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)

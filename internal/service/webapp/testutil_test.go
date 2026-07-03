@@ -35,7 +35,7 @@ func newMockWebAuthnService(t *testing.T) (*WebAuthnService, sqlmock.Sqlmock) {
 	require.NoError(t, err)
 	t.Cleanup(func() { sqlDB.Close() })
 	q := db.New(sqlDB)
-	return NewWebAuthnService(q), mock
+	return NewWebAuthnService(sqlDB, q), mock
 }
 
 func newMockSignPayloadService(t *testing.T) (*SignPayloadService, sqlmock.Sqlmock) {
