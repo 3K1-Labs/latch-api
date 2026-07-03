@@ -384,10 +384,10 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 	credentialIDB64 := base64.RawURLEncoding.EncodeToString(in.CredentialID)
 	cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credentialIDB64)
 	if err != nil {
-		return AuthenticatedCredential{}, ErrCredentialNotFound
+		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
 	}
 	if cred.UserID.String() != in.UserID {
-		return AuthenticatedCredential{}, ErrCredentialNotFound
+		return AuthenticatedCredential{}, fmt.Errorf("%w: credential belongs to a different user", ErrCredentialNotFound)
 	}
 
 	digest := signedDataDigest(in.AuthenticatorData, in.ClientDataJSON)
