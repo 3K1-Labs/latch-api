@@ -44,6 +44,19 @@ type BuildAuthTransactionResult struct {
 	ValidUntilLedger                      uint32
 	SimulationResultXdr                   string
 	SubmitMethod                          string
+	// SmartAccountAuthEntryXdr/GAddressPreimageXdr/GAddressEntryTemplateXdr are
+	// populated only for a freighter signer (plain or bundler-delegated-auth
+	// mode): the smart account's own entry after its signature is rewritten to
+	// a Delegated(G) AuthPayload, and the unsigned native G-address
+	// __check_auth entry template (+ its raw signing preimage) that signer
+	// must sign, matching build-delegated's dedicated response shape. Ports
+	// lib/transaction/simulateAndExtractAuth.ts's same-named fields.
+	SmartAccountAuthEntryXdr string
+	GAddressPreimageXdr      string
+	GAddressEntryTemplateXdr string
+	// DelegatedAuthG is set only in bundler-delegated-auth mode: the on-chain
+	// Delegated G-address the smart account's Default rule authorizes.
+	DelegatedAuthG string
 }
 
 type TransactionService struct {
@@ -53,9 +66,14 @@ type TransactionService struct {
 	rpcURL                  string
 	networkPassphrase       string
 	webauthnVerifierAddress string
+	ed25519VerifierAddress  string
+	// counterContractAddress backs the demo counter build/build-delegated
+	// endpoints only (BuildCounter/BuildDelegatedCounter) — unrelated to any
+	// mobile-serving or asset-transfer path.
+	counterContractAddress string
 }
 
-func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress string) *TransactionService {
+func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string) *TransactionService {
 	return &TransactionService{
 		soroban:                 soroban,
 		bundler:                 bundler,
@@ -63,6 +81,8 @@ func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextR
 		rpcURL:                  rpcURL,
 		networkPassphrase:       networkPassphrase,
 		webauthnVerifierAddress: webauthnVerifierAddress,
+		ed25519VerifierAddress:  ed25519VerifierAddress,
+		counterContractAddress:  counterContractAddress,
 	}
 }
 
@@ -382,6 +402,345 @@ func (s *TransactionService) SubmitAuthEntries(ctx context.Context, txXdrB64 str
 	return s.submitWithBundler(ctx, txXdrB64, entries)
 }
 
+// ── submit-delegated (Freighter / mnemonic G-address signer) ────────────────
+
+// SubmitDelegatedInput is the input to SubmitDelegated, ported from
+// POST /api/transaction/submit-delegated.
+type SubmitDelegatedInput struct {
+	TxXdr string
+	// SmartAccountAuthEntryXdr is the smart account's own (still-unsigned,
+	// from build-send/build-swap/build/prepare-sign) auth entry — used when
+	// AuthEntriesXdr is empty (single/pair-entry legacy path).
+	SmartAccountAuthEntryXdr string
+	// GAddressEntryTemplateXdr is the unsigned delegated (native G-address)
+	// __check_auth entry template the client signed — matches one entry in
+	// AuthEntriesXdr/the pair by exact XDR content, not by array position
+	// (the delegated entry's index isn't stable: it may be synthesized and
+	// appended, or already present from simulation).
+	GAddressEntryTemplateXdr string
+	// SignedAuthEntryBase64 is either a raw 64-byte Ed25519 signature over
+	// the template's preimage hash, or a fully assembled signed entry XDR
+	// (see applyDelegatedFreighterSignature's length heuristic).
+	SignedAuthEntryBase64 string
+	SignerAddress         string
+	// ContextRuleID matches submit-webauthn's own field: not part of the
+	// missing-endpoints spec's SubmitDelegatedTxRequest, but required to
+	// rebuild the smart account entry's AuthPayload.context_rule_ids
+	// consistently with whatever build-send/build-swap computed it from.
+	// A wrong value fails safely — the enforcing-mode re-simulation in
+	// submitWithBundler rejects a digest mismatch on-chain, it can't be
+	// exploited to bypass auth.
+	ContextRuleID                  uint32
+	AuthEntriesXdr                 []string
+	SmartAccountAuthEntryIndex     int
+	DelegatedGAuthEntrySynthesized bool
+}
+
+// SubmitDelegated attaches a Freighter/mnemonic G-address signature to the
+// smart account's auth entry (AuthPayload{Delegated(G): <unused>}) and to
+// the separate delegated __check_auth entry that G-address's native
+// signature actually satisfies (see do_check_auth's authenticate(): a
+// Delegated signer's map value is never inspected — it calls
+// addr.require_auth_for_args(auth_digest), which the delegated entry
+// satisfies), bundler-signs any other still-unsigned synthesized entries,
+// and submits. Mirrors SubmitWebAuthn's shape for the Delegated signer kind.
+func (s *TransactionService) SubmitDelegated(ctx context.Context, in SubmitDelegatedInput) (SubmitResult, error) {
+	entriesB64 := in.AuthEntriesXdr
+	if len(entriesB64) == 0 {
+		entriesB64 = []string{in.SmartAccountAuthEntryXdr, in.GAddressEntryTemplateXdr}
+	}
+	entries, err := normalizeAuthEntries(entriesB64)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("normalize auth entries: %w", err)
+	}
+
+	idx := in.SmartAccountAuthEntryIndex
+	if idx < 0 || idx >= len(entries) {
+		return SubmitResult{}, fmt.Errorf("smart account auth entry index %d out of range", idx)
+	}
+
+	// Locate the delegated entry by content match against the template
+	// rather than a fixed array position — BuildSend appends a synthesized
+	// delegated entry at whatever index simulation left free, so it isn't
+	// necessarily idx+1.
+	templateEntry, err := decodeAuthEntryXdr(in.GAddressEntryTemplateXdr)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("decode delegated entry template: %w", err)
+	}
+	delegatedIdx, err := findMatchingAuthEntryIndex(entries, templateEntry, idx)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+
+	signedDelegated, err := applyDelegatedFreighterSignature(in.GAddressEntryTemplateXdr, in.SignedAuthEntryBase64, in.SignerAddress)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("apply delegated signature: %w", err)
+	}
+	entries[delegatedIdx] = signedDelegated
+
+	contextRuleIDs := contextRuleIDsForEntry(entries[idx], in.ContextRuleID)
+	authPayload, err := buildDelegatedAuthPayload(in.SignerAddress, contextRuleIDs)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("build delegated auth payload: %w", err)
+	}
+	if entries[idx].Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || entries[idx].Credentials.Address == nil {
+		return SubmitResult{}, ErrNotAddressCredentials
+	}
+	addrCredsCopy := *entries[idx].Credentials.Address
+	addrCredsCopy.Signature = authPayload
+	entries[idx].Credentials.Address = &addrCredsCopy
+
+	if in.DelegatedGAuthEntrySynthesized {
+		for i, e := range entries {
+			if i == idx || i == delegatedIdx || !isUnsignedAddressAuthEntry(e) {
+				continue
+			}
+			signed, err := signBundlerDelegatedAuthEntry(e, s.bundler.Keypair(), s.networkPassphrase)
+			if err != nil {
+				return SubmitResult{}, fmt.Errorf("sign bundler delegated entry %d: %w", i, err)
+			}
+			entries[i] = signed
+		}
+	}
+
+	return s.submitWithBundler(ctx, in.TxXdr, entries)
+}
+
+// ── submit (Phantom Ed25519 signer) ──────────────────────────────────────────
+
+// SubmitPhantomInput is the input to SubmitPhantom, ported from
+// POST /api/transaction/submit.
+type SubmitPhantomInput struct {
+	TxXdr                      string
+	AuthEntryXdr               string // smart account's own entry; used when AuthEntriesXdr is empty
+	AuthSignatureHex           string // raw 64-byte Ed25519 signature, hex, produced by Phantom over PrefixedMessage
+	PublicKeyHex               string // 32-byte raw Ed25519 public key, hex
+	ContextRuleID              uint32
+	AuthEntriesXdr             []string
+	SmartAccountAuthEntryIndex int
+}
+
+// SubmitPhantom attaches a Phantom (Solana wallet) Ed25519 signature to the
+// smart account's External(ed25519VerifierAddress, publicKeyHex) auth entry
+// and submits. The signature itself is over a fixed prefixed message (see
+// ed25519-phantom-verifier's AUTH_PREFIX) — this method does not
+// independently re-verify that convention; the on-chain
+// Ed25519PhantomVerifier does, during submitWithBundler's enforcing-mode
+// re-simulation, exactly as SubmitWebAuthn relies on the WebAuthn verifier
+// contract rather than checking the assertion in Go.
+func (s *TransactionService) SubmitPhantom(ctx context.Context, in SubmitPhantomInput) (SubmitResult, error) {
+	if s.ed25519VerifierAddress == "" {
+		return SubmitResult{}, fmt.Errorf("ed25519 verifier address is not configured")
+	}
+
+	entriesB64 := in.AuthEntriesXdr
+	if len(entriesB64) == 0 {
+		entriesB64 = []string{in.AuthEntryXdr}
+	}
+	entries, err := normalizeAuthEntries(entriesB64)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("normalize auth entries: %w", err)
+	}
+
+	idx := in.SmartAccountAuthEntryIndex
+	if idx < 0 || idx >= len(entries) {
+		return SubmitResult{}, fmt.Errorf("smart account auth entry index %d out of range", idx)
+	}
+
+	publicKey, err := hex.DecodeString(in.PublicKeyHex)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("decode publicKeyHex: %w", err)
+	}
+	sig, err := hex.DecodeString(in.AuthSignatureHex)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("decode authSignatureHex: %w", err)
+	}
+
+	contextRuleIDs := contextRuleIDsForEntry(entries[idx], in.ContextRuleID)
+	authPayload, err := buildEd25519AuthPayload(s.ed25519VerifierAddress, publicKey, sig, contextRuleIDs)
+	if err != nil {
+		return SubmitResult{}, fmt.Errorf("build ed25519 auth payload: %w", err)
+	}
+	if entries[idx].Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || entries[idx].Credentials.Address == nil {
+		return SubmitResult{}, ErrNotAddressCredentials
+	}
+	addrCredsCopy := *entries[idx].Credentials.Address
+	addrCredsCopy.Signature = authPayload
+	entries[idx].Credentials.Address = &addrCredsCopy
+
+	return s.submitWithBundler(ctx, in.TxXdr, entries)
+}
+
+// ── prepare-sign (generic simulate + attach auth) ────────────────────────────
+
+// PrepareSignInput is the input to PrepareSign, ported from
+// POST /api/transaction/prepare-sign.
+type PrepareSignInput struct {
+	SmartAccountAddress string
+	UnsignedTxXdr       string
+	SignerType          string // "passkey" | "phantom" | "freighter"
+	SignerG             string // required if SignerType == "freighter"
+}
+
+type PrepareSignResult struct {
+	BuildAuthTransactionResult
+}
+
+// PrepareSign simulates a client-built unsigned transaction (e.g. a
+// non-Aquarius swap built locally, or a dapp-supplied unsignedTxXdr) exactly
+// as BuildSend does after its own transfer-op construction: it does NOT
+// rebuild the operation or change its source account — the caller's XDR is
+// simulated as given — but extracts and classifies auth entries, sets
+// expiration, computes the signature payload/auth digest, synthesizes a
+// delegated entry for a freighter signer when needed, and returns the same
+// BuildAuthTransactionResult shape every build-* endpoint returns.
+func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInput) (PrepareSignResult, error) {
+	var envelope xdr.TransactionEnvelope
+	if err := xdr.SafeUnmarshalBase64(in.UnsignedTxXdr, &envelope); err != nil {
+		return PrepareSignResult{}, fmt.Errorf("decode unsignedTxXdr: %w", err)
+	}
+	if envelope.V1 == nil || len(envelope.V1.Tx.Operations) != 1 {
+		return PrepareSignResult{}, fmt.Errorf("expected a single-operation transaction envelope")
+	}
+
+	contextRuleID, discovery, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("discover context rule: %w", err)
+	}
+
+	sim, err := s.soroban.SimulateTransaction(ctx, s.rpcURL, in.UnsignedTxXdr, service.RPCResourceConfig{})
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("simulate transaction: %w", err)
+	}
+	if sim.Error != "" {
+		return PrepareSignResult{}, fmt.Errorf("simulation failed: %s", sim.Error)
+	}
+	if len(sim.Results) == 0 {
+		return PrepareSignResult{}, fmt.Errorf("simulation returned no results")
+	}
+
+	entries, err := normalizeAuthEntries(sim.Results[0].Auth)
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("normalize auth entries: %w", err)
+	}
+	validUntilLedger := setAddressCredentialExpiration(entries, sim.LatestLedger, 60)
+
+	var signerGStr string
+	if in.SignerType == "freighter" {
+		signerGStr = in.SignerG
+	}
+
+	smartAccountAuthEntryIndex := -1
+	var delegatedNativeIndices []int
+	for i, e := range entries {
+		switch classifyAuthEntryRole(e, in.SmartAccountAddress, signerGStr) {
+		case authEntryRoleSmartAccountCustom:
+			if smartAccountAuthEntryIndex < 0 {
+				smartAccountAuthEntryIndex = i
+			}
+		case authEntryRoleDelegatedNative:
+			delegatedNativeIndices = append(delegatedNativeIndices, i)
+		case authEntryRoleOther:
+		}
+	}
+	if smartAccountAuthEntryIndex < 0 {
+		return PrepareSignResult{}, fmt.Errorf("no smart account auth entry found in simulation result")
+	}
+
+	smartAccountEntry := entries[smartAccountAuthEntryIndex]
+	contextRuleIDs := contextRuleIDsForEntry(smartAccountEntry, contextRuleID)
+
+	signaturePayload, err := hashSorobanAuthPayload(smartAccountEntry, s.networkPassphrase)
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("compute signature payload: %w", err)
+	}
+	authDigest, err := computeAuthDigest(smartAccountEntry, s.networkPassphrase, contextRuleIDs)
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("compute auth digest: %w", err)
+	}
+
+	delegatedGSynthesized := false
+	if signerGStr != "" && len(delegatedNativeIndices) == 0 {
+		newEntry, err := buildUnsignedDelegatedGCheckAuthEntry(in.SmartAccountAddress, signerGStr, authDigest, validUntilLedger)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("synthesize delegated auth entry: %w", err)
+		}
+		entries = append(entries, newEntry)
+		delegatedNativeIndices = append(delegatedNativeIndices, len(entries)-1)
+		delegatedGSynthesized = true
+	}
+
+	signBlobPayloads := make([]string, len(delegatedNativeIndices))
+	for i, idx := range delegatedNativeIndices {
+		payload, err := hashSorobanAuthPayload(entries[idx], s.networkPassphrase)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("compute delegated sign payload: %w", err)
+		}
+		signBlobPayloads[i] = base64.StdEncoding.EncodeToString(payload[:])
+	}
+
+	var sorobanData xdr.SorobanTransactionData
+	if err := xdr.SafeUnmarshalBase64(sim.TransactionData, &sorobanData); err != nil {
+		return PrepareSignResult{}, fmt.Errorf("decode soroban transaction data: %w", err)
+	}
+	op := envelope.V1.Tx.Operations[0]
+	if op.Body.Type != xdr.OperationTypeInvokeHostFunction || op.Body.InvokeHostFunctionOp == nil {
+		return PrepareSignResult{}, fmt.Errorf("expected an invoke host function operation")
+	}
+	op.Body.InvokeHostFunctionOp.Auth = entries
+	envelope.V1.Tx.Ext = xdr.TransactionExt{V: 1, SorobanData: &sorobanData}
+	envelope.V1.Tx.Operations[0] = op
+	finalTxB64, err := xdr.MarshalBase64(envelope)
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("encode final tx: %w", err)
+	}
+
+	entriesB64 := make([]string, len(entries))
+	for i, e := range entries {
+		b64, err := xdr.MarshalBase64(e)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("encode auth entry %d: %w", i, err)
+		}
+		entriesB64[i] = b64
+	}
+
+	simResultJSON, err := json.Marshal(struct {
+		TransactionData string `json:"transactionData"`
+		MinResourceFee  string `json:"minResourceFee"`
+		LatestLedger    int64  `json:"latestLedger"`
+	}{sim.TransactionData, sim.MinResourceFee, sim.LatestLedger})
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("marshal simulation result: %w", err)
+	}
+
+	submitMethod := "webauthn"
+	if in.SignerType == "freighter" {
+		submitMethod = "delegated"
+	} else if in.SignerType == "phantom" {
+		submitMethod = "bundler-delegated"
+	}
+
+	return PrepareSignResult{
+		BuildAuthTransactionResult: BuildAuthTransactionResult{
+			TxXdr:                                 finalTxB64,
+			AuthEntryXdr:                          entriesB64[smartAccountAuthEntryIndex],
+			AuthEntriesXdr:                        entriesB64,
+			SmartAccountAuthEntryIndex:            smartAccountAuthEntryIndex,
+			DelegatedNativeAuthEntryIndices:       delegatedNativeIndices,
+			DelegatedNativeSignBlobPayloadsBase64: signBlobPayloads,
+			DelegatedGAuthEntrySynthesized:        delegatedGSynthesized,
+			ContextRuleID:                         contextRuleID,
+			ContextRuleIDs:                        contextRuleIDs,
+			ContextRuleDiscovery:                  discovery,
+			AuthDigestHex:                         hex.EncodeToString(authDigest[:]),
+			SignaturePayloadHex:                   hex.EncodeToString(signaturePayload[:]),
+			ValidUntilLedger:                      validUntilLedger,
+			SimulationResultXdr:                   string(simResultJSON),
+			SubmitMethod:                          submitMethod,
+		},
+	}, nil
+}
+
 // ── shared submit pipeline ───────────────────────────────────────────────────
 
 // submitWithBundler refreshes the bundler's on-chain sequence, re-simulates
@@ -523,6 +882,68 @@ func buildWebAuthnAuthPayload(verifierAddress string, keyData, sigDataXdr []byte
 		ruleIDVals[i] = scU32(id)
 	}
 	signersMap := scMap(scMapEntryVal(signerKey, scBytes(sigDataXdr)))
+
+	return scMap(
+		scMapEntry("context_rule_ids", scVec(ruleIDVals...)),
+		scMapEntry("signers", signersMap),
+	), nil
+}
+
+// ── delegated (native G-address) auth payload ────────────────────────────────
+
+// buildDelegatedAuthPayload builds the AuthPayload ScVal the smart account's
+// __check_auth expects for a Delegated (native G-address) signer:
+// AuthPayload { context_rule_ids, signers: Map<Signer::Delegated(G), Bytes> }.
+// Unlike External signers, do_check_auth's authenticate() never inspects the
+// map value for a Delegated signer — it calls
+// addr.require_auth_for_args(auth_digest) instead, which a *separate*
+// SorobanAuthorizationEntry (address-credentialed to that G-address, signed
+// natively) satisfies. The map entry's value is therefore an unused
+// placeholder; it only needs to exist so the signer passes context-rule
+// membership validation (do_check_auth's allowed_signers check).
+func buildDelegatedAuthPayload(gAddress string, contextRuleIDs []uint32) (xdr.ScVal, error) {
+	signerAddrVal, err := scAddress(gAddress)
+	if err != nil {
+		return xdr.ScVal{}, fmt.Errorf("resolve delegated signer address: %w", err)
+	}
+	signerKey := scVec(scSymbol("Delegated"), signerAddrVal)
+
+	ruleIDVals := make([]xdr.ScVal, len(contextRuleIDs))
+	for i, id := range contextRuleIDs {
+		ruleIDVals[i] = scU32(id)
+	}
+	signersMap := scMap(scMapEntryVal(signerKey, scBytes(nil)))
+
+	return scMap(
+		scMapEntry("context_rule_ids", scVec(ruleIDVals...)),
+		scMapEntry("signers", signersMap),
+	), nil
+}
+
+// ── ed25519 (Phantom) auth payload ───────────────────────────────────────────
+
+// buildEd25519AuthPayload builds the AuthPayload ScVal for an
+// External(ed25519VerifierAddress, publicKey) Phantom signer:
+// AuthPayload { context_rule_ids, signers: Map<Signer::External(verifier,
+// publicKey), Bytes(rawSignature)> }. The 64-byte rawSignature is exactly
+// what Phantom's signMessage produced over the fixed prefixed message
+// ("Stellar Smart Account Auth:\n" + lowercase_hex(auth_digest)) —
+// verification of that convention happens on-chain in the
+// Ed25519PhantomVerifier contract during the enforcing-mode re-simulation in
+// submitWithBundler, mirroring how SubmitWebAuthn defers to the WebAuthn
+// verifier rather than checking the assertion here.
+func buildEd25519AuthPayload(verifierAddress string, publicKey, rawSignature []byte, contextRuleIDs []uint32) (xdr.ScVal, error) {
+	verifierVal, err := scAddress(verifierAddress)
+	if err != nil {
+		return xdr.ScVal{}, fmt.Errorf("resolve verifier address: %w", err)
+	}
+	signerKey := scVec(scSymbol("External"), verifierVal, scBytes(publicKey))
+
+	ruleIDVals := make([]xdr.ScVal, len(contextRuleIDs))
+	for i, id := range contextRuleIDs {
+		ruleIDVals[i] = scU32(id)
+	}
+	signersMap := scMap(scMapEntryVal(signerKey, scBytes(rawSignature)))
 
 	return scMap(
 		scMapEntry("context_rule_ids", scVec(ruleIDVals...)),

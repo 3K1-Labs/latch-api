@@ -8,7 +8,15 @@ import (
 	"github.com/latch/backend/internal/config"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
+	"github.com/stellar/go-stellar-sdk/strkey"
 )
+
+// isValidGAddress reports whether g is a syntactically valid Stellar
+// classic account address (G...).
+func isValidGAddress(g string) bool {
+	_, err := strkey.Decode(strkey.VersionByteAccountID, g)
+	return err == nil
+}
 
 // minKeyDataHexLen matches the TS route's validation: a 65-byte uncompressed
 // P-256 public key (130 hex chars) plus at least a couple hex chars of
@@ -100,6 +108,124 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, gin.H{
 		"smartAccountAddress": address,
 		"alreadyDeployed":     alreadyDeployed,
+	})
+}
+
+// QueryFreighter godoc
+// @Summary      Derive a smart account address from a Freighter/mnemonic G-address
+// @Description  Pure computation over a client-supplied G-address (no session, no persistence). Returns the deterministic smart account address and whether it's already deployed.
+// @Tags         smart-account
+// @Produce      json
+// @Param        gAddress query string true "Classic Stellar public key (G...)"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account/freighter [get]
+func (h *SmartAccountHandler) QueryFreighter(c *gin.Context) {
+	gAddress := c.Query("gAddress")
+	if gAddress == "" || !isValidGAddress(gAddress) {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "missing or invalid gAddress")
+		return
+	}
+
+	address, deployed, err := h.smartAccountSvc.QueryFreighter(c.Request.Context(), gAddress)
+	if err != nil {
+		slog.Error("query freighter smart account", "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"deployed":            deployed,
+		"smartAccountAddress": address,
+	})
+}
+
+type deployFreighterSmartAccountRequest struct {
+	GAddress string `json:"gAddress" binding:"required"`
+}
+
+// DeployFreighter godoc
+// @Summary      Deploy a smart account for a Freighter/mnemonic G-address
+// @Description  Funds gAddress via testnet friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer.
+// @Tags         smart-account
+// @Accept       json
+// @Produce      json
+// @Param        body body deployFreighterSmartAccountRequest true "Freighter G-address"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account/freighter [post]
+func (h *SmartAccountHandler) DeployFreighter(c *gin.Context) {
+	var req deployFreighterSmartAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil || !isValidGAddress(req.GAddress) {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid gAddress. Expected a valid Stellar G-address.")
+		return
+	}
+
+	address, alreadyDeployed, err := h.smartAccountSvc.DeployFreighter(c.Request.Context(), req.GAddress)
+	if err != nil {
+		slog.Error("deploy freighter smart account", "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"smartAccountAddress": address,
+		"alreadyDeployed":     alreadyDeployed,
+	})
+}
+
+type connectPhantomRequest struct {
+	PublicKeyHex string `json:"publicKeyHex" binding:"required"`
+}
+
+// ConnectPhantom godoc
+// @Summary      Deploy the demo counter-contract smart account for a Phantom (Solana) signer
+// @Description  Derives a G-address from a Phantom Ed25519 public key and deploys (or idempotently returns) the counter-demo smart account WASM with that key as its External signer. No production UI calls this — kept for API parity with the reference demo.
+// @Tags         smart-account
+// @Accept       json
+// @Produce      json
+// @Param        body body connectPhantomRequest true "Phantom Ed25519 public key"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      500 {object} webappErrorResponse
+// @Router       /api/smart-account [post]
+func (h *SmartAccountHandler) ConnectPhantom(c *gin.Context) {
+	var req connectPhantomRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.PublicKeyHex) != 64 {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid public key. Expected 64-character hex string.")
+		return
+	}
+
+	result, err := h.smartAccountSvc.ConnectPhantom(c.Request.Context(), req.PublicKeyHex, h.cfg.WebAppEd25519VerifierAddress, h.cfg.WebAppSmartAccountWasmHash)
+	if err != nil {
+		slog.Error("connect phantom smart account", "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"smartAccountAddress": result.SmartAccountAddress,
+		"gAddress":            result.GAddress,
+		"verifierAddress":     h.cfg.WebAppEd25519VerifierAddress,
+		"counterAddress":      h.cfg.WebAppCounterContractAddress,
+		"alreadyDeployed":     result.AlreadyDeployed,
+	})
+}
+
+// PhantomConfig godoc
+// @Summary      Get the counter-demo contract addresses
+// @Description  Returns the ed25519 verifier and counter contract addresses the Phantom demo flow uses.
+// @Tags         smart-account
+// @Produce      json
+// @Success      200 {object} map[string]any
+// @Router       /api/smart-account [get]
+func (h *SmartAccountHandler) PhantomConfig(c *gin.Context) {
+	webappx.Success(c, http.StatusOK, gin.H{
+		"verifierAddress": h.cfg.WebAppEd25519VerifierAddress,
+		"counterAddress":  h.cfg.WebAppCounterContractAddress,
+		"network":         "testnet",
 	})
 }
 

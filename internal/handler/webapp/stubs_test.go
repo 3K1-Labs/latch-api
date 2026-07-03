@@ -55,6 +55,17 @@ type stubSmartAccount struct {
 	deployByKeyAddress         string
 	deployByKeyAlreadyDeployed bool
 	deployByKeyErr             error
+
+	queryFreighterAddress  string
+	queryFreighterDeployed bool
+	queryFreighterErr      error
+
+	deployFreighterAddress         string
+	deployFreighterAlreadyDeployed bool
+	deployFreighterErr             error
+
+	connectPhantomResult webapp.ConnectPhantomResult
+	connectPhantomErr    error
 }
 
 func (s *stubSmartAccount) DeployForCredential(_ context.Context, _ string, _ webapp.RegisteredCredential) (string, string, string, bool, bool, error) {
@@ -65,6 +76,15 @@ func (s *stubSmartAccount) Query(_ context.Context, _ string) (string, bool, err
 }
 func (s *stubSmartAccount) DeployByKeyData(_ context.Context, _ string) (string, bool, error) {
 	return s.deployByKeyAddress, s.deployByKeyAlreadyDeployed, s.deployByKeyErr
+}
+func (s *stubSmartAccount) QueryFreighter(_ context.Context, _ string) (string, bool, error) {
+	return s.queryFreighterAddress, s.queryFreighterDeployed, s.queryFreighterErr
+}
+func (s *stubSmartAccount) DeployFreighter(_ context.Context, _ string) (string, bool, error) {
+	return s.deployFreighterAddress, s.deployFreighterAlreadyDeployed, s.deployFreighterErr
+}
+func (s *stubSmartAccount) ConnectPhantom(_ context.Context, _, _, _ string) (webapp.ConnectPhantomResult, error) {
+	return s.connectPhantomResult, s.connectPhantomErr
 }
 
 type stubAccounts struct {
@@ -81,10 +101,26 @@ type stubAudit struct{}
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
 type stubTransaction struct {
-	buildSendResult webapp.BuildSendResult
-	buildSendErr    error
-	submitResult    webapp.SubmitResult
-	submitErr       error
+	buildSendResult      webapp.BuildSendResult
+	buildSendErr         error
+	submitResult         webapp.SubmitResult
+	submitErr            error
+	submitDelegatedErr   error
+	submitPhantomErr     error
+	prepareSignResult    webapp.PrepareSignResult
+	prepareSignErr       error
+	setupSendRulesResult webapp.SetupSendRulesResult
+	setupSendRulesErr    error
+	setupSwapRulesResult webapp.SetupSwapRulesResult
+	setupSwapRulesErr    error
+
+	buildCounterResult          webapp.BuildCounterResult
+	buildCounterErr             error
+	buildDelegatedCounterResult webapp.BuildDelegatedCounterResult
+	buildDelegatedCounterErr    error
+
+	buildSwapResult webapp.BuildSwapResult
+	buildSwapErr    error
 }
 
 func (s *stubTransaction) BuildSend(_ context.Context, _ webapp.BuildSendInput, _ []webapp.CatalogAsset) (webapp.BuildSendResult, error) {
@@ -92,6 +128,30 @@ func (s *stubTransaction) BuildSend(_ context.Context, _ webapp.BuildSendInput, 
 }
 func (s *stubTransaction) SubmitWebAuthn(_ context.Context, _ webapp.SubmitWebAuthnInput) (webapp.SubmitResult, error) {
 	return s.submitResult, s.submitErr
+}
+func (s *stubTransaction) SubmitDelegated(_ context.Context, _ webapp.SubmitDelegatedInput) (webapp.SubmitResult, error) {
+	return s.submitResult, s.submitDelegatedErr
+}
+func (s *stubTransaction) SubmitPhantom(_ context.Context, _ webapp.SubmitPhantomInput) (webapp.SubmitResult, error) {
+	return s.submitResult, s.submitPhantomErr
+}
+func (s *stubTransaction) PrepareSign(_ context.Context, _ webapp.PrepareSignInput) (webapp.PrepareSignResult, error) {
+	return s.prepareSignResult, s.prepareSignErr
+}
+func (s *stubTransaction) SetupSendRules(_ context.Context, _ webapp.SetupSendRulesInput, _ []webapp.CatalogAsset) (webapp.SetupSendRulesResult, error) {
+	return s.setupSendRulesResult, s.setupSendRulesErr
+}
+func (s *stubTransaction) SetupSwapRules(_ context.Context, _ webapp.SetupSwapRulesInput) (webapp.SetupSwapRulesResult, error) {
+	return s.setupSwapRulesResult, s.setupSwapRulesErr
+}
+func (s *stubTransaction) BuildCounter(_ context.Context, _ webapp.BuildCounterInput) (webapp.BuildCounterResult, error) {
+	return s.buildCounterResult, s.buildCounterErr
+}
+func (s *stubTransaction) BuildDelegatedCounter(_ context.Context, _ webapp.BuildDelegatedCounterInput) (webapp.BuildDelegatedCounterResult, error) {
+	return s.buildDelegatedCounterResult, s.buildDelegatedCounterErr
+}
+func (s *stubTransaction) BuildSwap(_ context.Context, _ webapp.BuildSwapInput) (webapp.BuildSwapResult, error) {
+	return s.buildSwapResult, s.buildSwapErr
 }
 
 type stubContextRules struct {

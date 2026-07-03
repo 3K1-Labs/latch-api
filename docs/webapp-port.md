@@ -140,12 +140,69 @@ Mounted on a *second* Gin route group also rooted at `/api/transaction` — veri
 mobile `simulate`/`relay` group route independently with zero collision (Gin routes by exact
 path+method).
 
-**Deferred to a later pass ("Pass B", not yet scheduled):** `build` (counter demo),
+**Deferred to a later pass ("Pass B"):** `build` (counter demo),
 `build-swap`, `build-delegated`, `submit-delegated`, `prepare-sign`, `setup-send-rules`,
 `setup-swap-rules`, `build-sign-demo` (dev-only).
 
 **Verified:** full test suite (`-race`) passes with zero regressions; new packages/files at
 85–100% coverage; `golangci-lint`, `gofmt`, `go vet` all clean.
+
+---
+
+## Phase 3 Pass B — remaining transaction/smart-account routes — ✅ DONE
+
+Implemented every route Pass A deferred except `build-sign-demo` (dev-only, no client caller):
+`POST /api/transaction/submit-delegated`, `POST /api/transaction/submit` (Phantom),
+`POST /api/transaction/prepare-sign`, `POST /api/smart-account/setup-send-rules`,
+`POST /api/smart-account/setup-swap-rules`, `POST /api/transaction/build` (counter demo),
+`POST /api/transaction/build-delegated` (counter demo), `POST /api/transaction/build-swap`,
+plus the two routes Phase 2 explicitly scoped out as "legacy Ed25519/delegated factories":
+`GET/POST /api/smart-account/freighter` and `POST /api/smart-account` (Phantom connect).
+
+**Shared engine** (`internal/service/webapp/build_auth_transaction.go`): a new
+`TransactionService.buildAuthTransactionCore` + `resolveAdminBundlerDelegatedAuth`, porting
+`lib/transaction/simulateAndExtractAuth.ts` and the outer `buildAuthTransaction()` wrapper's
+isSetupTx admin-rule auto-detection. `BuildSend`/`PrepareSign` (Pass A) were left untouched
+rather than refactored onto this engine — they predate it and are already shipped/tested; see
+"Open risks" below for a real behavioral gap this surfaced in `BuildSend`.
+
+`setup-send-rules` and `setup-swap-rules` (`internal/service/webapp/setup_rules_service.go`)
+port `lib/soroban-setup-signers.ts` — the former creates a new `CallContract` rule via
+`add_context_rule`, the latter adds a signer to the existing Default rule via `add_signer` (swaps
+always share one rule). `build`/`build-delegated`
+(`internal/service/webapp/build_counter_transaction.go`) turned out, on reading the actual TS
+source rather than the missing-endpoints doc's inferred contract, to be hardcoded to the demo
+counter contract's `increment(smartAccountAddress)` — not a generic SAC-transfer builder — so
+they're intentionally narrow, standalone methods rather than consumers of the shared engine.
+
+`build-swap` (`internal/service/webapp/build_swap_transaction.go`) ports
+`lib/transaction/validateContextRuleSigners.ts`'s `resolveSwapAuthMode`/
+`assertSwapRuleReadyForSign`/`validateContextRuleForSignerType` plus `SWAP_ROUTER_CONTRACTS`
+(testnet router hardcoded as a Go const, matching this service's single-network scope). Error
+responses use two new `internal/webappx` codes (`SIGNER_MISMATCH`, `validation_error`) mapped
+from two new sentinel errors (`ErrSwapSignerMismatch`, `ErrSwapValidation`) via
+`buildSwapErrorResponse`, matching the extension's documented expectation of a `409
+SIGNER_MISMATCH` + `suggestedAction: "reconfigure_swap_rule"` shape.
+
+`GET/POST /api/smart-account/freighter` (`internal/service/webapp/freighter_service.go`) reuses
+`SmartAccountService.PredictAddress`/`Deploy` generically (both already took an arbitrary
+`params xdr.ScVal`) with a new `Delegated(gAddress)`-signer init-params builder and
+`"freighter-delegated-v1"` salt derivation; also ports the reference route's testnet-friendbot
+auto-funding (`fundTestnetAccountIfNeeded`), gated to testnet since that's this service's only
+configured network.
+
+`POST /api/smart-account` (Phantom connect, `internal/service/webapp/phantom_service.go`) is a
+second, independent deployment mechanism — not the production factory pattern. It builds a raw
+`HostFunctionTypeCreateContractV2` host function against a fixed WASM hash
+(`WebAppSmartAccountWasmHash`, new config field, `NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH`) with a
+constructor, and computes the deterministic contract address locally (no RPC round trip, unlike
+the factory's `get_account_address` simulation) via the same `HashIdPreimageContractId` derivation
+Stellar Core uses.
+
+**Verified:** full test suite (`-race`) passes with zero regressions; `golangci-lint`, `gofmt`,
+`go vet` all clean; new files average 75–90% coverage (a few branch-heavy validation functions in
+`build_swap_transaction.go`/`setup_rules_service.go` sit in the 60s–70s — deeper edge-case tests
+would be needed to close the gap to this repo's 95% target).
 
 ---
 
@@ -188,7 +245,7 @@ Migrations verified up *and* down against the dev database.
 
 ---
 
-## Phase 5 — On-ramp, sign-payload, recovery/backup-passkey, counter demo (not started)
+## Phase 5 — On-ramp, sign-payload, recovery/backup-passkey, counter demo — ✅ DONE
 
 `/api/on-ramp/*` (dev-only, 403 in production via a new `devonly` middleware),
 `/api/sign-payload*`, `/api/recovery/backup-passkey`, `/api/counter`. New tables:
@@ -199,6 +256,15 @@ IDs: `"sp_" + crypto/rand 16 bytes hex`. Consume-on-read as one atomic
 
 **Tests:** TTL boundary tests, concurrent-consume race test under `-race`, 403-in-production
 checks, golden fixtures for sign-payload and on-ramp intent response shapes.
+
+---
+
+## Current status summary
+
+Every route in `references/latch/app/api/` has a Go equivalent except `build-sign-demo`
+(dev-only diagnostic endpoint, no client caller — not in scope for any documented consumer).
+Dark launch is still in effect: the Next.js app keeps serving production traffic; see
+"Verification strategy" below for what must happen before cutover.
 
 ---
 
@@ -233,3 +299,24 @@ checks, golden fixtures for sign-payload and on-ramp intent response shapes.
 6. **Extension custom headers** (e.g. `X-Latch-Chrome-Extension-Id`) — confirm the CORS
    allow-list includes every non-standard header the extension sends, or preflight will fail
    silently in-browser.
+7. **`BuildSend` never emits freighter delegated-signing fields** — discovered while building
+   Pass B's shared engine. `build-send/route.ts` calls the *same* `buildAuthTransaction()` /
+   `simulateAndExtractAuth()` that `setup-send-rules`/`setup-swap-rules`/`build-swap` do, which
+   includes a freighter-specific branch: rewrite the smart-account entry's signature to a
+   `Delegated(signerG)` `AuthPayload` and return `smartAccountAuthEntryXdr` /
+   `gAddressPreimageXdr` / `gAddressEntryTemplateXdr` for the client to sign externally. Go's
+   `TransactionService.BuildSend` (Pass A) is a hand-specialized port that never added this
+   branch, and also never sets `requireMatchedContextRule: true` (so it can't return the
+   documented `409 NO_CONTEXT_RULE`). Net effect: a freighter-signer send built via
+   `POST /api/transaction/build-send` today produces a result `SubmitDelegated` can't actually
+   consume (it expects those three fields as input) — the freighter send flow is likely broken
+   end-to-end. Not fixed as part of Pass B (out of the requested scope, and `BuildSend` is
+   already shipped/tested) — flagged here for a follow-up pass. The fix is mechanical: route
+   `BuildSend` through the new `buildAuthTransactionCore` in
+   `internal/service/webapp/build_auth_transaction.go` the same way `SetupSendRules` now does.
+8. **Coverage below this repo's 95% target** — Pass B's new files land at 75–90% coverage
+   (`internal/service/webapp/setup_rules_service_test.go`,
+   `build_swap_transaction_test.go`, `build_auth_transaction.go`'s branch coverage); the gaps
+   are mostly rare validation branches (e.g. `validateContextRuleForSignerType`'s freighter
+   sub-branches, `buildContextRuleName`'s length-overflow error). Worth a follow-up pass if the
+   95% target is a hard gate for this work specifically.

@@ -18,4 +18,12 @@ const (
 	// automatically rebuilt because it was near expiry — the client must
 	// collect fresh approvals before retrying.
 	ErrProposalRefreshed ErrorCode = "PROPOSAL_REFRESHED"
+	// ErrSignerMismatch is returned by build-swap when the smart account's
+	// swap context rule doesn't match the requested signer type — the
+	// client should re-run setup-swap-rules to reconfigure it.
+	ErrSignerMismatch ErrorCode = "SIGNER_MISMATCH"
+	// ErrValidation is returned for build-swap request/state validation
+	// failures that aren't a signer mismatch (e.g. malformed amounts,
+	// insufficient balance, signerG equal to the bundler fee-payer).
+	ErrValidation ErrorCode = "validation_error"
 )

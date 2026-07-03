@@ -79,6 +79,43 @@ func classifyAuthEntryRole(entry xdr.SorobanAuthorizationEntry, smartAccountAddr
 	return authEntryRoleOther
 }
 
+// decodeAuthEntryXdr decodes a single base64 XDR auth entry.
+func decodeAuthEntryXdr(b64 string) (xdr.SorobanAuthorizationEntry, error) {
+	var entry xdr.SorobanAuthorizationEntry
+	if err := xdr.SafeUnmarshalBase64(b64, &entry); err != nil {
+		return xdr.SorobanAuthorizationEntry{}, fmt.Errorf("decode auth entry: %w", err)
+	}
+	return entry, nil
+}
+
+// findMatchingAuthEntryIndex returns the index of the entry in entries whose
+// (unsigned) nonce and invocation match target's — i.e. the same logical
+// auth entry, possibly still in its unsigned simulation form. skipIdx is
+// excluded from the search (the smart account's own entry, which target
+// never refers to). Used by SubmitDelegated to locate the delegated entry
+// within a resent AuthEntriesXdr array without relying on a fixed position,
+// since BuildSend/PrepareSign may append a synthesized delegated entry at
+// whatever index simulation left free.
+func findMatchingAuthEntryIndex(entries []xdr.SorobanAuthorizationEntry, target xdr.SorobanAuthorizationEntry, skipIdx int) (int, error) {
+	targetAddr, targetOK := addressStringFromCredentials(target)
+	for i, e := range entries {
+		if i == skipIdx {
+			continue
+		}
+		addr, ok := addressStringFromCredentials(e)
+		if targetOK != ok || (targetOK && addr != targetAddr) {
+			continue
+		}
+		if e.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || target.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress {
+			continue
+		}
+		if e.Credentials.Address.Nonce == target.Credentials.Address.Nonce {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("delegated auth entry template not found among the given auth entries")
+}
+
 // isUnsignedAddressAuthEntry reports whether entry's address-credential
 // signature is still the simulation placeholder (void or an empty vector),
 // i.e. not yet signed. Ports lib/soroban-auth-entries.ts's

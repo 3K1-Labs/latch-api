@@ -134,6 +134,13 @@ func (s *ContextRulesService) DiscoverDefaultContextRule(ctx context.Context, sm
 	return 0, ContextRuleDiscoveryFallback, nil
 }
 
+// RuleAtID fetches a single context rule by id. ok is false if no rule
+// exists at that id. Ports lib/soroban-context-rules.ts's
+// fetchContextRuleAtId()/getContextRule().
+func (s *ContextRulesService) RuleAtID(ctx context.Context, smartAccountAddress string, id uint32) (ContextRuleSummary, bool, error) {
+	return s.getRule(ctx, smartAccountAddress, id)
+}
+
 // ListContextRules returns every context rule configured on the smart
 // account, for GET /api/smart-account/context-rules.
 func (s *ContextRulesService) ListContextRules(ctx context.Context, smartAccountAddress string) ([]ContextRuleSummary, error) {
@@ -154,6 +161,39 @@ func (s *ContextRulesService) ListContextRules(ctx context.Context, smartAccount
 		}
 	}
 	return rules, nil
+}
+
+// ruleHasExternalSigner reports whether rule has any External (passkey/
+// phantom) signer. Ports lib/soroban-context-rules.ts's ruleHasExternalSigner().
+func ruleHasExternalSigner(rule ContextRuleSummary) bool {
+	for _, sg := range rule.Signers {
+		if sg.Kind == "External" {
+			return true
+		}
+	}
+	return false
+}
+
+// delegatedGFromContextRule returns rule's sole Delegated G-address signer,
+// or "" if rule doesn't authorize exactly one Delegated signer and nothing
+// else (i.e. it isn't a bundler-only-delegated admin rule). Ports
+// lib/bundler-config.ts's delegatedGFromContextRule().
+func delegatedGFromContextRule(rule ContextRuleSummary) string {
+	var delegatedG string
+	count := 0
+	for _, sg := range rule.Signers {
+		if sg.Kind == "External" {
+			return ""
+		}
+		if sg.Kind == "Delegated" {
+			count++
+			delegatedG = sg.GAddress
+		}
+	}
+	if count != 1 {
+		return ""
+	}
+	return delegatedG
 }
 
 // ── on-chain rule/signer parsing ─────────────────────────────────────────────

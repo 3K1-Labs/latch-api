@@ -417,6 +417,25 @@ definitions:
       displayName:
         type: string
     type: object
+  internal_handler_webapp.buildCounterRequest:
+    properties:
+      signerG:
+        type: string
+      smartAccountAddress:
+        type: string
+    required:
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.buildDelegatedCounterRequest:
+    properties:
+      gAddress:
+        type: string
+      smartAccountAddress:
+        type: string
+    required:
+    - gAddress
+    - smartAccountAddress
+    type: object
   internal_handler_webapp.buildSendRequest:
     properties:
       amount:
@@ -438,6 +457,43 @@ definitions:
     - recipient
     - signerType
     - smartAccountAddress
+    type: object
+  internal_handler_webapp.buildSwapRequest:
+    properties:
+      amountInRaw:
+        type: string
+      amountOutMinRaw:
+        type: string
+      network:
+        type: string
+      providerId:
+        type: string
+      routerContractId:
+        type: string
+      signerG:
+        type: string
+      signerType:
+        type: string
+      smartAccountAddress:
+        type: string
+      swapChainXdr:
+        type: string
+      tokenInContractId:
+        type: string
+    required:
+    - amountInRaw
+    - amountOutMinRaw
+    - signerType
+    - smartAccountAddress
+    - swapChainXdr
+    - tokenInContractId
+    type: object
+  internal_handler_webapp.connectPhantomRequest:
+    properties:
+      publicKeyHex:
+        type: string
+    required:
+    - publicKeyHex
     type: object
   internal_handler_webapp.counterResponse:
     properties:
@@ -536,6 +592,13 @@ definitions:
     - accountSaltHex
     - signers
     - threshold
+    type: object
+  internal_handler_webapp.deployFreighterSmartAccountRequest:
+    properties:
+      gAddress:
+        type: string
+    required:
+    - gAddress
     type: object
   internal_handler_webapp.deploySmartAccountRequest:
     properties:
@@ -718,6 +781,24 @@ definitions:
         example: https://buy.moonpay.com?apiKey=...&signature=...
         type: string
     type: object
+  internal_handler_webapp.prepareSignRequest:
+    properties:
+      feePayerG:
+        type: string
+      network:
+        type: string
+      signerG:
+        type: string
+      signerType:
+        type: string
+      smartAccountAddress:
+        type: string
+      unsignedTxXdr:
+        type: string
+    required:
+    - smartAccountAddress
+    - unsignedTxXdr
+    type: object
   internal_handler_webapp.publicKeyCredentialJSON:
     properties:
       id:
@@ -789,6 +870,100 @@ definitions:
         type: string
     required:
     - smartAccountAddress
+    type: object
+  internal_handler_webapp.setupSendRulesRequest:
+    properties:
+      assetId:
+        type: string
+      assetIds:
+        items:
+          type: string
+        type: array
+      gAddress:
+        type: string
+      keyDataHex:
+        type: string
+      publicKeyHex:
+        type: string
+      signerType:
+        type: string
+      smartAccountAddress:
+        type: string
+    required:
+    - signerType
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.setupSwapRulesRequest:
+    properties:
+      gAddress:
+        type: string
+      keyDataHex:
+        type: string
+      network:
+        type: string
+      providerId:
+        type: string
+      publicKeyHex:
+        type: string
+      routerContractId:
+        type: string
+      signerType:
+        type: string
+      smartAccountAddress:
+        type: string
+    required:
+    - smartAccountAddress
+    type: object
+  internal_handler_webapp.submitDelegatedRequest:
+    properties:
+      authEntriesXdr:
+        items:
+          type: string
+        type: array
+      contextRuleId:
+        type: integer
+      delegatedGAuthEntrySynthesized:
+        type: boolean
+      gAddressEntryTemplateXdr:
+        type: string
+      signedAuthEntryBase64:
+        type: string
+      signerAddress:
+        type: string
+      smartAccountAuthEntryIndex:
+        type: integer
+      smartAccountAuthEntryXdr:
+        type: string
+      txXdr:
+        type: string
+    required:
+    - gAddressEntryTemplateXdr
+    - signedAuthEntryBase64
+    - signerAddress
+    - txXdr
+    type: object
+  internal_handler_webapp.submitPhantomRequest:
+    properties:
+      authEntriesXdr:
+        items:
+          type: string
+        type: array
+      authEntryXdr:
+        type: string
+      authSignatureHex:
+        type: string
+      contextRuleId:
+        type: integer
+      prefixedMessage:
+        type: string
+      publicKeyHex:
+        type: string
+      txXdr:
+        type: string
+    required:
+    - authSignatureHex
+    - publicKeyHex
+    - txXdr
     type: object
   internal_handler_webapp.submitWebAuthnRequest:
     properties:
@@ -2159,6 +2334,55 @@ paths:
       summary: Consume a stored sign payload
       tags:
       - sign-payload
+  /api/smart-account:
+    get:
+      description: Returns the ed25519 verifier and counter contract addresses the
+        Phantom demo flow uses.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get the counter-demo contract addresses
+      tags:
+      - smart-account
+    post:
+      consumes:
+      - application/json
+      description: Derives a G-address from a Phantom Ed25519 public key and deploys
+        (or idempotently returns) the counter-demo smart account WASM with that key
+        as its External signer. No production UI calls this — kept for API parity
+        with the reference demo.
+      parameters:
+      - description: Phantom Ed25519 public key
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.connectPhantomRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Deploy the demo counter-contract smart account for a Phantom (Solana)
+        signer
+      tags:
+      - smart-account
   /api/smart-account/balances:
     get:
       description: Fetches balances for every asset in the configured catalog. Zero
@@ -2224,6 +2448,124 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
       summary: List a smart account's context rules
+      tags:
+      - smart-account
+  /api/smart-account/freighter:
+    get:
+      description: Pure computation over a client-supplied G-address (no session,
+        no persistence). Returns the deterministic smart account address and whether
+        it's already deployed.
+      parameters:
+      - description: Classic Stellar public key (G...)
+        in: query
+        name: gAddress
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Derive a smart account address from a Freighter/mnemonic G-address
+      tags:
+      - smart-account
+    post:
+      consumes:
+      - application/json
+      description: Funds gAddress via testnet friendbot if needed, then deploys (or
+        idempotently returns) a smart account with gAddress as its Delegated signer.
+      parameters:
+      - description: Freighter G-address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.deployFreighterSmartAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Deploy a smart account for a Freighter/mnemonic G-address
+      tags:
+      - smart-account
+  /api/smart-account/setup-send-rules:
+    post:
+      consumes:
+      - application/json
+      description: Adds a CallContract context rule authorizing signerType to send
+        the first not-yet-configured asset (of assetId/assetIds, defaulting to the
+        full catalog).
+      parameters:
+      - description: Setup parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.setupSendRulesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Build a one-time context-rule setup transaction for sending an asset
+      tags:
+      - smart-account
+  /api/smart-account/setup-swap-rules:
+    post:
+      consumes:
+      - application/json
+      description: Ensures signerType (defaulting to passkey) is authorized on the
+        Default context rule every swap uses; a no-op if it's already configured.
+      parameters:
+      - description: Setup parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.setupSwapRulesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Add a signer to the smart account's default context rule for swaps
       tags:
       - smart-account
   /api/smart-account/webauthn:
@@ -2293,6 +2635,64 @@ paths:
       summary: Deploy a smart account from WebAuthn key material
       tags:
       - smart-account
+  /api/transaction/build:
+    post:
+      consumes:
+      - application/json
+      description: Builds an unsigned counter.increment(smartAccountAddress) transaction
+        (dev/demo contract) and extracts its auth entries. No production UI calls
+        this — kept for API parity.
+      parameters:
+      - description: Counter increment parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.buildCounterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Build a demo counter-increment transaction
+      tags:
+      - transaction
+  /api/transaction/build-delegated:
+    post:
+      consumes:
+      - application/json
+      description: Like build, but always prepares the smart-account entry for a Freighter/mnemonic
+        G-address signature. No production UI calls this — kept for API parity.
+      parameters:
+      - description: Counter increment parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.buildDelegatedCounterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Build a demo counter-increment transaction for a delegated G-address
+        signer
+      tags:
+      - transaction
   /api/transaction/build-send:
     post:
       consumes:
@@ -2324,6 +2724,68 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
       summary: Build a send transaction
+      tags:
+      - transaction
+  /api/transaction/build-swap:
+    post:
+      consumes:
+      - application/json
+      description: Builds an unsigned swap_chained transaction from a smart account,
+        resolving the Default context rule's auth mode and returning the auth entries
+        and signature payload the client needs to sign next.
+      parameters:
+      - description: Swap parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.buildSwapRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Build an Aquarius router swap transaction
+      tags:
+      - transaction
+  /api/transaction/prepare-sign:
+    post:
+      consumes:
+      - application/json
+      description: Simulates a client-supplied unsigned transaction (e.g. a non-Aquarius
+        swap or a dapp-supplied payload), attaches auth entries, and returns the same
+        build-result shape every build-* endpoint returns.
+      parameters:
+      - description: Unsigned transaction to prepare
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.prepareSignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Prepare a client-built transaction for review and signing
       tags:
       - transaction
   /api/transaction/relay:
@@ -2390,6 +2852,63 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Simulate Soroban transaction
+      tags:
+      - transaction
+  /api/transaction/submit:
+    post:
+      consumes:
+      - application/json
+      description: Attaches the client's Phantom (Solana wallet) Ed25519 signature
+        to the built transaction's auth entry and submits it to the network.
+      parameters:
+      - description: Signed transaction and auth entry
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.submitPhantomRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Submit a Phantom-signed transaction
+      tags:
+      - transaction
+  /api/transaction/submit-delegated:
+    post:
+      consumes:
+      - application/json
+      description: Attaches a native G-address signature (Freighter or a locally-held
+        mnemonic key) to the built transaction's smart-account and delegated auth
+        entries and submits it to the network.
+      parameters:
+      - description: Signed transaction and auth entries
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_webapp.submitDelegatedRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
+      summary: Submit a Freighter/mnemonic-delegated-signed transaction
       tags:
       - transaction
   /api/transaction/submit-webauthn:
