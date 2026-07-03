@@ -38,6 +38,7 @@ import (
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/store"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -186,6 +187,7 @@ func main() {
 	// Router
 	r := gin.New()
 	r.Use(middleware.CORSWithAllowlist(cfg.WebAppCORSAllowedOrigins))
+	r.Use(middleware.Metrics())
 	r.Use(gin.Logger())
 	if isProd {
 		r.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
@@ -230,6 +232,10 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	// Not gated behind auth, matching /health above — do not expose this
+	// port publicly in production; see docs/observability.md.
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	v1 := r.Group("/v1")
 	{
