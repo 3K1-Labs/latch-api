@@ -99,3 +99,67 @@ func contextRuleIDsForEntry(entry xdr.SorobanAuthorizationEntry, ruleID uint32) 
 	}
 	return ids
 }
+
+// ErrContextRuleIDRequired is returned by resolveContextRuleIDs when a
+// submit-* call can't determine which context rule the client signed
+// against: entry's own signature payload is still an unsigned/void
+// template (the common case — build-send/build-swap return an unsigned
+// entry for the client to sign) and the caller didn't supply one either.
+// Silently defaulting to context rule 0 in this situation builds a
+// validly-shaped but wrongly-scoped signature that only fails later,
+// opaquely, on-chain ("Unauthorized function call for address ...") instead
+// of failing loudly here.
+var ErrContextRuleIDRequired = errors.New("could not determine contextRuleId: pass contextRuleId, or ensure the smart account auth entry's signature payload already includes context_rule_ids")
+
+// contextRuleIDsFromSmartAccountAuthEntry recovers context_rule_ids already
+// embedded in entry's own AuthPayload signature map (set by
+// buildDelegatedAuthPayload/buildWebAuthnAuthPayload/buildEd25519AuthPayload
+// at build-send/build-swap time), for entries that have already been
+// through that path. Returns nil for an unsigned (void-signature) template
+// or anything not shaped like an AuthPayload map. Ports
+// lib/soroban-auth-payload-parse.ts's
+// contextRuleIdsFromSmartAccountAuthEntry().
+func contextRuleIDsFromSmartAccountAuthEntry(entry xdr.SorobanAuthorizationEntry) []uint32 {
+	if entry.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || entry.Credentials.Address == nil {
+		return nil
+	}
+	sig := entry.Credentials.Address.Signature
+	if sig.Type != xdr.ScValTypeScvMap || sig.Map == nil || *sig.Map == nil {
+		return nil
+	}
+	for _, e := range **sig.Map {
+		if e.Key.Type != xdr.ScValTypeScvSymbol || e.Key.Sym == nil || string(*e.Key.Sym) != "context_rule_ids" {
+			continue
+		}
+		if e.Val.Type != xdr.ScValTypeScvVec || e.Val.Vec == nil || *e.Val.Vec == nil {
+			return nil
+		}
+		vec := **e.Val.Vec
+		ids := make([]uint32, 0, len(vec))
+		for _, v := range vec {
+			if v.Type != xdr.ScValTypeScvU32 || v.U32 == nil {
+				return nil
+			}
+			ids = append(ids, uint32(*v.U32))
+		}
+		return ids
+	}
+	return nil
+}
+
+// resolveContextRuleIDs determines which context rule ids a submit-*
+// handler should bind into the delegated/WebAuthn/Phantom AuthPayload it's
+// about to build for entry. It prefers ids already embedded in entry's own
+// signature payload, falls back to the caller-supplied bodyContextRuleID,
+// and returns ErrContextRuleIDRequired rather than silently defaulting to
+// context rule 0. Ports lib/soroban-transaction-build.ts's
+// resolveContextRuleIds().
+func resolveContextRuleIDs(entry xdr.SorobanAuthorizationEntry, bodyContextRuleID *uint32) ([]uint32, error) {
+	if ids := contextRuleIDsFromSmartAccountAuthEntry(entry); len(ids) > 0 {
+		return ids, nil
+	}
+	if bodyContextRuleID != nil {
+		return contextRuleIDsForEntry(entry, *bodyContextRuleID), nil
+	}
+	return nil, ErrContextRuleIDRequired
+}

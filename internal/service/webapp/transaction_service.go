@@ -318,11 +318,17 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 // SubmitWebAuthnInput is the input to SubmitWebAuthn, ported from
 // POST /api/transaction/submit-webauthn.
 type SubmitWebAuthnInput struct {
-	TxXdr          string
-	AuthEntryXdr   string // used when AuthEntriesXdr is empty (single-entry legacy path)
-	SigDataXdr     string // hex-encoded WebAuthnSigData XDR, computed client-side
-	KeyDataHex     string
-	ContextRuleID  uint32
+	TxXdr        string
+	AuthEntryXdr string // used when AuthEntriesXdr is empty (single-entry legacy path)
+	SigDataXdr   string // hex-encoded WebAuthnSigData XDR, computed client-side
+	KeyDataHex   string
+	// ContextRuleID: nil (omitted by the client) falls back to whatever's
+	// already embedded in the smart account entry's own signature payload;
+	// if neither is available, SubmitWebAuthn returns
+	// ErrContextRuleIDRequired instead of silently binding to context rule
+	// 0. See SubmitDelegatedInput.ContextRuleID for the failure mode this
+	// avoids.
+	ContextRuleID  *uint32
 	AuthEntriesXdr []string // optional full array (passkey entry + bundler delegated entries)
 	// SmartAccountAuthEntryIndex is the index of the smart-account row within
 	// AuthEntriesXdr/AuthEntryXdr; 0 when only a single entry is supplied.
@@ -363,7 +369,10 @@ func (s *TransactionService) SubmitWebAuthn(ctx context.Context, in SubmitWebAut
 		return SubmitResult{}, fmt.Errorf("decode keyDataHex: %w", err)
 	}
 
-	contextRuleIDs := contextRuleIDsForEntry(entries[idx], in.ContextRuleID)
+	contextRuleIDs, err := resolveContextRuleIDs(entries[idx], in.ContextRuleID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
 	authPayload, err := buildWebAuthnAuthPayload(s.webauthnVerifierAddress, keyData, sigDataXdr, contextRuleIDs)
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("build webauthn auth payload: %w", err)
@@ -427,10 +436,13 @@ type SubmitDelegatedInput struct {
 	// missing-endpoints spec's SubmitDelegatedTxRequest, but required to
 	// rebuild the smart account entry's AuthPayload.context_rule_ids
 	// consistently with whatever build-send/build-swap computed it from.
-	// A wrong value fails safely — the enforcing-mode re-simulation in
-	// submitWithBundler rejects a digest mismatch on-chain, it can't be
-	// exploited to bypass auth.
-	ContextRuleID                  uint32
+	// nil (omitted by the client) falls back to whatever's already embedded
+	// in SmartAccountAuthEntryXdr's own signature payload; if neither is
+	// available, SubmitDelegated returns ErrContextRuleIDRequired instead of
+	// silently binding to context rule 0 — which would build a validly
+	// shaped but wrongly scoped signature that only fails later, opaquely,
+	// on-chain.
+	ContextRuleID                  *uint32
 	AuthEntriesXdr                 []string
 	SmartAccountAuthEntryIndex     int
 	DelegatedGAuthEntrySynthesized bool
@@ -478,7 +490,10 @@ func (s *TransactionService) SubmitDelegated(ctx context.Context, in SubmitDeleg
 	}
 	entries[delegatedIdx] = signedDelegated
 
-	contextRuleIDs := contextRuleIDsForEntry(entries[idx], in.ContextRuleID)
+	contextRuleIDs, err := resolveContextRuleIDs(entries[idx], in.ContextRuleID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
 	authPayload, err := buildDelegatedAuthPayload(in.SignerAddress, contextRuleIDs)
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("build delegated auth payload: %w", err)
@@ -511,11 +526,17 @@ func (s *TransactionService) SubmitDelegated(ctx context.Context, in SubmitDeleg
 // SubmitPhantomInput is the input to SubmitPhantom, ported from
 // POST /api/transaction/submit.
 type SubmitPhantomInput struct {
-	TxXdr                      string
-	AuthEntryXdr               string // smart account's own entry; used when AuthEntriesXdr is empty
-	AuthSignatureHex           string // raw 64-byte Ed25519 signature, hex, produced by Phantom over PrefixedMessage
-	PublicKeyHex               string // 32-byte raw Ed25519 public key, hex
-	ContextRuleID              uint32
+	TxXdr            string
+	AuthEntryXdr     string // smart account's own entry; used when AuthEntriesXdr is empty
+	AuthSignatureHex string // raw 64-byte Ed25519 signature, hex, produced by Phantom over PrefixedMessage
+	PublicKeyHex     string // 32-byte raw Ed25519 public key, hex
+	// ContextRuleID: nil (omitted by the client) falls back to whatever's
+	// already embedded in the smart account entry's own signature payload;
+	// if neither is available, SubmitPhantom returns
+	// ErrContextRuleIDRequired instead of silently binding to context rule
+	// 0. See SubmitDelegatedInput.ContextRuleID for the failure mode this
+	// avoids.
+	ContextRuleID              *uint32
 	AuthEntriesXdr             []string
 	SmartAccountAuthEntryIndex int
 }
@@ -556,7 +577,10 @@ func (s *TransactionService) SubmitPhantom(ctx context.Context, in SubmitPhantom
 		return SubmitResult{}, fmt.Errorf("decode authSignatureHex: %w", err)
 	}
 
-	contextRuleIDs := contextRuleIDsForEntry(entries[idx], in.ContextRuleID)
+	contextRuleIDs, err := resolveContextRuleIDs(entries[idx], in.ContextRuleID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
 	authPayload, err := buildEd25519AuthPayload(s.ed25519VerifierAddress, publicKey, sig, contextRuleIDs)
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("build ed25519 auth payload: %w", err)

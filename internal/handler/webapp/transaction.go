@@ -133,7 +133,7 @@ type submitWebAuthnRequest struct {
 	AuthEntryXdr                   string   `json:"authEntryXdr,omitempty"`
 	SigDataXdr                     string   `json:"sigDataXdr" binding:"required"`
 	KeyDataHex                     string   `json:"keyDataHex" binding:"required"`
-	ContextRuleID                  uint32   `json:"contextRuleId"`
+	ContextRuleID                  *uint32  `json:"contextRuleId"`
 	AuthEntriesXdr                 []string `json:"authEntriesXdr,omitempty"`
 	SmartAccountAuthEntryIndex     int      `json:"smartAccountAuthEntryIndex,omitempty"`
 	DelegatedGAuthEntrySynthesized bool     `json:"delegatedGAuthEntrySynthesized,omitempty"`
@@ -171,6 +171,10 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
+			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+			return
+		}
 		slog.Error("submit webauthn transaction", "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
 		return
@@ -188,7 +192,7 @@ type submitDelegatedRequest struct {
 	GAddressEntryTemplateXdr       string   `json:"gAddressEntryTemplateXdr" binding:"required"`
 	SignedAuthEntryBase64          string   `json:"signedAuthEntryBase64" binding:"required"`
 	SignerAddress                  string   `json:"signerAddress" binding:"required"`
-	ContextRuleID                  uint32   `json:"contextRuleId"`
+	ContextRuleID                  *uint32  `json:"contextRuleId"`
 	AuthEntriesXdr                 []string `json:"authEntriesXdr,omitempty"`
 	SmartAccountAuthEntryIndex     int      `json:"smartAccountAuthEntryIndex,omitempty"`
 	DelegatedGAuthEntrySynthesized bool     `json:"delegatedGAuthEntrySynthesized,omitempty"`
@@ -227,6 +231,10 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
+			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+			return
+		}
 		slog.Error("submit delegated transaction", "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
 		return
@@ -244,7 +252,7 @@ type submitPhantomRequest struct {
 	AuthSignatureHex string   `json:"authSignatureHex" binding:"required"`
 	PrefixedMessage  string   `json:"prefixedMessage,omitempty"`
 	PublicKeyHex     string   `json:"publicKeyHex" binding:"required"`
-	ContextRuleID    uint32   `json:"contextRuleId"`
+	ContextRuleID    *uint32  `json:"contextRuleId"`
 	AuthEntriesXdr   []string `json:"authEntriesXdr,omitempty"`
 }
 
@@ -283,6 +291,10 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 		SmartAccountAuthEntryIndex: 0,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
+			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+			return
+		}
 		slog.Error("submit phantom transaction", "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
 		return
