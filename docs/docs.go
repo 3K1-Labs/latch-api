@@ -1914,6 +1914,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/smart-account": {
+            "get": {
+                "description": "Returns the ed25519 verifier and counter contract addresses the Phantom demo flow uses.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Get the counter-demo contract addresses",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Derives a G-address from a Phantom Ed25519 public key and deploys (or idempotently returns) the counter-demo smart account WASM with that key as its External signer. No production UI calls this — kept for API parity with the reference demo.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy the demo counter-contract smart account for a Phantom (Solana) signer",
+                "parameters": [
+                    {
+                        "description": "Phantom Ed25519 public key",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.connectPhantomRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/smart-account/balances": {
             "get": {
                 "description": "Fetches balances for every asset in the configured catalog. Zero balances are omitted unless all=1.",
@@ -2004,6 +2070,175 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/smart-account/freighter": {
+            "get": {
+                "description": "Pure computation over a client-supplied G-address (no session, no persistence). Returns the deterministic smart account address and whether it's already deployed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Derive a smart account address from a Freighter/mnemonic G-address",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Classic Stellar public key (G...)",
+                        "name": "gAddress",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Funds gAddress via testnet friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy a smart account for a Freighter/mnemonic G-address",
+                "parameters": [
+                    {
+                        "description": "Freighter G-address",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.deployFreighterSmartAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/smart-account/setup-send-rules": {
+            "post": {
+                "description": "Adds a CallContract context rule authorizing signerType to send the first not-yet-configured asset (of assetId/assetIds, defaulting to the full catalog).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Build a one-time context-rule setup transaction for sending an asset",
+                "parameters": [
+                    {
+                        "description": "Setup parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.setupSendRulesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/smart-account/setup-swap-rules": {
+            "post": {
+                "description": "Ensures signerType (defaulting to passkey) is authorized on the Default context rule every swap uses; a no-op if it's already configured.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Add a signer to the smart account's default context rule for swaps",
+                "parameters": [
+                    {
+                        "description": "Setup parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.setupSwapRulesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
@@ -2105,6 +2340,88 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/transaction/build": {
+            "post": {
+                "description": "Builds an unsigned counter.increment(smartAccountAddress) transaction (dev/demo contract) and extracts its auth entries. No production UI calls this — kept for API parity.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Build a demo counter-increment transaction",
+                "parameters": [
+                    {
+                        "description": "Counter increment parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.buildCounterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/build-delegated": {
+            "post": {
+                "description": "Like build, but always prepares the smart-account entry for a Freighter/mnemonic G-address signature. No production UI calls this — kept for API parity.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Build a demo counter-increment transaction for a delegated G-address signer",
+                "parameters": [
+                    {
+                        "description": "Counter increment parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.buildDelegatedCounterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/transaction/build-send": {
             "post": {
                 "description": "Builds an unsigned send transaction (XLM or a cataloged asset) from a smart account, along with the auth entries and signature payload the client needs to sign next.",
@@ -2145,6 +2462,94 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/build-swap": {
+            "post": {
+                "description": "Builds an unsigned swap_chained transaction from a smart account, resolving the Default context rule's auth mode and returning the auth entries and signature payload the client needs to sign next.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Build an Aquarius router swap transaction",
+                "parameters": [
+                    {
+                        "description": "Swap parameters",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.buildSwapRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/prepare-sign": {
+            "post": {
+                "description": "Simulates a client-supplied unsigned transaction (e.g. a non-Aquarius swap or a dapp-supplied payload), attaches auth entries, and returns the same build-result shape every build-* endpoint returns.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Prepare a client-built transaction for review and signing",
+                "parameters": [
+                    {
+                        "description": "Unsigned transaction to prepare",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.prepareSignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
@@ -2245,6 +2650,88 @@ const docTemplate = `{
                         "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/submit": {
+            "post": {
+                "description": "Attaches the client's Phantom (Solana wallet) Ed25519 signature to the built transaction's auth entry and submits it to the network.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Submit a Phantom-signed transaction",
+                "parameters": [
+                    {
+                        "description": "Signed transaction and auth entry",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.submitPhantomRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/transaction/submit-delegated": {
+            "post": {
+                "description": "Attaches a native G-address signature (Freighter or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Submit a Freighter/mnemonic-delegated-signed transaction",
+                "parameters": [
+                    {
+                        "description": "Signed transaction and auth entries",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.submitDelegatedRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
                     }
                 }
@@ -4504,6 +4991,35 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_webapp.buildCounterRequest": {
+            "type": "object",
+            "required": [
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "signerG": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.buildDelegatedCounterRequest": {
+            "type": "object",
+            "required": [
+                "gAddress",
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "gAddress": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler_webapp.buildSendRequest": {
             "type": "object",
             "required": [
@@ -4532,6 +5048,60 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.buildSwapRequest": {
+            "type": "object",
+            "required": [
+                "amountInRaw",
+                "amountOutMinRaw",
+                "signerType",
+                "smartAccountAddress",
+                "swapChainXdr",
+                "tokenInContractId"
+            ],
+            "properties": {
+                "amountInRaw": {
+                    "type": "string"
+                },
+                "amountOutMinRaw": {
+                    "type": "string"
+                },
+                "network": {
+                    "type": "string"
+                },
+                "providerId": {
+                    "type": "string"
+                },
+                "routerContractId": {
+                    "type": "string"
+                },
+                "signerG": {
+                    "type": "string"
+                },
+                "signerType": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                },
+                "swapChainXdr": {
+                    "type": "string"
+                },
+                "tokenInContractId": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.connectPhantomRequest": {
+            "type": "object",
+            "required": [
+                "publicKeyHex"
+            ],
+            "properties": {
+                "publicKeyHex": {
                     "type": "string"
                 }
             }
@@ -4673,6 +5243,17 @@ const docTemplate = `{
                 },
                 "threshold": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handler_webapp.deployFreighterSmartAccountRequest": {
+            "type": "object",
+            "required": [
+                "gAddress"
+            ],
+            "properties": {
+                "gAddress": {
+                    "type": "string"
                 }
             }
         },
@@ -4935,6 +5516,33 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_webapp.prepareSignRequest": {
+            "type": "object",
+            "required": [
+                "smartAccountAddress",
+                "unsignedTxXdr"
+            ],
+            "properties": {
+                "feePayerG": {
+                    "type": "string"
+                },
+                "network": {
+                    "type": "string"
+                },
+                "signerG": {
+                    "type": "string"
+                },
+                "signerType": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                },
+                "unsignedTxXdr": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler_webapp.publicKeyCredentialJSON": {
             "type": "object",
             "required": [
@@ -5039,6 +5647,146 @@ const docTemplate = `{
             ],
             "properties": {
                 "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.setupSendRulesRequest": {
+            "type": "object",
+            "required": [
+                "signerType",
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "assetId": {
+                    "type": "string"
+                },
+                "assetIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "gAddress": {
+                    "type": "string"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                },
+                "publicKeyHex": {
+                    "type": "string"
+                },
+                "signerType": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.setupSwapRulesRequest": {
+            "type": "object",
+            "required": [
+                "smartAccountAddress"
+            ],
+            "properties": {
+                "gAddress": {
+                    "type": "string"
+                },
+                "keyDataHex": {
+                    "type": "string"
+                },
+                "network": {
+                    "type": "string"
+                },
+                "providerId": {
+                    "type": "string"
+                },
+                "publicKeyHex": {
+                    "type": "string"
+                },
+                "routerContractId": {
+                    "type": "string"
+                },
+                "signerType": {
+                    "type": "string"
+                },
+                "smartAccountAddress": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.submitDelegatedRequest": {
+            "type": "object",
+            "required": [
+                "gAddressEntryTemplateXdr",
+                "signedAuthEntryBase64",
+                "signerAddress",
+                "txXdr"
+            ],
+            "properties": {
+                "authEntriesXdr": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "contextRuleId": {
+                    "type": "integer"
+                },
+                "delegatedGAuthEntrySynthesized": {
+                    "type": "boolean"
+                },
+                "gAddressEntryTemplateXdr": {
+                    "type": "string"
+                },
+                "signedAuthEntryBase64": {
+                    "type": "string"
+                },
+                "signerAddress": {
+                    "type": "string"
+                },
+                "smartAccountAuthEntryIndex": {
+                    "type": "integer"
+                },
+                "smartAccountAuthEntryXdr": {
+                    "type": "string"
+                },
+                "txXdr": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_webapp.submitPhantomRequest": {
+            "type": "object",
+            "required": [
+                "authSignatureHex",
+                "publicKeyHex",
+                "txXdr"
+            ],
+            "properties": {
+                "authEntriesXdr": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "authEntryXdr": {
+                    "type": "string"
+                },
+                "authSignatureHex": {
+                    "type": "string"
+                },
+                "contextRuleId": {
+                    "type": "integer"
+                },
+                "prefixedMessage": {
+                    "type": "string"
+                },
+                "publicKeyHex": {
+                    "type": "string"
+                },
+                "txXdr": {
                     "type": "string"
                 }
             }
