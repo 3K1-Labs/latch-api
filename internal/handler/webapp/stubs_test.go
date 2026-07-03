@@ -101,18 +101,19 @@ type stubAudit struct{}
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
 type stubTransaction struct {
-	buildSendResult      webapp.BuildSendResult
-	buildSendErr         error
-	submitResult         webapp.SubmitResult
-	submitErr            error
-	submitDelegatedErr   error
-	submitPhantomErr     error
-	prepareSignResult    webapp.PrepareSignResult
-	prepareSignErr       error
-	setupSendRulesResult webapp.SetupSendRulesResult
-	setupSendRulesErr    error
-	setupSwapRulesResult webapp.SetupSwapRulesResult
-	setupSwapRulesErr    error
+	buildSendResult         webapp.BuildSendResult
+	buildSendErr            error
+	submitResult            webapp.SubmitResult
+	submitErr               error
+	gotSubmitDelegatedInput webapp.SubmitDelegatedInput
+	submitDelegatedErr      error
+	submitPhantomErr        error
+	prepareSignResult       webapp.PrepareSignResult
+	prepareSignErr          error
+	setupSendRulesResult    webapp.SetupSendRulesResult
+	setupSendRulesErr       error
+	setupSwapRulesResult    webapp.SetupSwapRulesResult
+	setupSwapRulesErr       error
 
 	buildCounterResult          webapp.BuildCounterResult
 	buildCounterErr             error
@@ -129,7 +130,8 @@ func (s *stubTransaction) BuildSend(_ context.Context, _ webapp.BuildSendInput, 
 func (s *stubTransaction) SubmitWebAuthn(_ context.Context, _ webapp.SubmitWebAuthnInput) (webapp.SubmitResult, error) {
 	return s.submitResult, s.submitErr
 }
-func (s *stubTransaction) SubmitDelegated(_ context.Context, _ webapp.SubmitDelegatedInput) (webapp.SubmitResult, error) {
+func (s *stubTransaction) SubmitDelegated(_ context.Context, in webapp.SubmitDelegatedInput) (webapp.SubmitResult, error) {
+	s.gotSubmitDelegatedInput = in
 	return s.submitResult, s.submitDelegatedErr
 }
 func (s *stubTransaction) SubmitPhantom(_ context.Context, _ webapp.SubmitPhantomInput) (webapp.SubmitResult, error) {

@@ -243,6 +243,29 @@ func TestSubmitDelegated_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"hash":"deadbeef"`)
 }
 
+func TestSubmitDelegated_ContextRuleIDAsString(t *testing.T) {
+	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
+	h := NewTransactionHandler(stub, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
+		"txXdr":                    "AAAAtx==",
+		"smartAccountAuthEntryXdr": "AAAAauth==",
+		"gAddressEntryTemplateXdr": "AAAAdeleg==",
+		"signedAuthEntryBase64":    "AAAAsig==",
+		"signerAddress":            "GSIGNER",
+		"contextRuleId":            "1",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	if assert.NotNil(t, stub.gotSubmitDelegatedInput.ContextRuleID) {
+		assert.Equal(t, uint32(1), *stub.gotSubmitDelegatedInput.ContextRuleID)
+	}
+}
+
 func TestSubmitDelegated_InvalidBody(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
