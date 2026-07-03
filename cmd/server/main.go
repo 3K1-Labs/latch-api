@@ -144,6 +144,7 @@ func main() {
 			webappTransactionSvc = webapp.NewTransactionService(
 				sorobanSvc, bundlerSvc, webappContextRulesSvc,
 				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
+				cfg.WebAppEd25519VerifierAddress, cfg.WebAppCounterContractAddress,
 			)
 			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
 			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)
@@ -336,6 +337,10 @@ func main() {
 
 		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
 		smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
+		smartAccountGroup.GET("/freighter", webappSmartAccountHandler.QueryFreighter)
+		smartAccountGroup.POST("/freighter", webappSmartAccountHandler.DeployFreighter)
+		smartAccountGroup.GET("", webappSmartAccountHandler.PhantomConfig)
+		smartAccountGroup.POST("", webappSmartAccountHandler.ConnectPhantom)
 	}
 
 	if webappTransactionSvc != nil {
@@ -344,7 +349,16 @@ func main() {
 		{
 			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)
 			transactionGroup.POST("/submit-webauthn", webappTransactionHandler.SubmitWebAuthn)
+			transactionGroup.POST("/submit-delegated", webappTransactionHandler.SubmitDelegated)
+			transactionGroup.POST("/submit", webappTransactionHandler.SubmitPhantom)
+			transactionGroup.POST("/prepare-sign", webappTransactionHandler.PrepareSign)
+			transactionGroup.POST("/build", webappTransactionHandler.BuildCounter)
+			transactionGroup.POST("/build-delegated", webappTransactionHandler.BuildDelegatedCounter)
+			transactionGroup.POST("/build-swap", webappTransactionHandler.BuildSwap)
 		}
+
+		smartAccountGroup.POST("/setup-send-rules", webappTransactionHandler.SetupSendRules)
+		smartAccountGroup.POST("/setup-swap-rules", webappTransactionHandler.SetupSwapRules)
 	}
 
 	// Multisig (Safe-style multi-signer smart accounts): drafts (pre-deployment

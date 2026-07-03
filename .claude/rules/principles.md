@@ -5,6 +5,7 @@ Core rules for every change made to this codebase. These override convenience.
 ## Think before coding
 
 Before writing a line:
+
 - State assumptions explicitly. If uncertain, ask — don't guess silently.
 - If multiple interpretations exist, surface them. Don't pick one without saying so.
 - If a simpler approach exists, say so and push back.
@@ -69,7 +70,7 @@ Every new code path must be observable.
 - Write tests before marking work done.
 - Table-driven tests for all non-trivial logic.
 - Integration tests for every new HTTP endpoint.
-- Target ≥ 80% coverage on new packages; do not regress existing coverage.
+- Target ≥ 95% coverage on new packages; do not regress existing coverage.
 - Tests must pass with `-race` flag: `make test`.
 
 ## Feature development order

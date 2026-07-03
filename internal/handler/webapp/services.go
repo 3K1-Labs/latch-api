@@ -20,6 +20,9 @@ type smartAccountService interface {
 	DeployForCredential(ctx context.Context, userID string, cred webapp.RegisteredCredential) (keyDataHex, saltHex, smartAccountAddress string, deployed, alreadyDeployed bool, err error)
 	Query(ctx context.Context, keyDataHex string) (address string, deployed bool, err error)
 	DeployByKeyData(ctx context.Context, keyDataHex string) (address string, alreadyDeployed bool, err error)
+	QueryFreighter(ctx context.Context, gAddress string) (address string, deployed bool, err error)
+	DeployFreighter(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error)
+	ConnectPhantom(ctx context.Context, publicKeyHex, verifierAddress, wasmHashHex string) (webapp.ConnectPhantomResult, error)
 }
 
 type accountsService interface {
@@ -33,6 +36,14 @@ type auditService interface {
 type transactionService interface {
 	BuildSend(ctx context.Context, in webapp.BuildSendInput, catalog []webapp.CatalogAsset) (webapp.BuildSendResult, error)
 	SubmitWebAuthn(ctx context.Context, in webapp.SubmitWebAuthnInput) (webapp.SubmitResult, error)
+	SubmitDelegated(ctx context.Context, in webapp.SubmitDelegatedInput) (webapp.SubmitResult, error)
+	SubmitPhantom(ctx context.Context, in webapp.SubmitPhantomInput) (webapp.SubmitResult, error)
+	PrepareSign(ctx context.Context, in webapp.PrepareSignInput) (webapp.PrepareSignResult, error)
+	SetupSendRules(ctx context.Context, in webapp.SetupSendRulesInput, catalog []webapp.CatalogAsset) (webapp.SetupSendRulesResult, error)
+	SetupSwapRules(ctx context.Context, in webapp.SetupSwapRulesInput) (webapp.SetupSwapRulesResult, error)
+	BuildCounter(ctx context.Context, in webapp.BuildCounterInput) (webapp.BuildCounterResult, error)
+	BuildDelegatedCounter(ctx context.Context, in webapp.BuildDelegatedCounterInput) (webapp.BuildDelegatedCounterResult, error)
+	BuildSwap(ctx context.Context, in webapp.BuildSwapInput) (webapp.BuildSwapResult, error)
 }
 
 type contextRulesService interface {

@@ -220,3 +220,216 @@ func TestSubmitWebAuthn_ServiceError(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// ── SubmitDelegated ──────────────────────────────────────────────────────────
+
+func TestSubmitDelegated_Success(t *testing.T) {
+	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
+	h := NewTransactionHandler(stub, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
+		"txXdr":                    "AAAAtx==",
+		"smartAccountAuthEntryXdr": "AAAAauth==",
+		"gAddressEntryTemplateXdr": "AAAAdeleg==",
+		"signedAuthEntryBase64":    "AAAAsig==",
+		"signerAddress":            "GSIGNER",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"hash":"deadbeef"`)
+}
+
+func TestSubmitDelegated_InvalidBody(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
+		"txXdr": "AAAAtx==",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSubmitDelegated_MissingAuthEntry(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
+		"txXdr":                    "AAAAtx==",
+		"gAddressEntryTemplateXdr": "AAAAdeleg==",
+		"signedAuthEntryBase64":    "AAAAsig==",
+		"signerAddress":            "GSIGNER",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSubmitDelegated_ServiceError(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: assertErr}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
+		"txXdr":                    "AAAAtx==",
+		"smartAccountAuthEntryXdr": "AAAAauth==",
+		"gAddressEntryTemplateXdr": "AAAAdeleg==",
+		"signedAuthEntryBase64":    "AAAAsig==",
+		"signerAddress":            "GSIGNER",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ── SubmitPhantom ────────────────────────────────────────────────────────────
+
+func TestSubmitPhantom_Success(t *testing.T) {
+	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "cafebabe", Status: "SUCCESS"}}
+	h := NewTransactionHandler(stub, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit", h.SubmitPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
+		"txXdr":            "AAAAtx==",
+		"authEntryXdr":     "AAAAauth==",
+		"authSignatureHex": "aabbcc",
+		"publicKeyHex":     "ddeeff",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"hash":"cafebabe"`)
+}
+
+func TestSubmitPhantom_InvalidBody(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit", h.SubmitPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
+		"txXdr": "AAAAtx==",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSubmitPhantom_MissingAuthEntry(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit", h.SubmitPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
+		"txXdr":            "AAAAtx==",
+		"authSignatureHex": "aabbcc",
+		"publicKeyHex":     "ddeeff",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSubmitPhantom_ServiceError(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{submitPhantomErr: assertErr}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit", h.SubmitPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
+		"txXdr":            "AAAAtx==",
+		"authEntryXdr":     "AAAAauth==",
+		"authSignatureHex": "aabbcc",
+		"publicKeyHex":     "ddeeff",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ── PrepareSign ──────────────────────────────────────────────────────────────
+
+func TestPrepareSign_Success(t *testing.T) {
+	stub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{
+			TxXdr:        "AAAAtx==",
+			AuthEntryXdr: "AAAAauth==",
+			SubmitMethod: "webauthn",
+		},
+	}}
+	h := NewTransactionHandler(stub, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"network":             "testnet",
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"txXdr":"AAAAtx=="`)
+	assert.Contains(t, w.Body.String(), `"network":"testnet"`)
+}
+
+func TestPrepareSign_InvalidBody(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "freighter",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestPrepareSign_ServiceError(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: assertErr}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

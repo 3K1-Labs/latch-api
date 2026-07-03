@@ -216,3 +216,158 @@ func TestSmartAccountBalances_BadAssetAllowlistJSON(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
+
+// ── QueryFreighter / DeployFreighter ────────────────────────────────────────
+
+const testHandlerGAddress = "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
+
+func TestQueryFreighter_Success(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterAddress: "CADDRESS", queryFreighterDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.GET("/smart-account/freighter", h.QueryFreighter)
+
+	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress="+testHandlerGAddress, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDRESS"`)
+	assert.Contains(t, w.Body.String(), `"deployed":true`)
+}
+
+func TestQueryFreighter_InvalidGAddress(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.GET("/smart-account/freighter", h.QueryFreighter)
+
+	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress=not-valid", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestQueryFreighter_ServiceError(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.GET("/smart-account/freighter", h.QueryFreighter)
+
+	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress="+testHandlerGAddress, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestDeployFreighter_Success(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS", deployFreighterAlreadyDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/freighter", h.DeployFreighter)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+		"gAddress": testHandlerGAddress,
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDRESS"`)
+	assert.Contains(t, w.Body.String(), `"alreadyDeployed":true`)
+}
+
+func TestDeployFreighter_InvalidGAddress(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/freighter", h.DeployFreighter)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+		"gAddress": "not-valid",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDeployFreighter_ServiceError(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/freighter", h.DeployFreighter)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+		"gAddress": testHandlerGAddress,
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ── ConnectPhantom / PhantomConfig ──────────────────────────────────────────
+
+func TestConnectPhantom_Success(t *testing.T) {
+	stub := &stubSmartAccount{connectPhantomResult: webapp.ConnectPhantomResult{
+		SmartAccountAddress: "CADDRESS",
+		GAddress:            testHandlerGAddress,
+		AlreadyDeployed:     true,
+	}}
+	h := NewSmartAccountHandler(stub, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account", h.ConnectPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account", postJSONBody(map[string]any{
+		"publicKeyHex": strings.Repeat("ab", 32),
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDRESS"`)
+	assert.Contains(t, w.Body.String(), `"gAddress":"`+testHandlerGAddress+`"`)
+	assert.Contains(t, w.Body.String(), `"alreadyDeployed":true`)
+}
+
+func TestConnectPhantom_InvalidPublicKey(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account", h.ConnectPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account", postJSONBody(map[string]any{
+		"publicKeyHex": "tooshort",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestConnectPhantom_ServiceError(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{connectPhantomErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account", h.ConnectPhantom)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account", postJSONBody(map[string]any{
+		"publicKeyHex": strings.Repeat("ab", 32),
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestPhantomConfig_Success(t *testing.T) {
+	cfg := testCfg()
+	cfg.WebAppEd25519VerifierAddress = "CVERIFIER"
+	cfg.WebAppCounterContractAddress = "CCOUNTER"
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, cfg)
+	r := gin.New()
+	r.GET("/smart-account", h.PhantomConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/smart-account", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"verifierAddress":"CVERIFIER"`)
+	assert.Contains(t, w.Body.String(), `"counterAddress":"CCOUNTER"`)
+}

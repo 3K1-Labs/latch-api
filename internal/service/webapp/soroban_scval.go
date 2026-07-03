@@ -69,6 +69,11 @@ func scI128(hi int64, lo uint64) xdr.ScVal {
 	return xdr.ScVal{Type: xdr.ScValTypeScvI128, I128: &parts}
 }
 
+func scU128(hi, lo uint64) xdr.ScVal {
+	parts := xdr.UInt128Parts{Hi: xdr.Uint64(hi), Lo: xdr.Uint64(lo)}
+	return xdr.ScVal{Type: xdr.ScValTypeScvU128, U128: &parts}
+}
+
 // scAddressFromString builds an xdr.ScAddress from a G... (account) or C...
 // (contract) Stellar address.
 func scAddressFromString(address string) (xdr.ScAddress, error) {

@@ -2,6 +2,7 @@ package webapp
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -179,4 +180,550 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 		"hash":   result.Hash,
 		"status": result.Status,
 	})
+}
+
+type submitDelegatedRequest struct {
+	TxXdr                          string   `json:"txXdr" binding:"required"`
+	SmartAccountAuthEntryXdr       string   `json:"smartAccountAuthEntryXdr,omitempty"`
+	GAddressEntryTemplateXdr       string   `json:"gAddressEntryTemplateXdr" binding:"required"`
+	SignedAuthEntryBase64          string   `json:"signedAuthEntryBase64" binding:"required"`
+	SignerAddress                  string   `json:"signerAddress" binding:"required"`
+	ContextRuleID                  uint32   `json:"contextRuleId"`
+	AuthEntriesXdr                 []string `json:"authEntriesXdr,omitempty"`
+	SmartAccountAuthEntryIndex     int      `json:"smartAccountAuthEntryIndex,omitempty"`
+	DelegatedGAuthEntrySynthesized bool     `json:"delegatedGAuthEntrySynthesized,omitempty"`
+}
+
+// SubmitDelegated godoc
+// @Summary      Submit a Freighter/mnemonic-delegated-signed transaction
+// @Description  Attaches a native G-address signature (Freighter or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body submitDelegatedRequest true "Signed transaction and auth entries"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/transaction/submit-delegated [post]
+func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
+	var req submitDelegatedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+	if len(req.AuthEntriesXdr) == 0 && req.SmartAccountAuthEntryXdr == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "smartAccountAuthEntryXdr or authEntriesXdr is required")
+		return
+	}
+
+	result, err := h.txSvc.SubmitDelegated(c.Request.Context(), webapp.SubmitDelegatedInput{
+		TxXdr:                          req.TxXdr,
+		SmartAccountAuthEntryXdr:       req.SmartAccountAuthEntryXdr,
+		GAddressEntryTemplateXdr:       req.GAddressEntryTemplateXdr,
+		SignedAuthEntryBase64:          req.SignedAuthEntryBase64,
+		SignerAddress:                  req.SignerAddress,
+		ContextRuleID:                  req.ContextRuleID,
+		AuthEntriesXdr:                 req.AuthEntriesXdr,
+		SmartAccountAuthEntryIndex:     req.SmartAccountAuthEntryIndex,
+		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
+	})
+	if err != nil {
+		slog.Error("submit delegated transaction", "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"hash":   result.Hash,
+		"status": result.Status,
+	})
+}
+
+type submitPhantomRequest struct {
+	TxXdr            string   `json:"txXdr" binding:"required"`
+	AuthEntryXdr     string   `json:"authEntryXdr,omitempty"`
+	AuthSignatureHex string   `json:"authSignatureHex" binding:"required"`
+	PrefixedMessage  string   `json:"prefixedMessage,omitempty"`
+	PublicKeyHex     string   `json:"publicKeyHex" binding:"required"`
+	ContextRuleID    uint32   `json:"contextRuleId"`
+	AuthEntriesXdr   []string `json:"authEntriesXdr,omitempty"`
+}
+
+// SubmitPhantom godoc
+// @Summary      Submit a Phantom-signed transaction
+// @Description  Attaches the client's Phantom (Solana wallet) Ed25519 signature to the built transaction's auth entry and submits it to the network.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body submitPhantomRequest true "Signed transaction and auth entry"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/transaction/submit [post]
+func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
+	var req submitPhantomRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+	if len(req.AuthEntriesXdr) == 0 && req.AuthEntryXdr == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "authEntryXdr or authEntriesXdr is required")
+		return
+	}
+
+	// prefixedMessage isn't used server-side: on-chain enforcement (the
+	// Ed25519PhantomVerifier contract) reconstructs and checks it during the
+	// enforcing-mode re-simulation in submitWithBundler — the same pattern
+	// SubmitWebAuthn already follows for the WebAuthn assertion.
+	result, err := h.txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
+		TxXdr:                      req.TxXdr,
+		AuthEntryXdr:               req.AuthEntryXdr,
+		AuthSignatureHex:           req.AuthSignatureHex,
+		PublicKeyHex:               req.PublicKeyHex,
+		ContextRuleID:              req.ContextRuleID,
+		AuthEntriesXdr:             req.AuthEntriesXdr,
+		SmartAccountAuthEntryIndex: 0,
+	})
+	if err != nil {
+		slog.Error("submit phantom transaction", "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"hash":   result.Hash,
+		"status": result.Status,
+	})
+}
+
+type prepareSignRequest struct {
+	Network             string `json:"network"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	UnsignedTxXdr       string `json:"unsignedTxXdr" binding:"required"`
+	SignerType          string `json:"signerType,omitempty"`
+	SignerG             string `json:"signerG,omitempty"`
+	FeePayerG           string `json:"feePayerG,omitempty"`
+}
+
+// PrepareSign godoc
+// @Summary      Prepare a client-built transaction for review and signing
+// @Description  Simulates a client-supplied unsigned transaction (e.g. a non-Aquarius swap or a dapp-supplied payload), attaches auth entries, and returns the same build-result shape every build-* endpoint returns.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body prepareSignRequest true "Unsigned transaction to prepare"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/transaction/prepare-sign [post]
+func (h *TransactionHandler) PrepareSign(c *gin.Context) {
+	var req prepareSignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+	if req.SignerType == "freighter" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is freighter")
+		return
+	}
+
+	result, err := h.txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
+		SmartAccountAddress: req.SmartAccountAddress,
+		UnsignedTxXdr:       req.UnsignedTxXdr,
+		SignerType:          req.SignerType,
+		SignerG:             req.SignerG,
+	})
+	if err != nil {
+		slog.Error("prepare sign transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to prepare transaction")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"network":                               req.Network,
+		"smartAccountAddress":                   req.SmartAccountAddress,
+		"txXdr":                                 result.TxXdr,
+		"authEntryXdr":                          result.AuthEntryXdr,
+		"authEntriesXdr":                        result.AuthEntriesXdr,
+		"smartAccountAuthEntryIndex":            result.SmartAccountAuthEntryIndex,
+		"delegatedNativeAuthEntryIndices":       result.DelegatedNativeAuthEntryIndices,
+		"delegatedNativeSignBlobPayloadsBase64": result.DelegatedNativeSignBlobPayloadsBase64,
+		"delegatedGAuthEntrySynthesized":        result.DelegatedGAuthEntrySynthesized,
+		"contextRuleId":                         result.ContextRuleID,
+		"contextRuleIds":                        result.ContextRuleIDs,
+		"contextRuleDiscovery":                  result.ContextRuleDiscovery,
+		"authDigestHex":                         result.AuthDigestHex,
+		"signaturePayloadHex":                   result.SignaturePayloadHex,
+		"validUntilLedger":                      result.ValidUntilLedger,
+		"simulationResultXdr":                   result.SimulationResultXdr,
+		"submitMethod":                          result.SubmitMethod,
+	})
+}
+
+type setupSendRulesRequest struct {
+	SmartAccountAddress string   `json:"smartAccountAddress" binding:"required"`
+	SignerType          string   `json:"signerType" binding:"required"`
+	AssetID             string   `json:"assetId,omitempty"`
+	AssetIDs            []string `json:"assetIds,omitempty"`
+	PublicKeyHex        string   `json:"publicKeyHex,omitempty"`
+	KeyDataHex          string   `json:"keyDataHex,omitempty"`
+	GAddress            string   `json:"gAddress,omitempty"`
+}
+
+// SetupSendRules godoc
+// @Summary      Build a one-time context-rule setup transaction for sending an asset
+// @Description  Adds a CallContract context rule authorizing signerType to send the first not-yet-configured asset (of assetId/assetIds, defaulting to the full catalog).
+// @Tags         smart-account
+// @Accept       json
+// @Produce      json
+// @Param        body body setupSendRulesRequest true "Setup parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/smart-account/setup-send-rules [post]
+func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
+	var req setupSendRulesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+	if req.SignerType != "passkey" && req.SignerType != "phantom" && req.SignerType != "freighter" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, phantom, or freighter")
+		return
+	}
+
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
+	if err != nil {
+		slog.Error("load asset catalog", "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+
+	result, err := h.txSvc.SetupSendRules(c.Request.Context(), webapp.SetupSendRulesInput{
+		SmartAccountAddress: req.SmartAccountAddress,
+		SignerType:          req.SignerType,
+		AssetID:             req.AssetID,
+		AssetIDs:            req.AssetIDs,
+		PublicKeyHex:        req.PublicKeyHex,
+		KeyDataHex:          req.KeyDataHex,
+		GAddress:            req.GAddress,
+	}, catalog)
+	if err != nil {
+		slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build setup transaction")
+		return
+	}
+
+	if result.AlreadyConfigured {
+		webappx.Success(c, http.StatusOK, gin.H{
+			"alreadyConfigured": true,
+			"message":           result.Message,
+		})
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"txXdr":                                 result.TxXdr,
+		"authEntryXdr":                          result.AuthEntryXdr,
+		"authEntriesXdr":                        result.AuthEntriesXdr,
+		"smartAccountAuthEntryIndex":            result.SmartAccountAuthEntryIndex,
+		"delegatedNativeAuthEntryIndices":       result.DelegatedNativeAuthEntryIndices,
+		"delegatedNativeSignBlobPayloadsBase64": result.DelegatedNativeSignBlobPayloadsBase64,
+		"delegatedGAuthEntrySynthesized":        result.DelegatedGAuthEntrySynthesized,
+		"contextRuleId":                         result.ContextRuleID,
+		"contextRuleIds":                        result.ContextRuleIDs,
+		"authDigestHex":                         result.AuthDigestHex,
+		"signaturePayloadHex":                   result.SignaturePayloadHex,
+		"validUntilLedger":                      result.ValidUntilLedger,
+		"simulationResultXdr":                   result.SimulationResultXdr,
+		"submitMethod":                          result.SubmitMethod,
+		"smartAccountAuthEntryXdr":              result.SmartAccountAuthEntryXdr,
+		"gAddressPreimageXdr":                   result.GAddressPreimageXdr,
+		"gAddressEntryTemplateXdr":              result.GAddressEntryTemplateXdr,
+		"configuredAsset": gin.H{
+			"assetId":    result.ConfiguredAsset.AssetID,
+			"contractId": result.ConfiguredAsset.ContractID,
+		},
+		"remainingSetupCount": result.RemainingSetupCount,
+		"instructions":        "Sign and submit this setup transaction (one context rule). Repeat if remainingSetupCount > 0.",
+	})
+}
+
+type setupSwapRulesRequest struct {
+	Network             string `json:"network"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	SignerType          string `json:"signerType,omitempty"`
+	ProviderID          string `json:"providerId,omitempty"`
+	RouterContractID    string `json:"routerContractId,omitempty"`
+	PublicKeyHex        string `json:"publicKeyHex,omitempty"`
+	KeyDataHex          string `json:"keyDataHex,omitempty"`
+	GAddress            string `json:"gAddress,omitempty"`
+}
+
+// SetupSwapRules godoc
+// @Summary      Add a signer to the smart account's default context rule for swaps
+// @Description  Ensures signerType (defaulting to passkey) is authorized on the Default context rule every swap uses; a no-op if it's already configured.
+// @Tags         smart-account
+// @Accept       json
+// @Produce      json
+// @Param        body body setupSwapRulesRequest true "Setup parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/smart-account/setup-swap-rules [post]
+func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
+	var req setupSwapRulesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+
+	providerID := req.ProviderID
+	if providerID == "" {
+		providerID = "aquarius"
+	}
+
+	result, err := h.txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
+		SmartAccountAddress: req.SmartAccountAddress,
+		SignerType:          req.SignerType,
+		RouterContractID:    req.RouterContractID,
+		PublicKeyHex:        req.PublicKeyHex,
+		KeyDataHex:          req.KeyDataHex,
+		GAddress:            req.GAddress,
+	})
+	if err != nil {
+		slog.Error("build setup-swap-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build swap setup transaction")
+		return
+	}
+
+	if result.AlreadyConfigured {
+		webappx.Success(c, http.StatusOK, gin.H{
+			"alreadyConfigured": true,
+			"message":           result.Message,
+			"routerContractId":  result.RouterContractID,
+			"contextRuleId":     result.ContextRuleID,
+		})
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"txXdr":                                 result.TxXdr,
+		"authEntryXdr":                          result.AuthEntryXdr,
+		"authEntriesXdr":                        result.AuthEntriesXdr,
+		"smartAccountAuthEntryIndex":            result.SmartAccountAuthEntryIndex,
+		"delegatedNativeAuthEntryIndices":       result.DelegatedNativeAuthEntryIndices,
+		"delegatedNativeSignBlobPayloadsBase64": result.DelegatedNativeSignBlobPayloadsBase64,
+		"delegatedGAuthEntrySynthesized":        result.DelegatedGAuthEntrySynthesized,
+		"contextRuleId":                         result.ContextRuleID,
+		"contextRuleIds":                        result.ContextRuleIDs,
+		"authDigestHex":                         result.AuthDigestHex,
+		"signaturePayloadHex":                   result.SignaturePayloadHex,
+		"validUntilLedger":                      result.ValidUntilLedger,
+		"simulationResultXdr":                   result.SimulationResultXdr,
+		"submitMethod":                          result.SubmitMethod,
+		"smartAccountAuthEntryXdr":              result.SmartAccountAuthEntryXdr,
+		"gAddressPreimageXdr":                   result.GAddressPreimageXdr,
+		"gAddressEntryTemplateXdr":              result.GAddressEntryTemplateXdr,
+		"delegatedAuthG":                        result.DelegatedAuthG,
+		"routerContractId":                      result.RouterContractID,
+		"providerId":                            providerID,
+		"remainingSetupCount":                   0,
+	})
+}
+
+type buildCounterRequest struct {
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	SignerG             string `json:"signerG,omitempty"`
+}
+
+// BuildCounter godoc
+// @Summary      Build a demo counter-increment transaction
+// @Description  Builds an unsigned counter.increment(smartAccountAddress) transaction (dev/demo contract) and extracts its auth entries. No production UI calls this — kept for API parity.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body buildCounterRequest true "Counter increment parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/transaction/build [post]
+func (h *TransactionHandler) BuildCounter(c *gin.Context) {
+	var req buildCounterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+
+	result, err := h.txSvc.BuildCounter(c.Request.Context(), webapp.BuildCounterInput{
+		SmartAccountAddress: req.SmartAccountAddress,
+		SignerG:             req.SignerG,
+	})
+	if err != nil {
+		slog.Error("build counter transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to build transaction")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"txXdr":                                 result.TxXdr,
+		"authEntryXdr":                          result.AuthEntryXdr,
+		"authEntriesXdr":                        result.AuthEntriesXdr,
+		"smartAccountAuthEntryIndex":            result.SmartAccountAuthEntryIndex,
+		"delegatedNativeAuthEntryIndices":       result.DelegatedNativeAuthEntryIndices,
+		"delegatedNativeSignBlobPayloadsBase64": result.DelegatedNativeSignBlobPayloadsBase64,
+		"delegatedGAuthEntrySynthesized":        result.DelegatedGAuthEntrySynthesized,
+		"contextRuleId":                         result.ContextRuleID,
+		"contextRuleDiscovery":                  result.ContextRuleDiscovery,
+		"authDigestHex":                         result.AuthDigestHex,
+		"signaturePayloadHex":                   result.SignaturePayloadHex,
+		"validUntilLedger":                      result.ValidUntilLedger,
+		"simulationResultXdr":                   result.SimulationResultXdr,
+	})
+}
+
+type buildDelegatedCounterRequest struct {
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	GAddress            string `json:"gAddress" binding:"required"`
+}
+
+// BuildDelegatedCounter godoc
+// @Summary      Build a demo counter-increment transaction for a delegated G-address signer
+// @Description  Like build, but always prepares the smart-account entry for a Freighter/mnemonic G-address signature. No production UI calls this — kept for API parity.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body buildDelegatedCounterRequest true "Counter increment parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Router       /api/transaction/build-delegated [post]
+func (h *TransactionHandler) BuildDelegatedCounter(c *gin.Context) {
+	var req buildDelegatedCounterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+
+	result, err := h.txSvc.BuildDelegatedCounter(c.Request.Context(), webapp.BuildDelegatedCounterInput{
+		SmartAccountAddress: req.SmartAccountAddress,
+		GAddress:            req.GAddress,
+	})
+	if err != nil {
+		slog.Error("build delegated counter transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to build transaction")
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"txXdr":                    result.TxXdr,
+		"smartAccountAuthEntryXdr": result.SmartAccountAuthEntryXdr,
+		"gAddressPreimageXdr":      result.GAddressPreimageXdr,
+		"gAddressEntryTemplateXdr": result.GAddressEntryTemplateXdr,
+		"authDigestHex":            result.AuthDigestHex,
+		"validUntilLedger":         result.ValidUntilLedger,
+		"contextRuleId":            result.ContextRuleID,
+	})
+}
+
+type buildSwapRequest struct {
+	Network             string `json:"network"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	SignerType          string `json:"signerType" binding:"required"`
+	SignerG             string `json:"signerG,omitempty"`
+	RouterContractID    string `json:"routerContractId,omitempty"`
+	SwapChainXdr        string `json:"swapChainXdr" binding:"required"`
+	TokenInContractID   string `json:"tokenInContractId" binding:"required"`
+	AmountInRaw         string `json:"amountInRaw" binding:"required"`
+	AmountOutMinRaw     string `json:"amountOutMinRaw" binding:"required"`
+	ProviderID          string `json:"providerId,omitempty"`
+}
+
+// BuildSwap godoc
+// @Summary      Build an Aquarius router swap transaction
+// @Description  Builds an unsigned swap_chained transaction from a smart account, resolving the Default context rule's auth mode and returning the auth entries and signature payload the client needs to sign next.
+// @Tags         transaction
+// @Accept       json
+// @Produce      json
+// @Param        body body buildSwapRequest true "Swap parameters"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
+// @Router       /api/transaction/build-swap [post]
+func (h *TransactionHandler) BuildSwap(c *gin.Context) {
+	var req buildSwapRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+	if req.SignerType != "passkey" && req.SignerType != "phantom" && req.SignerType != "freighter" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, phantom, or freighter")
+		return
+	}
+	if req.SignerType == "freighter" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required for freighter")
+		return
+	}
+
+	providerID := req.ProviderID
+	if providerID == "" {
+		providerID = "aquarius"
+	}
+
+	result, err := h.txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
+		SmartAccountAddress: req.SmartAccountAddress,
+		SignerType:          req.SignerType,
+		SignerG:             req.SignerG,
+		RouterContractID:    req.RouterContractID,
+		SwapChainXdr:        req.SwapChainXdr,
+		TokenInContractID:   req.TokenInContractID,
+		AmountInRaw:         req.AmountInRaw,
+		AmountOutMinRaw:     req.AmountOutMinRaw,
+	})
+	if err != nil {
+		buildSwapErrorResponse(c, req.SmartAccountAddress, err)
+		return
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"txXdr":                                 result.TxXdr,
+		"authEntryXdr":                          result.AuthEntryXdr,
+		"authEntriesXdr":                        result.AuthEntriesXdr,
+		"smartAccountAuthEntryIndex":            result.SmartAccountAuthEntryIndex,
+		"delegatedNativeAuthEntryIndices":       result.DelegatedNativeAuthEntryIndices,
+		"delegatedNativeSignBlobPayloadsBase64": result.DelegatedNativeSignBlobPayloadsBase64,
+		"delegatedGAuthEntrySynthesized":        result.DelegatedGAuthEntrySynthesized,
+		"contextRuleId":                         result.ContextRuleID,
+		"contextRuleIds":                        result.ContextRuleIDs,
+		"authDigestHex":                         result.AuthDigestHex,
+		"signaturePayloadHex":                   result.SignaturePayloadHex,
+		"validUntilLedger":                      result.ValidUntilLedger,
+		"simulationResultXdr":                   result.SimulationResultXdr,
+		"submitMethod":                          result.SubmitMethod,
+		"smartAccountAuthEntryXdr":              result.SmartAccountAuthEntryXdr,
+		"gAddressPreimageXdr":                   result.GAddressPreimageXdr,
+		"gAddressEntryTemplateXdr":              result.GAddressEntryTemplateXdr,
+		"delegatedAuthG":                        result.DelegatedAuthG,
+		"routerContractId":                      result.RouterContractID,
+		"tokenInContractId":                     result.TokenInContractID,
+		"amountInRaw":                           result.AmountInRaw,
+		"amountOutMinRaw":                       result.AmountOutMinRaw,
+		"providerId":                            providerID,
+	})
+}
+
+// buildSwapErrorResponse maps a BuildSwap service-layer sentinel error to
+// the correct HTTP status and error code, including the suggestedAction
+// hint the extension branches on to decide whether to run setup-swap-rules
+// or prompt the user to reconfigure it. Ports build-swap/route.ts's catch
+// block. Sentinel-wrapped validation/mismatch messages are safe to expose
+// via err.Error() — that's their purpose; anything unrecognized falls back
+// to a generic 500 with no internal detail leaked, per security.md.
+func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	switch {
+	case errors.Is(err, webapp.ErrSwapSignerMismatch):
+		webappx.Success(c, http.StatusConflict, gin.H{
+			"error":           err.Error(),
+			"code":            webappx.ErrSignerMismatch,
+			"suggestedAction": "reconfigure_swap_rule",
+		})
+	case errors.Is(err, webapp.ErrSwapValidation):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+	default:
+		slog.Error("build swap transaction", "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to build swap transaction")
+	}
 }
