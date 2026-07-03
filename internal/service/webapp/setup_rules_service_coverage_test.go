@@ -427,14 +427,14 @@ func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
 	assert.Contains(t, err.Error(), "fetch bundler sequence")
 }
 
-// ── swapRuleAlreadyConfigured ────────────────────────────────────────────────
+// ── ruleAuthorizesSigner ─────────────────────────────────────────────────────
 
-func TestSwapRuleAlreadyConfigured_FreighterNoMatch(t *testing.T) {
+func TestRuleAuthorizesSigner_FreighterNoMatch(t *testing.T) {
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "Delegated", GAddress: "GOTHER"}}}
-	assert.False(t, swapRuleAlreadyConfigured(rule, "freighter", "", testGAddress))
+	assert.False(t, ruleAuthorizesSigner(rule, "freighter", "", testGAddress))
 }
 
-func TestSwapRuleAlreadyConfigured_ExternalVerifierMismatch(t *testing.T) {
+func TestRuleAuthorizesSigner_ExternalVerifierMismatch(t *testing.T) {
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "External", VerifierAddress: "COTHER"}}}
-	assert.False(t, swapRuleAlreadyConfigured(rule, "passkey", "CVERIFIER", ""))
+	assert.False(t, ruleAuthorizesSigner(rule, "passkey", "CVERIFIER", ""))
 }

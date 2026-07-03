@@ -142,13 +142,39 @@ func (s *TransactionService) SetupSendRules(ctx context.Context, in SetupSendRul
 		return SetupSendRulesResult{}, err
 	}
 
+	verifierAddress := s.ed25519VerifierAddress
+	if in.SignerType == "passkey" {
+		verifierAddress = s.webauthnVerifierAddress
+	}
+	if verifierAddress == "" && in.SignerType != "freighter" {
+		return SetupSendRulesResult{}, fmt.Errorf("verifier address not configured for this signer type")
+	}
+
+	// An asset only counts as configured if a matching rule exists AND that
+	// rule already authorizes this specific signer — matching by contract
+	// address alone (discovery == Matched) isn't enough: a rule can already
+	// exist for this asset under a *different* signer, and treating that as
+	// "done" would both (a) leave the current signer unauthorized to send
+	// (the on-chain __check_auth call then fails with an opaque
+	// "Unauthorized function call" instead of ever reaching this endpoint)
+	// and (b), if the earlier "not yet configured" check were used instead,
+	// create a duplicate rule for a signer that's already covered every time
+	// this endpoint is retried.
 	var missingAssets []CatalogAsset
 	for _, asset := range assetsToConfigure {
-		_, discovery, err := s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
+		id, discovery, err := s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
 		if err != nil {
 			return SetupSendRulesResult{}, fmt.Errorf("discover context rule for %s: %w", asset.AssetID, err)
 		}
 		if discovery != ContextRuleDiscoveryMatched {
+			missingAssets = append(missingAssets, asset)
+			continue
+		}
+		rule, ok, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, id)
+		if err != nil {
+			return SetupSendRulesResult{}, fmt.Errorf("fetch context rule %d for %s: %w", id, asset.AssetID, err)
+		}
+		if !ok || !ruleAuthorizesSigner(rule, in.SignerType, verifierAddress, in.GAddress) {
 			missingAssets = append(missingAssets, asset)
 		}
 	}
@@ -158,14 +184,6 @@ func (s *TransactionService) SetupSendRules(ctx context.Context, in SetupSendRul
 			AlreadyConfigured: true,
 			Message:           "Context rules already exist for all requested assets.",
 		}, nil
-	}
-
-	verifierAddress := s.ed25519VerifierAddress
-	if in.SignerType == "passkey" {
-		verifierAddress = s.webauthnVerifierAddress
-	}
-	if verifierAddress == "" && in.SignerType != "freighter" {
-		return SetupSendRulesResult{}, fmt.Errorf("verifier address not configured for this signer type")
 	}
 
 	signersVec, err := buildSignersVecForSetup(in.SignerType, verifierAddress, in.PublicKeyHex, in.KeyDataHex, in.GAddress)
@@ -333,7 +351,7 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 		verifierAddress = s.webauthnVerifierAddress
 	}
 
-	if ruleOK && swapRuleAlreadyConfigured(defaultRule, signerType, verifierAddress, in.GAddress) {
+	if ruleOK && ruleAuthorizesSigner(defaultRule, signerType, verifierAddress, in.GAddress) {
 		return SetupSwapRulesResult{
 			AlreadyConfigured: true,
 			Message:           "Default context rule already has your signer for swaps.",
@@ -405,13 +423,15 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 	}, nil
 }
 
-// swapRuleAlreadyConfigured reports whether rule already authorizes
-// signerType's signer for swaps: a matching Delegated(gAddress) for
-// freighter, or any External signer (optionally matching verifierAddress)
-// for passkey/phantom. Ports the combined effect of setup-swap-rules/
-// route.ts's ruleHasDelegatedSigner/ruleHasExternalPasskey/
-// contextRuleSignersMatchSetup pre-checks.
-func swapRuleAlreadyConfigured(rule ContextRuleSummary, signerType, verifierAddress, gAddress string) bool {
+// ruleAuthorizesSigner reports whether rule already authorizes signerType's
+// signer: a matching Delegated(gAddress) for freighter, or any External
+// signer (optionally matching verifierAddress) for passkey/phantom. Used by
+// both setup-send-rules and setup-swap-rules to detect "this signer is
+// already configured" before creating a duplicate rule/signer entry. Ports
+// the combined effect of setup-swap-rules/route.ts's
+// ruleHasDelegatedSigner/ruleHasExternalPasskey/contextRuleSignersMatchSetup
+// pre-checks.
+func ruleAuthorizesSigner(rule ContextRuleSummary, signerType, verifierAddress, gAddress string) bool {
 	if signerType == "freighter" {
 		for _, sg := range rule.Signers {
 			if sg.Kind == "Delegated" && sg.GAddress == gAddress {

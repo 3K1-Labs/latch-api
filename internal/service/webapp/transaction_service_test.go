@@ -32,6 +32,8 @@ func defaultContextRulesService(t *testing.T) *ContextRulesService {
 	return newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, ""))
 }
 
+func uint32Ptr(v uint32) *uint32 { return &v }
+
 // ── BuildSend ────────────────────────────────────────────────────────────────
 
 func TestBuildSend_PasskeySuccess(t *testing.T) {
@@ -259,7 +261,7 @@ func TestSubmitWebAuthn_Success(t *testing.T) {
 		AuthEntryXdr:  authEntryB64,
 		SigDataXdr:    "aabbcc",
 		KeyDataHex:    "010203",
-		ContextRuleID: 0,
+		ContextRuleID: uint32Ptr(0),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "h1", result.Hash)
@@ -304,7 +306,7 @@ func TestSubmitWebAuthn_SignsSynthesizedDelegatedEntry(t *testing.T) {
 		SmartAccountAuthEntryIndex:     0,
 		SigDataXdr:                     "aabbcc",
 		KeyDataHex:                     "010203",
-		ContextRuleID:                  0,
+		ContextRuleID:                  uint32Ptr(0),
 		DelegatedGAuthEntrySynthesized: true,
 	})
 	require.NoError(t, err)
@@ -412,7 +414,7 @@ func TestSubmitDelegated_Success(t *testing.T) {
 		GAddressEntryTemplateXdr:   delegatedEntryB64,
 		SignedAuthEntryBase64:      signedB64,
 		SignerAddress:              signerKp.Address(),
-		ContextRuleID:              0,
+		ContextRuleID:              uint32Ptr(0),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "hd1", result.Hash)
@@ -463,6 +465,7 @@ func TestSubmitDelegated_LegacyPairFallback(t *testing.T) {
 		GAddressEntryTemplateXdr: delegatedEntryB64,
 		SignedAuthEntryBase64:    signedB64,
 		SignerAddress:            signerKp.Address(),
+		ContextRuleID:            uint32Ptr(0),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "hd2", result.Hash)
@@ -543,7 +546,7 @@ func TestSubmitPhantom_Success(t *testing.T) {
 		AuthEntryXdr:     authEntryB64,
 		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
 		PublicKeyHex:     hex.EncodeToString(make([]byte, 32)),
-		ContextRuleID:    0,
+		ContextRuleID:    uint32Ptr(0),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "hp1", result.Hash)

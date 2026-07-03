@@ -144,3 +144,41 @@ func TestContextRuleIDsForEntry(t *testing.T) {
 	ids := contextRuleIDsForEntry(entry, 5)
 	assert.Equal(t, []uint32{5}, ids)
 }
+
+func TestContextRuleIDsFromSmartAccountAuthEntry_VoidSignatureReturnsNil(t *testing.T) {
+	entry := sampleAuthEntry(t, testGAddress, 42, 1000, "transfer") // unsigned template
+	assert.Nil(t, contextRuleIDsFromSmartAccountAuthEntry(entry))
+}
+
+func TestContextRuleIDsFromSmartAccountAuthEntry_RecoversFromAuthPayload(t *testing.T) {
+	entry := sampleAuthEntry(t, testGAddress, 42, 1000, "transfer")
+	payload, err := buildDelegatedAuthPayload(testGAddress, []uint32{3, 3})
+	require.NoError(t, err)
+	entry.Credentials.Address.Signature = payload
+
+	assert.Equal(t, []uint32{3, 3}, contextRuleIDsFromSmartAccountAuthEntry(entry))
+}
+
+func TestResolveContextRuleIDs_PrefersEmbeddedPayload(t *testing.T) {
+	entry := sampleAuthEntry(t, testGAddress, 42, 1000, "transfer")
+	payload, err := buildDelegatedAuthPayload(testGAddress, []uint32{7})
+	require.NoError(t, err)
+	entry.Credentials.Address.Signature = payload
+
+	ids, err := resolveContextRuleIDs(entry, uint32Ptr(99))
+	require.NoError(t, err)
+	assert.Equal(t, []uint32{7}, ids)
+}
+
+func TestResolveContextRuleIDs_FallsBackToBody(t *testing.T) {
+	entry := sampleAuthEntry(t, testGAddress, 42, 1000, "transfer") // unsigned template
+	ids, err := resolveContextRuleIDs(entry, uint32Ptr(4))
+	require.NoError(t, err)
+	assert.Equal(t, []uint32{4}, ids)
+}
+
+func TestResolveContextRuleIDs_ErrorsWhenUndetermined(t *testing.T) {
+	entry := sampleAuthEntry(t, testGAddress, 42, 1000, "transfer") // unsigned template
+	_, err := resolveContextRuleIDs(entry, nil)
+	assert.ErrorIs(t, err, ErrContextRuleIDRequired)
+}

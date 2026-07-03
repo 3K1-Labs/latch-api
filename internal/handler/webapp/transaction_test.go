@@ -292,6 +292,26 @@ func TestSubmitDelegated_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestSubmitDelegated_ContextRuleIDRequired(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: webapp.ErrContextRuleIDRequired}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
+		"txXdr":                    "AAAAtx==",
+		"smartAccountAuthEntryXdr": "AAAAauth==",
+		"gAddressEntryTemplateXdr": "AAAAdeleg==",
+		"signedAuthEntryBase64":    "AAAAsig==",
+		"signerAddress":            "GSIGNER",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"validation_error"`)
+	assert.Contains(t, w.Body.String(), "could not determine contextRuleId")
+}
+
 // ── SubmitPhantom ────────────────────────────────────────────────────────────
 
 func TestSubmitPhantom_Success(t *testing.T) {

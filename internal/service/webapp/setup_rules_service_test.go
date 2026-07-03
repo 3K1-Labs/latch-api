@@ -35,24 +35,81 @@ func newTestTransactionServiceWithContextRules(t *testing.T, rpc sorobanRPC, con
 func TestSetupSendRules_AlreadyConfigured(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
+	signerScVal, err := buildDelegatedSignerScVal(testGAddress)
+	require.NoError(t, err)
 
 	contextRules := newContextRulesService(t,
 		scU32(1), // rulesCount
-		buildTestRuleScVal("send-usdc", false, assetContractAddr), // getRule(0) matches
+		buildTestRuleScVal("send-usdc", false, assetContractAddr, signerScVal), // DiscoverContextRule's getRule(0) matches
+		buildTestRuleScVal("send-usdc", false, assetContractAddr, signerScVal), // RuleAtID(0) re-fetch for the signer-authorization check
 	)
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
 
 	result, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "USDC",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, catalog)
 	require.NoError(t, err)
 	assert.True(t, result.AlreadyConfigured)
 	assert.NotEmpty(t, result.Message)
 	assert.Empty(t, result.TxXdr)
+}
+
+func TestSetupSendRules_MatchedRuleWrongSignerStillMissing(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	assetContractAddr := testContractAddress(t)
+	otherSignerScVal, err := buildDelegatedSignerScVal(testGAddress)
+	require.NoError(t, err)
+
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 0, "add_context_rule")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+
+	// DiscoverContextRule(asset): count=1, getRule(0)=send-usdc (matches by
+	// contract, but its only signer is a *different* freighter G-address) →
+	// RuleAtID(0) re-fetch shows the same rule → signer not authorized →
+	// still missing, a new rule must be created for our signer.
+	// DiscoverDefaultContextRule: count=1, getRule(0)=send-usdc (not
+	// default) → falls back to rule 0 as a last resort.
+	// resolveAdminBundlerDelegatedAuth: RuleAtID(0)=send-usdc (no admin
+	// bundler-delegated signer since its sole signer isn't ours).
+	contextRules := newContextRulesService(t,
+		scU32(1), buildTestRuleScVal("send-usdc", false, assetContractAddr, otherSignerScVal),
+		buildTestRuleScVal("send-usdc", false, assetContractAddr, otherSignerScVal),
+		scU32(1), buildTestRuleScVal("send-usdc", false, assetContractAddr, otherSignerScVal),
+		buildTestRuleScVal("send-usdc", false, assetContractAddr, otherSignerScVal),
+	)
+
+	rpc := &fakeSorobanRPC{
+		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
+		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{
+				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+				TransactionData: minimalSorobanTransactionDataXDR(t),
+				MinResourceFee:  "100",
+				LatestLedger:    1000,
+			}, nil
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
+
+	// A different freighter G-address than the rule's existing signer.
+	newSignerKp, err := keypair.Random()
+	require.NoError(t, err)
+	newGAddress := newSignerKp.Address()
+	result, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "freighter",
+		AssetID:             "USDC",
+		GAddress:            newGAddress,
+	}, catalog)
+	require.NoError(t, err)
+	assert.False(t, result.AlreadyConfigured)
+	assert.NotEmpty(t, result.TxXdr)
 }
 
 func TestSetupSendRules_PasskeySuccess(t *testing.T) {
