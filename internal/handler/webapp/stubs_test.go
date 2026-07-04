@@ -66,10 +66,18 @@ type stubSmartAccount struct {
 
 	connectPhantomResult webapp.ConnectPhantomResult
 	connectPhantomErr    error
+
+	getByCredentialIDAddress  string
+	getByCredentialIDKeyData  string
+	getByCredentialIDDeployed bool
+	getByCredentialIDErr      error
 }
 
 func (s *stubSmartAccount) DeployForCredential(_ context.Context, _ string, _ webapp.RegisteredCredential) (string, string, string, bool, bool, error) {
 	return s.deployKeyDataHex, s.deploySaltHex, s.deploySmartAccountAddress, s.deployDeployed, s.deployAlreadyDeployed, s.deployErr
+}
+func (s *stubSmartAccount) GetByCredentialID(_ context.Context, _ string) (string, string, bool, error) {
+	return s.getByCredentialIDAddress, s.getByCredentialIDKeyData, s.getByCredentialIDDeployed, s.getByCredentialIDErr
 }
 func (s *stubSmartAccount) Query(_ context.Context, _ string) (string, bool, error) {
 	return s.queryAddress, s.queryDeployed, s.queryErr

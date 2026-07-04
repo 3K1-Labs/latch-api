@@ -25,12 +25,13 @@ func keyDataHashHex(keyDataHex string) string {
 type WebAuthnHandler struct {
 	webauthnSvc     webauthnService
 	smartAccountSvc smartAccountService
+	accountsSvc     accountsService
 	auditSvc        auditService
 	cfg             *config.Config
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, auditSvc auditService, cfg *config.Config) *WebAuthnHandler {
-	return &WebAuthnHandler{webauthnSvc: webauthnSvc, smartAccountSvc: smartAccountSvc, auditSvc: auditSvc, cfg: cfg}
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, auditSvc auditService, cfg *config.Config) *WebAuthnHandler {
+	return &WebAuthnHandler{webauthnSvc: webauthnSvc, smartAccountSvc: smartAccountSvc, accountsSvc: accountsSvc, auditSvc: auditSvc, cfg: cfg}
 }
 
 func (h *WebAuthnHandler) webAuthnConfig() webapp.WebAuthnConfig {
@@ -311,8 +312,34 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		return
 	}
 
+	smartAccountAddress, keyDataHex, deployed, err := h.smartAccountSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID)
+	if err != nil {
+		slog.Error("get smart account for authenticated credential", "userID", userID, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "credential verified, but no smart account mapping exists")
+		return
+	}
+
+	accounts, err := h.accountsSvc.ListAccounts(c.Request.Context(), cred.UserID)
+	if err != nil {
+		slog.Error("list accounts after webauthn authentication", "userID", userID, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+	accountsOut := make([]gin.H, 0, len(accounts))
+	for _, a := range accounts {
+		accountsOut = append(accountsOut, gin.H{
+			"smartAccountAddress": a.SmartAccountAddress,
+			"credentialId":        a.CredentialID,
+			"deployed":            a.Deployed,
+		})
+	}
+
 	webappx.Success(c, http.StatusOK, gin.H{
-		"credentialId": cred.CredentialID,
+		"smartAccountAddress": smartAccountAddress,
+		"keyDataHex":          keyDataHex,
+		"deployed":            deployed,
+		"activeCredentialId":  cred.CredentialID,
+		"accounts":            accountsOut,
 	})
 }
 
