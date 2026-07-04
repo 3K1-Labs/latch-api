@@ -18,6 +18,7 @@ type webauthnService interface {
 
 type smartAccountService interface {
 	DeployForCredential(ctx context.Context, userID string, cred webapp.RegisteredCredential) (keyDataHex, saltHex, smartAccountAddress string, deployed, alreadyDeployed bool, err error)
+	GetByCredentialID(ctx context.Context, credentialID string) (address, keyDataHex string, deployed bool, err error)
 	Query(ctx context.Context, keyDataHex string) (address string, deployed bool, err error)
 	DeployByKeyData(ctx context.Context, keyDataHex string) (address string, alreadyDeployed bool, err error)
 	QueryFreighter(ctx context.Context, gAddress string) (address string, deployed bool, err error)

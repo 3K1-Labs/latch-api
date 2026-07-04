@@ -369,6 +369,18 @@ func (s *SmartAccountService) Query(ctx context.Context, keyDataHex string) (add
 	return address, deployed, nil
 }
 
+// GetByCredentialID looks up an already-persisted smart account by its
+// owning credential ID. Used by webauthn authentication-finish to return the
+// signed-in credential's account details (ports the `acct` lookup in
+// app/api/webauthn/authentication/finish/route.ts).
+func (s *SmartAccountService) GetByCredentialID(ctx context.Context, credentialID string) (address, keyDataHex string, deployed bool, err error) {
+	row, err := s.q.GetSmartAccountByCredentialID(ctx, credentialID)
+	if err != nil {
+		return "", "", false, fmt.Errorf("get smart account for credential: %w", err)
+	}
+	return row.SmartAccountAddress, row.KeyDataHex, row.Deployed != 0, nil
+}
+
 // DeployByKeyData predicts and deploys a webauthn smart account for a
 // client-supplied keyDataHex, without persisting anything. This is the
 // standalone POST /api/smart-account/webauthn route, independent of the
