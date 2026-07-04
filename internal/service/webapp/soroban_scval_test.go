@@ -86,6 +86,46 @@ func TestExtractReturnAddress_Success(t *testing.T) {
 	assert.Equal(t, contractAddr, addr)
 }
 
+func TestExtractReturnAddress_V4Success(t *testing.T) {
+	contractAddr := testContractAddress(t)
+	contractID, err := contractIDFromAddress(contractAddr)
+	require.NoError(t, err)
+
+	returnValue := xdr.ScVal{
+		Type:    xdr.ScValTypeScvAddress,
+		Address: &xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: &contractID},
+	}
+	meta := xdr.TransactionMeta{
+		V: 4,
+		V4: &xdr.TransactionMetaV4{
+			SorobanMeta: &xdr.SorobanTransactionMetaV2{
+				ReturnValue: &returnValue,
+			},
+		},
+	}
+	metaB64, err := xdr.MarshalBase64(meta)
+	require.NoError(t, err)
+
+	addr, err := extractReturnAddress(metaB64)
+	require.NoError(t, err)
+	assert.Equal(t, contractAddr, addr)
+}
+
+func TestExtractReturnAddress_V4MissingReturnValue(t *testing.T) {
+	meta := xdr.TransactionMeta{
+		V: 4,
+		V4: &xdr.TransactionMetaV4{
+			SorobanMeta: &xdr.SorobanTransactionMetaV2{},
+		},
+	}
+	metaB64, err := xdr.MarshalBase64(meta)
+	require.NoError(t, err)
+
+	_, err = extractReturnAddress(metaB64)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing soroban return value")
+}
+
 func TestExtractReturnAddress_InvalidBase64(t *testing.T) {
 	_, err := extractReturnAddress("not-valid-xdr!!")
 	require.Error(t, err)

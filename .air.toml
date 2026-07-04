@@ -10,7 +10,7 @@ tmp_dir = "tmp"
   delay = 500
 
   # Don't watch these
-  exclude_dir  = ["tmp", "vendor", "migrations", "internal/db/generated"]
+  exclude_dir  = ["tmp", "vendor", "migrations", "internal/db/generated", "references"]
   exclude_file = []
   exclude_regex = ["_test\\.go$"]
 

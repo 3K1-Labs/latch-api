@@ -163,15 +163,23 @@ func scValToContractAddress(val xdr.ScVal) (string, error) {
 // extractReturnAddress decodes a base64 TransactionMeta XDR (as returned by
 // Soroban RPC's getTransaction "resultMetaXdr" field) and extracts the
 // invoked contract's return value as a C... address.
+//
+// Protocol 23 moved Soroban meta from TransactionMetaV3 to V4 (and
+// SorobanTransactionMeta's returnValue became a pointer in the V2 shape used
+// there) — check V4 first since that's what current testnet/mainnet emit,
+// falling back to V3 for older networks/archived transactions.
 func extractReturnAddress(resultMetaXdrB64 string) (string, error) {
 	var meta xdr.TransactionMeta
 	if err := xdr.SafeUnmarshalBase64(resultMetaXdrB64, &meta); err != nil {
 		return "", fmt.Errorf("decode transaction meta: %w", err)
 	}
-	if meta.V3 == nil || meta.V3.SorobanMeta == nil {
-		return "", fmt.Errorf("transaction meta missing soroban return value")
+	if meta.V4 != nil && meta.V4.SorobanMeta != nil && meta.V4.SorobanMeta.ReturnValue != nil {
+		return scValToContractAddress(*meta.V4.SorobanMeta.ReturnValue)
 	}
-	return scValToContractAddress(meta.V3.SorobanMeta.ReturnValue)
+	if meta.V3 != nil && meta.V3.SorobanMeta != nil {
+		return scValToContractAddress(meta.V3.SorobanMeta.ReturnValue)
+	}
+	return "", fmt.Errorf("transaction meta missing soroban return value")
 }
 
 func decodeBase64URL(s string) ([]byte, error) {
