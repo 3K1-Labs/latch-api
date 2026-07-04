@@ -30,6 +30,11 @@ UPDATE webapp.webauthn_credentials
 SET sign_count = $2
 WHERE credential_id = $1;
 
+-- name: UpdateWebauthnCredentialUserID :exec
+UPDATE webapp.webauthn_credentials
+SET user_id = $2
+WHERE credential_id = $1;
+
 -- name: InsertWebauthnChallenge :exec
 INSERT INTO webapp.webauthn_challenges (id, user_id, purpose, challenge, rp_id, origin, expires_at, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);

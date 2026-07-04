@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
@@ -36,6 +37,35 @@ func (f *flexibleAmount) UnmarshalJSON(data []byte) error {
 	}
 	*f = flexibleAmount(data)
 	return nil
+}
+
+// flexibleUint32 accepts contextRuleId sent as either a JSON number or a
+// numeric string, matching the source app's permissive Number(contextRuleId)
+// coercion (e.g. submit-delegated/route.ts) — extension callers have been
+// observed sending it as a quoted string.
+type flexibleUint32 uint32
+
+func (f *flexibleUint32) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	if len(data) > 0 && data[0] == '"' {
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return err
+	}
+	*f = flexibleUint32(n)
+	return nil
+}
+
+func contextRuleIDPtr(f *flexibleUint32) *uint32 {
+	if f == nil {
+		return nil
+	}
+	v := uint32(*f)
+	return &v
 }
 
 type buildSendRequest struct {
@@ -129,14 +159,14 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 }
 
 type submitWebAuthnRequest struct {
-	TxXdr                          string   `json:"txXdr" binding:"required"`
-	AuthEntryXdr                   string   `json:"authEntryXdr,omitempty"`
-	SigDataXdr                     string   `json:"sigDataXdr" binding:"required"`
-	KeyDataHex                     string   `json:"keyDataHex" binding:"required"`
-	ContextRuleID                  *uint32  `json:"contextRuleId"`
-	AuthEntriesXdr                 []string `json:"authEntriesXdr,omitempty"`
-	SmartAccountAuthEntryIndex     int      `json:"smartAccountAuthEntryIndex,omitempty"`
-	DelegatedGAuthEntrySynthesized bool     `json:"delegatedGAuthEntrySynthesized,omitempty"`
+	TxXdr                          string          `json:"txXdr" binding:"required"`
+	AuthEntryXdr                   string          `json:"authEntryXdr,omitempty"`
+	SigDataXdr                     string          `json:"sigDataXdr" binding:"required"`
+	KeyDataHex                     string          `json:"keyDataHex" binding:"required"`
+	ContextRuleID                  *flexibleUint32 `json:"contextRuleId"`
+	AuthEntriesXdr                 []string        `json:"authEntriesXdr,omitempty"`
+	SmartAccountAuthEntryIndex     int             `json:"smartAccountAuthEntryIndex,omitempty"`
+	DelegatedGAuthEntrySynthesized bool            `json:"delegatedGAuthEntrySynthesized,omitempty"`
 }
 
 // SubmitWebAuthn godoc
@@ -165,7 +195,7 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 		AuthEntryXdr:                   req.AuthEntryXdr,
 		SigDataXdr:                     req.SigDataXdr,
 		KeyDataHex:                     req.KeyDataHex,
-		ContextRuleID:                  req.ContextRuleID,
+		ContextRuleID:                  contextRuleIDPtr(req.ContextRuleID),
 		AuthEntriesXdr:                 req.AuthEntriesXdr,
 		SmartAccountAuthEntryIndex:     req.SmartAccountAuthEntryIndex,
 		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
@@ -187,15 +217,15 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 }
 
 type submitDelegatedRequest struct {
-	TxXdr                          string   `json:"txXdr" binding:"required"`
-	SmartAccountAuthEntryXdr       string   `json:"smartAccountAuthEntryXdr,omitempty"`
-	GAddressEntryTemplateXdr       string   `json:"gAddressEntryTemplateXdr" binding:"required"`
-	SignedAuthEntryBase64          string   `json:"signedAuthEntryBase64" binding:"required"`
-	SignerAddress                  string   `json:"signerAddress" binding:"required"`
-	ContextRuleID                  *uint32  `json:"contextRuleId"`
-	AuthEntriesXdr                 []string `json:"authEntriesXdr,omitempty"`
-	SmartAccountAuthEntryIndex     int      `json:"smartAccountAuthEntryIndex,omitempty"`
-	DelegatedGAuthEntrySynthesized bool     `json:"delegatedGAuthEntrySynthesized,omitempty"`
+	TxXdr                          string          `json:"txXdr" binding:"required"`
+	SmartAccountAuthEntryXdr       string          `json:"smartAccountAuthEntryXdr,omitempty"`
+	GAddressEntryTemplateXdr       string          `json:"gAddressEntryTemplateXdr" binding:"required"`
+	SignedAuthEntryBase64          string          `json:"signedAuthEntryBase64" binding:"required"`
+	SignerAddress                  string          `json:"signerAddress" binding:"required"`
+	ContextRuleID                  *flexibleUint32 `json:"contextRuleId"`
+	AuthEntriesXdr                 []string        `json:"authEntriesXdr,omitempty"`
+	SmartAccountAuthEntryIndex     int             `json:"smartAccountAuthEntryIndex,omitempty"`
+	DelegatedGAuthEntrySynthesized bool            `json:"delegatedGAuthEntrySynthesized,omitempty"`
 }
 
 // SubmitDelegated godoc
@@ -225,7 +255,7 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 		GAddressEntryTemplateXdr:       req.GAddressEntryTemplateXdr,
 		SignedAuthEntryBase64:          req.SignedAuthEntryBase64,
 		SignerAddress:                  req.SignerAddress,
-		ContextRuleID:                  req.ContextRuleID,
+		ContextRuleID:                  contextRuleIDPtr(req.ContextRuleID),
 		AuthEntriesXdr:                 req.AuthEntriesXdr,
 		SmartAccountAuthEntryIndex:     req.SmartAccountAuthEntryIndex,
 		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
@@ -247,13 +277,13 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 }
 
 type submitPhantomRequest struct {
-	TxXdr            string   `json:"txXdr" binding:"required"`
-	AuthEntryXdr     string   `json:"authEntryXdr,omitempty"`
-	AuthSignatureHex string   `json:"authSignatureHex" binding:"required"`
-	PrefixedMessage  string   `json:"prefixedMessage,omitempty"`
-	PublicKeyHex     string   `json:"publicKeyHex" binding:"required"`
-	ContextRuleID    *uint32  `json:"contextRuleId"`
-	AuthEntriesXdr   []string `json:"authEntriesXdr,omitempty"`
+	TxXdr            string          `json:"txXdr" binding:"required"`
+	AuthEntryXdr     string          `json:"authEntryXdr,omitempty"`
+	AuthSignatureHex string          `json:"authSignatureHex" binding:"required"`
+	PrefixedMessage  string          `json:"prefixedMessage,omitempty"`
+	PublicKeyHex     string          `json:"publicKeyHex" binding:"required"`
+	ContextRuleID    *flexibleUint32 `json:"contextRuleId"`
+	AuthEntriesXdr   []string        `json:"authEntriesXdr,omitempty"`
 }
 
 // SubmitPhantom godoc
@@ -286,7 +316,7 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 		AuthEntryXdr:               req.AuthEntryXdr,
 		AuthSignatureHex:           req.AuthSignatureHex,
 		PublicKeyHex:               req.PublicKeyHex,
-		ContextRuleID:              req.ContextRuleID,
+		ContextRuleID:              contextRuleIDPtr(req.ContextRuleID),
 		AuthEntriesXdr:             req.AuthEntriesXdr,
 		SmartAccountAuthEntryIndex: 0,
 	})

@@ -159,6 +159,22 @@ func (q *Queries) UpdateWebauthnCredentialSignCount(ctx context.Context, arg Upd
 	return err
 }
 
+const updateWebauthnCredentialUserID = `-- name: UpdateWebauthnCredentialUserID :exec
+UPDATE webapp.webauthn_credentials
+SET user_id = $2
+WHERE credential_id = $1
+`
+
+type UpdateWebauthnCredentialUserIDParams struct {
+	CredentialID string    `json:"credential_id"`
+	UserID       uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) UpdateWebauthnCredentialUserID(ctx context.Context, arg UpdateWebauthnCredentialUserIDParams) error {
+	_, err := q.db.ExecContext(ctx, updateWebauthnCredentialUserID, arg.CredentialID, arg.UserID)
+	return err
+}
+
 const upsertWebauthnCredential = `-- name: UpsertWebauthnCredential :one
 INSERT INTO webapp.webauthn_credentials (
   id, user_id, credential_id, credential_id_bytes, cose_public_key,

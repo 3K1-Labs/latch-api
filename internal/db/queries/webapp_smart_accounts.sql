@@ -25,3 +25,8 @@ ORDER BY created_at DESC;
 UPDATE webapp.smart_accounts
 SET deployed = 1
 WHERE smart_account_address = $1;
+
+-- name: UpdateSmartAccountUserIDByCredentialID :exec
+UPDATE webapp.smart_accounts
+SET user_id = $2
+WHERE credential_id = $1;
