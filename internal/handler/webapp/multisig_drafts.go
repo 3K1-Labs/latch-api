@@ -243,9 +243,15 @@ type draftMemberRequest struct {
 }
 
 func (r draftMemberRequest) toDomain() webapp.DraftMultisigMember {
+	memberType := r.MemberType
+	if memberType == "seed" {
+		// Client-facing alias for a G-address/seed-phrase signer — same shape
+		// (label + gAddress) as what the service layer calls "delegated".
+		memberType = string(webapp.MultisigSignerKindDelegated)
+	}
 	return webapp.DraftMultisigMember{
 		Label:        r.Label,
-		Kind:         webapp.MultisigSignerKind(r.MemberType),
+		Kind:         webapp.MultisigSignerKind(memberType),
 		GAddress:     r.GAddress,
 		KeyDataHex:   r.KeyDataHex,
 		CredentialID: r.CredentialID,

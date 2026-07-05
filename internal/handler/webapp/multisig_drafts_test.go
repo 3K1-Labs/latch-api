@@ -172,6 +172,22 @@ func TestMultisigDraftsAddMember_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestMultisigDraftsAddMember_SeedAliasedToDelegated(t *testing.T) {
+	stub := &stubMultisigDraft{draft: sampleSerializedDraft()}
+	h := NewMultisigDraftsHandler(stub)
+	r := gin.New()
+	r.POST("/multisig/drafts/:id/members", h.AddMember)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts/draft-1/members", postJSONBody(map[string]any{
+		"label": "signer 2", "memberType": "seed", "gAddress": "GADDR",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, webapp.MultisigSignerKindDelegated, stub.gotAddMember.Kind)
+}
+
 func TestMultisigDraftsAddMember_DuplicateError(t *testing.T) {
 	stub := &stubMultisigDraft{draftErr: webapp.ErrMultisigMemberDuplicate}
 	h := NewMultisigDraftsHandler(stub)

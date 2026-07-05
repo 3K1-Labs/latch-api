@@ -207,7 +207,13 @@ func (h *MultisigAccountsHandler) Register(c *gin.Context) {
 
 	members := make([]webapp.RegisterMemberInput, len(req.Members))
 	for i, m := range req.Members {
-		members[i] = webapp.RegisterMemberInput{Type: m.Type, KeyDataHex: m.KeyDataHex, CredentialID: m.CredentialID, GAddress: m.GAddress, Label: m.Label}
+		memberType := m.Type
+		if memberType == "seed" {
+			// Client-facing alias for a G-address/seed-phrase signer — same
+			// shape (label + gAddress) as what this service calls "delegated".
+			memberType = string(webapp.MultisigSignerKindDelegated)
+		}
+		members[i] = webapp.RegisterMemberInput{Type: memberType, KeyDataHex: m.KeyDataHex, CredentialID: m.CredentialID, GAddress: m.GAddress, Label: m.Label}
 	}
 
 	account, err := h.accountsSvc.RegisterAccount(c.Request.Context(), userID, req.SmartAccountAddress, req.Threshold, req.AccountSaltHex, members)

@@ -151,7 +151,7 @@ func Load() (*Config, error) {
 
 		WebAppFactoryAddress:          getEnv("NEXT_PUBLIC_FACTORY_ADDRESS", ""),
 		WebAppWebAuthnVerifierAddress: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", ""),
-		WebAppEd25519VerifierAddress:  getEnv("NEXT_PUBLIC_ED25519_VERIFIER_ADDRESS", ""),
+		WebAppEd25519VerifierAddress:  getEnv("NEXT_PUBLIC_VERIFIER_ADDRESS", ""),
 		WebAppNetworkPassphrase:       getEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"),
 
 		WebAppWebAuthnRPID:            getEnv("WEBAUTHN_RP_ID", ""),

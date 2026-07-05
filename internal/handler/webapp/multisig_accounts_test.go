@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMultisigAccountsList_Success(t *testing.T) {
@@ -150,6 +151,26 @@ func TestMultisigAccountsRegister_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDRESS"`)
+}
+
+func TestMultisigAccountsRegister_SeedAliasedToDelegated(t *testing.T) {
+	stub := &stubMultisigAccounts{registerAccount: webapp.MultisigAccountSummary{ID: "acc-1"}}
+	h := NewMultisigAccountsHandler(stub)
+	r := gin.New()
+	r.POST("/multisig/accounts/register", h.Register)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/accounts/register", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"threshold":           1,
+		"accountSaltHex":      "aabbcc",
+		"members":             []map[string]any{{"type": "seed", "gAddress": "GADDR"}},
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, stub.gotRegisterMembers, 1)
+	assert.Equal(t, "delegated", stub.gotRegisterMembers[0].Type)
 }
 
 func TestMultisigAccountsRegister_ServiceError(t *testing.T) {
