@@ -193,6 +193,8 @@ type stubMultisigDraft struct {
 	deployAddress    string
 	deployAlready    bool
 	deployErr        error
+
+	gotAddMember webapp.DraftMultisigMember
 }
 
 func (s *stubMultisigDraft) CreateDraft(_ context.Context, _ string) (webapp.SerializedDraft, error) {
@@ -207,7 +209,8 @@ func (s *stubMultisigDraft) GetDraftForCreator(_ context.Context, _, _ string) (
 func (s *stubMultisigDraft) UpdateThreshold(_ context.Context, _, _ string, _ int) (webapp.SerializedDraft, error) {
 	return s.draft, s.draftErr
 }
-func (s *stubMultisigDraft) AddMember(_ context.Context, _, _ string, _ webapp.DraftMultisigMember) (webapp.SerializedDraft, error) {
+func (s *stubMultisigDraft) AddMember(_ context.Context, _, _ string, m webapp.DraftMultisigMember) (webapp.SerializedDraft, error) {
+	s.gotAddMember = m
 	return s.draft, s.draftErr
 }
 func (s *stubMultisigDraft) DeleteMember(_ context.Context, _, _, _ string) (webapp.SerializedDraft, error) {
@@ -242,6 +245,8 @@ type stubMultisigAccounts struct {
 	deployErr        error
 	registerAccount  webapp.MultisigAccountSummary
 	registerErr      error
+
+	gotRegisterMembers []webapp.RegisterMemberInput
 }
 
 func (s *stubMultisigAccounts) ListAccounts(_ context.Context, _ string) ([]webapp.MultisigAccountSummary, error) {
@@ -253,7 +258,8 @@ func (s *stubMultisigAccounts) DraftParams(_ context.Context, _ int, _ []webapp.
 func (s *stubMultisigAccounts) DeployParams(_ context.Context, _ int, _ []webapp.MultisigSignerInit, _ string) (string, string, bool, string, []webapp.MultisigSignerInit, error) {
 	return s.deployAddress, s.predictedAddress, s.alreadyDeployed, s.deployParamsB64, s.deploySigners, s.deployErr
 }
-func (s *stubMultisigAccounts) RegisterAccount(_ context.Context, _, _ string, _ int, _ string, _ []webapp.RegisterMemberInput) (webapp.MultisigAccountSummary, error) {
+func (s *stubMultisigAccounts) RegisterAccount(_ context.Context, _, _ string, _ int, _ string, members []webapp.RegisterMemberInput) (webapp.MultisigAccountSummary, error) {
+	s.gotRegisterMembers = members
 	return s.registerAccount, s.registerErr
 }
 
