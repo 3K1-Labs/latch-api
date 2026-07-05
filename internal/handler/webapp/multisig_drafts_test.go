@@ -3,6 +3,7 @@ package webapp
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -186,6 +187,22 @@ func TestMultisigDraftsAddMember_SeedAliasedToDelegated(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, webapp.MultisigSignerKindDelegated, stub.gotAddMember.Kind)
+}
+
+func TestMultisigDraftsAddMember_PasskeyAliasedToWebauthn(t *testing.T) {
+	stub := &stubMultisigDraft{draft: sampleSerializedDraft()}
+	h := NewMultisigDraftsHandler(stub)
+	r := gin.New()
+	r.POST("/multisig/drafts/:id/members", h.AddMember)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts/draft-1/members", postJSONBody(map[string]any{
+		"label": "signer 2", "memberType": "passkey", "keyDataHex": "04" + strings.Repeat("ab", 65), "credentialId": "cred-1",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, webapp.MultisigSignerKindWebauthn, stub.gotAddMember.Kind)
 }
 
 func TestMultisigDraftsAddMember_DuplicateError(t *testing.T) {

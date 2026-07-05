@@ -3,6 +3,7 @@ package webapp
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -171,6 +172,26 @@ func TestMultisigAccountsRegister_SeedAliasedToDelegated(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.Len(t, stub.gotRegisterMembers, 1)
 	assert.Equal(t, "delegated", stub.gotRegisterMembers[0].Type)
+}
+
+func TestMultisigAccountsRegister_PasskeyAliasedToWebauthn(t *testing.T) {
+	stub := &stubMultisigAccounts{registerAccount: webapp.MultisigAccountSummary{ID: "acc-1"}}
+	h := NewMultisigAccountsHandler(stub)
+	r := gin.New()
+	r.POST("/multisig/accounts/register", h.Register)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/accounts/register", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"threshold":           1,
+		"accountSaltHex":      "aabbcc",
+		"members":             []map[string]any{{"type": "passkey", "keyDataHex": "04" + strings.Repeat("ab", 65), "credentialId": "cred-1"}},
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, stub.gotRegisterMembers, 1)
+	assert.Equal(t, "webauthn", stub.gotRegisterMembers[0].Type)
 }
 
 func TestMultisigAccountsRegister_ServiceError(t *testing.T) {

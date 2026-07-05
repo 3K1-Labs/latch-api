@@ -244,10 +244,15 @@ type draftMemberRequest struct {
 
 func (r draftMemberRequest) toDomain() webapp.DraftMultisigMember {
 	memberType := r.MemberType
-	if memberType == "seed" {
+	switch memberType {
+	case "seed":
 		// Client-facing alias for a G-address/seed-phrase signer — same shape
 		// (label + gAddress) as what the service layer calls "delegated".
 		memberType = string(webapp.MultisigSignerKindDelegated)
+	case "passkey":
+		// Client-facing alias for a WebAuthn signer — same shape (label +
+		// keyDataHex + credentialId) as what the service layer calls "webauthn".
+		memberType = string(webapp.MultisigSignerKindWebauthn)
 	}
 	return webapp.DraftMultisigMember{
 		Label:        r.Label,
