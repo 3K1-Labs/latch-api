@@ -208,10 +208,15 @@ func (h *MultisigAccountsHandler) Register(c *gin.Context) {
 	members := make([]webapp.RegisterMemberInput, len(req.Members))
 	for i, m := range req.Members {
 		memberType := m.Type
-		if memberType == "seed" {
+		switch memberType {
+		case "seed":
 			// Client-facing alias for a G-address/seed-phrase signer — same
 			// shape (label + gAddress) as what this service calls "delegated".
 			memberType = string(webapp.MultisigSignerKindDelegated)
+		case "passkey":
+			// Client-facing alias for a WebAuthn signer — same shape (label +
+			// keyDataHex + credentialId) as what this service calls "webauthn".
+			memberType = string(webapp.MultisigSignerKindWebauthn)
 		}
 		members[i] = webapp.RegisterMemberInput{Type: memberType, KeyDataHex: m.KeyDataHex, CredentialID: m.CredentialID, GAddress: m.GAddress, Label: m.Label}
 	}
