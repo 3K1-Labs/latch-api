@@ -41,6 +41,7 @@ type DraftMultisigMember struct {
 	KeyDataHex   string // for webauthn
 	CredentialID string // for webauthn
 	PublicKeyHex string // for ed25519
+	UserID       string // session that added this member, if known
 }
 
 func isValidGAddress(g string) bool {

@@ -136,8 +136,14 @@ func TestDeployParams(t *testing.T) {
 	})
 }
 
+// multisigMemberColumnsWithUserID is multisigMemberColumns (defined in
+// multisig_proposal_service_test.go, which matches GetMultisigMemberByID's
+// column set) plus user_id, which ListMultisigMembersForAccount also selects.
+var multisigMemberColumnsWithUserID = append(append([]string{}, multisigMemberColumns...), "user_id")
+
 func TestMultisigListAccounts_Success(t *testing.T) {
 	userID := uuid.New()
+	otherMemberID := uuid.New()
 	accountID := uuid.New()
 	addr := testContractAddress(t)
 
@@ -146,15 +152,20 @@ func TestMultisigListAccounts_Success(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "smart_account_address", "threshold", "account_salt_hex", "created_at", "proposal_count"}).
 			AddRow(accountID, addr, 2, "aabb", 1000, 3))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).
-			AddRow(uuid.New(), accountID, "webauthn", "m1", "04ab", "cred1", nil, 1000))
+		WillReturnRows(sqlmock.NewRows(multisigMemberColumnsWithUserID).
+			AddRow(otherMemberID, accountID, "webauthn", "m1", "04ab", "cred1", nil, 1000, nil).
+			AddRow(uuid.New(), accountID, "delegated", "m2", nil, nil, randomGAddress(t), 1000, userID))
 
 	accounts, err := svc.ListAccounts(context.Background(), userID.String())
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
 	assert.Equal(t, int64(3), accounts[0].ProposalCount)
-	require.Len(t, accounts[0].Members, 1)
+	require.Len(t, accounts[0].Members, 2)
 	assert.True(t, accounts[0].Members[0].HasKeyData)
+	// The caller's own member row (matched by user_id) resolves as MemberID —
+	// this is the field the extension needs for proposal approvals.
+	assert.Equal(t, accounts[0].Members[1].ID, accounts[0].MemberID)
+	assert.NotEqual(t, otherMemberID.String(), accounts[0].MemberID)
 }
 
 func TestRegisterAccount(t *testing.T) {
@@ -165,11 +176,12 @@ func TestRegisterAccount(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		svc, mock := newMockMultisigAccountsService(t, nil)
+		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").
+			WillReturnRows(sqlmock.NewRows([]string{"id", "credential_id", "created_at"}))
 		mock.ExpectBegin()
 		mock.ExpectQuery("INSERT INTO webapp.multisig_accounts").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
-		mock.ExpectExec("DELETE FROM webapp.multisig_members").WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectExec("INSERT INTO webapp.multisig_members").WillReturnResult(sqlmock.NewResult(0, 1))
-		mock.ExpectExec("INSERT INTO webapp.multisig_members").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("INSERT INTO webapp.multisig_members").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+		mock.ExpectQuery("INSERT INTO webapp.multisig_members").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 		mock.ExpectCommit()
 
 		result, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 2, "aabbcc", []RegisterMemberInput{
@@ -179,6 +191,37 @@ func TestRegisterAccount(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, addr, result.SmartAccountAddress)
 		require.Len(t, result.Members, 2)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("second caller links their own webauthn member without erasing others", func(t *testing.T) {
+		svc, mock := newMockMultisigAccountsService(t, nil)
+		credentialID := "cred-b"
+		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").
+			WillReturnRows(sqlmock.NewRows([]string{"id", "credential_id", "created_at"}).AddRow(uuid.New(), credentialID, 1000))
+		mock.ExpectBegin()
+		mock.ExpectQuery("INSERT INTO webapp.multisig_accounts").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+		// Member A (delegated, not the caller) — upserted with a null
+		// user_id, so COALESCE in the query preserves whatever link it
+		// already had; this test only asserts the Go-side param, not that
+		// preservation (which is exercised by the SQL COALESCE itself).
+		mock.ExpectQuery("INSERT INTO webapp.multisig_members").
+			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "delegated", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), validG1, sqlmock.AnyArg(), uuid.NullUUID{}).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+		// Member B (webauthn, matches the caller's own credential) — must be
+		// linked to the caller's userID.
+		mock.ExpectQuery("INSERT INTO webapp.multisig_members").
+			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "webauthn", sqlmock.AnyArg(), sqlmock.AnyArg(), credentialID, sqlmock.AnyArg(), sqlmock.AnyArg(), uuid.NullUUID{UUID: userID, Valid: true}).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+		mock.ExpectCommit()
+
+		result, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 2, "aabbcc", []RegisterMemberInput{
+			{Type: "delegated", GAddress: validG1},
+			{Type: "webauthn", KeyDataHex: testWebauthnKeyDataHex(), CredentialID: credentialID},
+		})
+		require.NoError(t, err)
+		require.Len(t, result.Members, 2)
+		assert.Equal(t, result.Members[1].ID, result.MemberID)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 

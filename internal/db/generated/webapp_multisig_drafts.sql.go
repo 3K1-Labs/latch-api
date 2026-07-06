@@ -140,8 +140,8 @@ func (q *Queries) InsertMultisigDraft(ctx context.Context, arg InsertMultisigDra
 }
 
 const insertMultisigDraftMember = `-- name: InsertMultisigDraftMember :one
-INSERT INTO webapp.multisig_draft_members (id, draft_id, label, member_type, g_address, key_data_hex, credential_id, public_key_hex, source, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO webapp.multisig_draft_members (id, draft_id, label, member_type, g_address, key_data_hex, credential_id, public_key_hex, source, created_at, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id
 `
 
@@ -156,6 +156,7 @@ type InsertMultisigDraftMemberParams struct {
 	PublicKeyHex sql.NullString `json:"public_key_hex"`
 	Source       string         `json:"source"`
 	CreatedAt    int64          `json:"created_at"`
+	UserID       uuid.NullUUID  `json:"user_id"`
 }
 
 func (q *Queries) InsertMultisigDraftMember(ctx context.Context, arg InsertMultisigDraftMemberParams) (uuid.UUID, error) {
@@ -170,6 +171,7 @@ func (q *Queries) InsertMultisigDraftMember(ctx context.Context, arg InsertMulti
 		arg.PublicKeyHex,
 		arg.Source,
 		arg.CreatedAt,
+		arg.UserID,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
@@ -177,7 +179,7 @@ func (q *Queries) InsertMultisigDraftMember(ctx context.Context, arg InsertMulti
 }
 
 const listMultisigDraftMembersForDraft = `-- name: ListMultisigDraftMembersForDraft :many
-SELECT id, draft_id, label, member_type, g_address, key_data_hex, credential_id, public_key_hex, source, created_at
+SELECT id, draft_id, label, member_type, g_address, key_data_hex, credential_id, public_key_hex, source, created_at, user_id
 FROM webapp.multisig_draft_members
 WHERE draft_id = $1
 ORDER BY created_at ASC
@@ -203,6 +205,7 @@ func (q *Queries) ListMultisigDraftMembersForDraft(ctx context.Context, draftID 
 			&i.PublicKeyHex,
 			&i.Source,
 			&i.CreatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}

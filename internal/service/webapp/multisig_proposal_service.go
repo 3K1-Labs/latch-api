@@ -230,23 +230,23 @@ func (s *MultisigProposalService) getOwnedProposal(ctx context.Context, proposal
 	return proposal, account, nil
 }
 
-func (s *MultisigProposalService) getOwnedMember(ctx context.Context, account db.WebappMultisigAccount, memberID, expectedType string) (db.WebappMultisigMember, error) {
+func (s *MultisigProposalService) getOwnedMember(ctx context.Context, account db.WebappMultisigAccount, memberID, expectedType string) (db.GetMultisigMemberByIDRow, error) {
 	mid, err := uuid.Parse(memberID)
 	if err != nil {
-		return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
+		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalMemberNotFound
 	}
 	member, err := s.q.GetMultisigMemberByID(ctx, mid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
+		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalMemberNotFound
 	}
 	if err != nil {
-		return db.WebappMultisigMember{}, fmt.Errorf("get multisig member: %w", err)
+		return db.GetMultisigMemberByIDRow{}, fmt.Errorf("get multisig member: %w", err)
 	}
 	if member.MultisigAccountID != account.ID {
-		return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
+		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalMemberNotFound
 	}
 	if member.MemberType != expectedType {
-		return db.WebappMultisigMember{}, ErrMultisigApprovalWrongMemberType
+		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalWrongMemberType
 	}
 	return member, nil
 }

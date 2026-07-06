@@ -111,6 +111,7 @@ func domainMemberFromRow(row db.WebappMultisigDraftMember) DraftMultisigMember {
 		KeyDataHex:   strOrEmpty(row.KeyDataHex),
 		CredentialID: strOrEmpty(row.CredentialID),
 		PublicKeyHex: strOrEmpty(row.PublicKeyHex),
+		UserID:       uuidOrEmpty(row.UserID),
 	}
 }
 
@@ -338,6 +339,7 @@ func (s *MultisigDraftService) AddMember(ctx context.Context, draftID, userID st
 	if draft.Status != "collecting" {
 		return SerializedDraft{}, ErrMultisigDraftNotCollecting
 	}
+	member.UserID = userID
 	if err := s.addMemberToDraft(ctx, draft, member, "creator"); err != nil {
 		return SerializedDraft{}, err
 	}
@@ -377,6 +379,7 @@ func (s *MultisigDraftService) addMemberToDraft(ctx context.Context, draft db.We
 		PublicKeyHex: nullStr(member.PublicKeyHex),
 		Source:       source,
 		CreatedAt:    time.Now().UnixMilli(),
+		UserID:       nullUUID(member.UserID),
 	}); err != nil {
 		return fmt.Errorf("insert draft member: %w", err)
 	}
@@ -569,6 +572,7 @@ func (s *MultisigDraftService) persistDeployedAccount(ctx context.Context, userI
 			CredentialID:      nullStr(m.CredentialID),
 			GAddress:          nullStr(m.GAddress),
 			CreatedAt:         now,
+			UserID:            nullUUID(m.UserID),
 		}); err != nil {
 			return fmt.Errorf("insert multisig member: %w", err)
 		}
@@ -614,12 +618,15 @@ func (s *MultisigDraftService) GetPublicDraftByToken(ctx context.Context, token 
 }
 
 // AddMemberViaInvite adds a new member to a draft found by invite token,
-// tagging it with source="invite". Ports POST /api/multisig/join/[token]/members.
-func (s *MultisigDraftService) AddMemberViaInvite(ctx context.Context, token string, member DraftMultisigMember) (PublicDraftView, error) {
+// tagging it with source="invite" and linking the joining session's userID
+// so a later deploy can fan out account visibility to them. Ports
+// POST /api/multisig/join/[token]/members.
+func (s *MultisigDraftService) AddMemberViaInvite(ctx context.Context, token, userID string, member DraftMultisigMember) (PublicDraftView, error) {
 	draft, err := s.getDraftByInviteToken(ctx, token)
 	if err != nil {
 		return PublicDraftView{}, err
 	}
+	member.UserID = userID
 	if err := s.addMemberToDraft(ctx, draft, member, "invite"); err != nil {
 		return PublicDraftView{}, err
 	}

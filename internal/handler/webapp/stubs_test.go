@@ -194,7 +194,9 @@ type stubMultisigDraft struct {
 	deployAlready    bool
 	deployErr        error
 
-	gotAddMember webapp.DraftMultisigMember
+	gotAddMember  webapp.DraftMultisigMember
+	gotJoinUserID string
+	gotJoinMember webapp.DraftMultisigMember
 }
 
 func (s *stubMultisigDraft) CreateDraft(_ context.Context, _ string) (webapp.SerializedDraft, error) {
@@ -225,7 +227,9 @@ func (s *stubMultisigDraft) Deploy(_ context.Context, _, _ string) (string, bool
 func (s *stubMultisigDraft) GetPublicDraftByToken(_ context.Context, _ string) (webapp.PublicDraftView, error) {
 	return s.publicView, s.publicViewErr
 }
-func (s *stubMultisigDraft) AddMemberViaInvite(_ context.Context, _ string, _ webapp.DraftMultisigMember) (webapp.PublicDraftView, error) {
+func (s *stubMultisigDraft) AddMemberViaInvite(_ context.Context, _, userID string, m webapp.DraftMultisigMember) (webapp.PublicDraftView, error) {
+	s.gotJoinUserID = userID
+	s.gotJoinMember = m
 	return s.publicView, s.publicViewErr
 }
 
