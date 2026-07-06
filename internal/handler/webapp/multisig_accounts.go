@@ -65,6 +65,7 @@ func (h *MultisigAccountsHandler) List(c *gin.Context) {
 			"createdAt":           a.CreatedAt,
 			"proposalCount":       a.ProposalCount,
 			"members":             members,
+			"memberId":            nilIfEmpty(a.MemberID),
 		})
 	}
 	webappx.Success(c, http.StatusOK, gin.H{"accounts": out})

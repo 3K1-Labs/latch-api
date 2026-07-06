@@ -21,6 +21,7 @@ sql:
       - "migrations/000016_webapp_multisig_draft.up.sql"
       - "migrations/000017_webapp_sign_payloads.up.sql"
       - "migrations/000018_webapp_on_ramp_intents.up.sql"
+      - "migrations/000019_webapp_multisig_member_sessions.up.sql"
     gen:
       go:
         package: "db"

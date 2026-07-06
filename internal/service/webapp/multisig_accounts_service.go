@@ -53,6 +53,10 @@ type MultisigAccountSummary struct {
 	CreatedAt           int64
 	ProposalCount       int64
 	Members             []MultisigAccountMember
+	// MemberID is the calling session user's own member row id on this
+	// account, empty if they can only see it as its creator with no linked
+	// member row (e.g. a legacy account predating session linkage).
+	MemberID string
 }
 
 // RegisterMemberInput is one member of a POST /api/multisig/accounts/register
@@ -95,6 +99,7 @@ func (s *MultisigAccountsService) ListAccounts(ctx context.Context, userID strin
 			return nil, fmt.Errorf("list members for account %s: %w", r.ID, err)
 		}
 		members := make([]MultisigAccountMember, len(memberRows))
+		var callerMemberID string
 		for j, m := range memberRows {
 			members[j] = MultisigAccountMember{
 				ID:           m.ID.String(),
@@ -105,6 +110,9 @@ func (s *MultisigAccountsService) ListAccounts(ctx context.Context, userID strin
 				GAddress:     strOrEmpty(m.GAddress),
 				HasKeyData:   m.KeyDataHex.Valid && m.KeyDataHex.String != "",
 			}
+			if m.UserID.Valid && m.UserID.UUID == uid {
+				callerMemberID = m.ID.String()
+			}
 		}
 		summaries[i] = MultisigAccountSummary{
 			ID:                  r.ID.String(),
@@ -114,6 +122,7 @@ func (s *MultisigAccountsService) ListAccounts(ctx context.Context, userID strin
 			CreatedAt:           r.CreatedAt,
 			ProposalCount:       r.ProposalCount,
 			Members:             members,
+			MemberID:            callerMemberID,
 		}
 	}
 	return summaries, nil
@@ -283,9 +292,18 @@ func (s *MultisigAccountsService) DeployParams(ctx context.Context, threshold in
 
 // ── register (persist) ───────────────────────────────────────────────────────
 
-// RegisterAccount upserts a MultisigAccount row and replaces its
-// MultisigMembers in a single transaction. Ports
+// RegisterAccount upserts a MultisigAccount row and each of its
+// MultisigMembers, in a single transaction. Ports
 // POST /api/multisig/accounts/register.
+//
+// Members are upserted by signer identity (credential_id / g_address)
+// rather than deleted-and-reinserted, so a second caller registering the
+// same account can't erase a member link a previous caller already
+// established — see UpsertMultisigMemberByCredential/ByGAddress. The
+// calling session is linked to whichever submitted member matches one of
+// its own registered WebAuthn credentials (delegated/g_address members
+// have no equivalent proof-of-ownership channel here, so they can only be
+// linked at draft join/deploy time).
 func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, smartAccountAddress string, threshold int, accountSaltHex string, members []RegisterMemberInput) (MultisigAccountSummary, error) {
 	if threshold < 1 {
 		return MultisigAccountSummary{}, fmt.Errorf("%w: threshold must be at least 1", ErrMultisigAccountSignerValidation)
@@ -308,6 +326,15 @@ func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, s
 		return MultisigAccountSummary{}, fmt.Errorf("parse user id: %w", err)
 	}
 
+	ownCredentials, err := s.q.ListWebauthnCredentialsForUser(ctx, uid)
+	if err != nil {
+		return MultisigAccountSummary{}, fmt.Errorf("list caller webauthn credentials: %w", err)
+	}
+	ownCredentialIDs := make(map[string]bool, len(ownCredentials))
+	for _, c := range ownCredentials {
+		ownCredentialIDs[c.CredentialID] = true
+	}
+
 	tx, err := s.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return MultisigAccountSummary{}, fmt.Errorf("begin tx: %w", err)
@@ -326,16 +353,19 @@ func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, s
 	if err != nil {
 		return MultisigAccountSummary{}, fmt.Errorf("upsert multisig account: %w", err)
 	}
-	if err := qtx.DeleteMultisigMembersForAccount(ctx, accountID); err != nil {
-		return MultisigAccountSummary{}, fmt.Errorf("clear existing multisig members: %w", err)
-	}
 
 	now := time.Now().UnixMilli()
 	result := make([]MultisigAccountMember, len(members))
+	var callerMemberID string
 	for i, m := range members {
-		memberID := uuid.New()
-		if err := qtx.InsertMultisigMember(ctx, db.InsertMultisigMemberParams{
-			ID:                memberID,
+		linkCaller := m.Type == "webauthn" && m.CredentialID != "" && ownCredentialIDs[m.CredentialID]
+		memberUserID := uuid.NullUUID{}
+		if linkCaller {
+			memberUserID = uuid.NullUUID{UUID: uid, Valid: true}
+		}
+
+		params := db.UpsertMultisigMemberByCredentialParams{
+			ID:                uuid.New(),
 			MultisigAccountID: accountID,
 			MemberType:        m.Type,
 			Label:             nullStr(m.Label),
@@ -343,9 +373,22 @@ func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, s
 			CredentialID:      nullStr(m.CredentialID),
 			GAddress:          nullStr(m.GAddress),
 			CreatedAt:         now,
-		}); err != nil {
-			return MultisigAccountSummary{}, fmt.Errorf("insert multisig member: %w", err)
+			UserID:            memberUserID,
 		}
+
+		var memberID uuid.UUID
+		if m.Type == "delegated" {
+			memberID, err = qtx.UpsertMultisigMemberByGAddress(ctx, db.UpsertMultisigMemberByGAddressParams(params))
+		} else {
+			memberID, err = qtx.UpsertMultisigMemberByCredential(ctx, params)
+		}
+		if err != nil {
+			return MultisigAccountSummary{}, fmt.Errorf("upsert multisig member: %w", err)
+		}
+		if linkCaller {
+			callerMemberID = memberID.String()
+		}
+
 		result[i] = MultisigAccountMember{
 			ID:           memberID.String(),
 			MemberType:   m.Type,
@@ -368,5 +411,6 @@ func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, s
 		AccountSaltHex:      accountSaltHex,
 		CreatedAt:           now,
 		Members:             result,
+		MemberID:            callerMemberID,
 	}, nil
 }

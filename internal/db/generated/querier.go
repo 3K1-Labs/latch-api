@@ -42,7 +42,7 @@ type Querier interface {
 	GetMultisigApprovalByProposalAndMember(ctx context.Context, arg GetMultisigApprovalByProposalAndMemberParams) (WebappMultisigApproval, error)
 	GetMultisigDraftByIDForCreator(ctx context.Context, arg GetMultisigDraftByIDForCreatorParams) (WebappMultisigDraft, error)
 	GetMultisigDraftByInviteToken(ctx context.Context, inviteToken string) (WebappMultisigDraft, error)
-	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error)
+	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (GetMultisigMemberByIDRow, error)
 	GetMultisigProposalByID(ctx context.Context, id uuid.UUID) (WebappMultisigProposal, error)
 	GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (WebappOnRampIntent, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
@@ -73,6 +73,11 @@ type Querier interface {
 	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
 	InsertWebauthnChallenge(ctx context.Context, arg InsertWebauthnChallengeParams) error
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
+	// Visible to a user if they created the account OR they have a member row
+	// (established at draft-join time or via register) linked to their session.
+	// The caller's own member id (needed by the extension for proposal
+	// approvals) is resolved separately in Go from ListMultisigMembersForAccount,
+	// since sqlc can't reliably infer nullability for a synthetic joined column.
 	ListMultisigAccountsWithProposalCountForUser(ctx context.Context, userID uuid.UUID) ([]ListMultisigAccountsWithProposalCountForUserRow, error)
 	ListMultisigApprovalsWithMemberForProposal(ctx context.Context, proposalID uuid.UUID) ([]ListMultisigApprovalsWithMemberForProposalRow, error)
 	ListMultisigDraftMembersForDraft(ctx context.Context, draftID uuid.UUID) ([]WebappMultisigDraftMember, error)
@@ -106,6 +111,12 @@ type Querier interface {
 	UpsertMultisigAccount(ctx context.Context, arg UpsertMultisigAccountParams) (uuid.UUID, error)
 	UpsertMultisigApprovalDelegatedBegin(ctx context.Context, arg UpsertMultisigApprovalDelegatedBeginParams) (uuid.UUID, error)
 	UpsertMultisigApprovalWebauthn(ctx context.Context, arg UpsertMultisigApprovalWebauthnParams) (uuid.UUID, error)
+	// Upserts a webauthn signer by credential_id instead of a blind
+	// delete+reinsert, so one caller's register doesn't erase another member's
+	// already-established user_id link.
+	UpsertMultisigMemberByCredential(ctx context.Context, arg UpsertMultisigMemberByCredentialParams) (uuid.UUID, error)
+	// Same as UpsertMultisigMemberByCredential but for delegated (g_address) signers.
+	UpsertMultisigMemberByGAddress(ctx context.Context, arg UpsertMultisigMemberByGAddressParams) (uuid.UUID, error)
 	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
 	// The conflict update is guarded by uploader: only the original uploader (or a
