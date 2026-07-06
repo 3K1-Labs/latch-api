@@ -1211,7 +1211,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Builds an unsigned operation (send or contract call) against a multisig smart account and stores it as a pending proposal awaiting signer approvals.",
+                "description": "Builds an unsigned operation against a multisig smart account and stores it as a pending proposal awaiting signer approvals. operationKind must be \"sac_transfer\" (asset transfer) or \"counter_increment\" (contract call).",
                 "consumes": [
                     "application/json"
                 ],
@@ -5149,6 +5149,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "operationKind": {
+                    "description": "\"counter_increment\" | \"sac_transfer\"",
                     "type": "string"
                 },
                 "recipient": {
