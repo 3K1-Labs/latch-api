@@ -8,7 +8,11 @@ This doc covers the API contract for reading that memo/pool address. It does **n
 
 ## Current scope: mobile only
 
-This is wired into the **mobile-facing** `POST /v1/backup` / `GET /v1/backup` endpoints only. The web app + Chrome extension backend's separate backup endpoint (`POST /api/recovery/backup-passkey`, `internal/handler/webapp/recovery.go`) is **not** connected to this yet — a web app user's smart account will not get a `memo_id`. If/when the web app needs this, the same registration call (`BackupService.registerWithRelayer`, `internal/service/relayer_service.go`) needs to be wired into `webapp.BackupPasskeyService`'s store path too. Flagging this now so it isn't assumed to already work.
+This is wired into the **mobile-facing** `POST /v1/backup` / `GET /v1/backup` endpoints only. Web app + Chrome extension accounts get no `memo_id` today.
+
+**Correction/clarification:** an earlier draft of this doc pointed at `POST /api/recovery/backup-passkey` (`internal/handler/webapp/recovery.go`) as "the web app's backup endpoint that isn't wired yet." That was wrong — that endpoint has nothing to do with credential backup. It records intent to add a **second on-chain passkey signer** to an *already-deployed* smart account, for multisig-style recovery redundancy (per its own doc comment: "records intent to add a backup passkey signer... a future step wires it to an on-chain second-signer flow"). The web app has no analog to mobile's `credential_backups`/encrypted-mnemonic-blob model at all — its accounts are controlled purely by an on-chain WebAuthn signer, so there's nothing to "back up" the same way.
+
+The real gap, if this is ever extended to the web app: registration needs to hook into wherever the web app **deploys** a smart account, not backup/recovery — see `SmartAccountService.Deploy` / `DeployForCredential` / `DeployByKeyData` / `DeployFreighter` in `internal/service/webapp/smartaccount_service.go` and `internal/service/webapp/freighter_service.go`. The natural place to store `memo_id`/`pool_address` for a web app account would be new columns on `webapp.smart_accounts` (migration `000014_webapp_schema_init`), not anywhere in the recovery flow.
 
 ## API contract
 
