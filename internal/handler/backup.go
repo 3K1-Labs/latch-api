@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/httpx"
@@ -82,7 +83,8 @@ func (h *BackupHandler) Store(c *gin.Context) {
 
 // Exists godoc
 // @Summary      Check backup exists
-// @Description  Returns whether the authenticated user has a stored credential backup.
+// @Description  Returns whether the authenticated user has a stored credential backup, plus
+// @Description  its latch-relayer deposit memo/pool address once registration has landed.
 // @Tags         backup
 // @Produce      json
 // @Success      200 {object} backupExistsDataResponse
@@ -93,12 +95,22 @@ func (h *BackupHandler) Store(c *gin.Context) {
 func (h *BackupHandler) Exists(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
 
-	exists, err := h.backupSvc.Exists(c.Request.Context(), userID)
+	status, err := h.backupSvc.GetStatus(c.Request.Context(), userID)
 	if err != nil {
-		slog.Error("check backup exists", "userID", userID, "err", err)
+		slog.Error("check backup status", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	httpx.Success(c, http.StatusOK, gin.H{"exists": exists})
+	resp := gin.H{"exists": status.Exists}
+	if status.MemoID != nil {
+		// Formatted as the original uint64 (relayer's own representation),
+		// not the raw bit-preserving int64 storage value.
+		resp["memo_id"] = strconv.FormatUint(uint64(*status.MemoID), 10)
+	}
+	if status.PoolAddress != nil {
+		resp["pool_address"] = *status.PoolAddress
+	}
+
+	httpx.Success(c, http.StatusOK, resp)
 }

@@ -210,6 +210,8 @@ type stubBackup struct {
 	storeErr   error
 	existsBool bool
 	existsErr  error
+	memoID     *int64
+	poolAddr   *string
 	clientBlob string
 	getErr     error
 }
@@ -218,8 +220,11 @@ func (s *stubBackup) StoreClientEncrypted(_ context.Context, _, _, _ string) err
 	return s.storeErr
 }
 
-func (s *stubBackup) Exists(_ context.Context, _ string) (bool, error) {
-	return s.existsBool, s.existsErr
+func (s *stubBackup) GetStatus(_ context.Context, _ string) (service.BackupStatus, error) {
+	if s.existsErr != nil {
+		return service.BackupStatus{}, s.existsErr
+	}
+	return service.BackupStatus{Exists: s.existsBool, MemoID: s.memoID, PoolAddress: s.poolAddr}, nil
 }
 
 func (s *stubBackup) GetClientBlob(_ context.Context, _ string) (string, error) {

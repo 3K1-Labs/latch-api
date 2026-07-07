@@ -158,6 +158,46 @@ func TestExists_False(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	data := resp["data"].(map[string]any)
 	assert.Equal(t, false, data["exists"])
+	_, hasMemo := data["memo_id"]
+	assert.False(t, hasMemo, "memo_id must be omitted when not registered")
+}
+
+func TestExists_WithMemoRegistration(t *testing.T) {
+	memoID := int64(-1) // all-bits-set uint64, exercises the unsigned re-format
+	poolAddr := "GB3POOLADDRESS"
+	h := newBackupHandler(&stubBackup{existsBool: true, memoID: &memoID, poolAddr: &poolAddr}, nil)
+	r := gin.New()
+	r.GET("/backup", h.Exists)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/backup", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, true, data["exists"])
+	assert.Equal(t, "18446744073709551615", data["memo_id"])
+	assert.Equal(t, poolAddr, data["pool_address"])
+}
+
+func TestExists_NotRegisteredYet(t *testing.T) {
+	h := newBackupHandler(&stubBackup{existsBool: true}, nil)
+	r := gin.New()
+	r.GET("/backup", h.Exists)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/backup", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, true, data["exists"])
+	_, hasMemo := data["memo_id"]
+	assert.False(t, hasMemo, "backup can exist before relayer registration lands")
 }
 
 // ── helper ────────────────────────────────────────────────────────────────────

@@ -41,7 +41,7 @@ type auditService interface {
 
 type backupService interface {
 	StoreClientEncrypted(ctx context.Context, userID, clientBlob, smartAccountAddress string) error
-	Exists(ctx context.Context, userID string) (bool, error)
+	GetStatus(ctx context.Context, userID string) (service.BackupStatus, error)
 	GetClientBlob(ctx context.Context, userID string) (string, error)
 }
 

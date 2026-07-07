@@ -47,6 +47,12 @@ type messageResponse struct {
 
 type backupExistsResponse struct {
 	Exists bool `json:"exists" example:"true"`
+	// MemoID and PoolAddress are omitted until latch-relayer registration
+	// lands (immediately after backup storage, or via the retry sweep).
+	// MemoID is a decimal string, not a JSON number — it holds a uint64
+	// value that can exceed JS's safe integer range.
+	MemoID      *string `json:"memo_id,omitempty" example:"17540123456789"`
+	PoolAddress *string `json:"pool_address,omitempty" example:"GB3POOLADDRESSEXAMPLE"`
 }
 
 // clientEncryptedBlob mirrors the EncryptedBackup type produced by the mobile
