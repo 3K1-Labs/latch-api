@@ -22,6 +22,7 @@ sql:
       - "migrations/000017_webapp_sign_payloads.up.sql"
       - "migrations/000018_webapp_on_ramp_intents.up.sql"
       - "migrations/000019_webapp_multisig_member_sessions.up.sql"
+      - "migrations/000020_add_memo_registration.up.sql"
     gen:
       go:
         package: "db"

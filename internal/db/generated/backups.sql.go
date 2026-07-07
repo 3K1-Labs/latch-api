@@ -63,6 +63,77 @@ func (q *Queries) GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (
 	return client_encrypted_blob, err
 }
 
+const getMemoRegistrationByUserID = `-- name: GetMemoRegistrationByUserID :one
+SELECT memo_id, pool_address
+FROM credential_backups
+WHERE user_id = $1
+`
+
+type GetMemoRegistrationByUserIDRow struct {
+	MemoID      sql.NullInt64  `json:"memo_id"`
+	PoolAddress sql.NullString `json:"pool_address"`
+}
+
+func (q *Queries) GetMemoRegistrationByUserID(ctx context.Context, userID uuid.UUID) (GetMemoRegistrationByUserIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getMemoRegistrationByUserID, userID)
+	var i GetMemoRegistrationByUserIDRow
+	err := row.Scan(&i.MemoID, &i.PoolAddress)
+	return i, err
+}
+
+const listUnregisteredBackups = `-- name: ListUnregisteredBackups :many
+SELECT user_id, smart_account_address
+FROM credential_backups
+WHERE memo_id IS NULL
+  AND smart_account_address IS NOT NULL
+  AND smart_account_address != ''
+`
+
+type ListUnregisteredBackupsRow struct {
+	UserID              uuid.UUID `json:"user_id"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+}
+
+func (q *Queries) ListUnregisteredBackups(ctx context.Context) ([]ListUnregisteredBackupsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUnregisteredBackups)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnregisteredBackupsRow
+	for rows.Next() {
+		var i ListUnregisteredBackupsRow
+		if err := rows.Scan(&i.UserID, &i.SmartAccountAddress); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setMemoRegistration = `-- name: SetMemoRegistration :exec
+UPDATE credential_backups
+SET memo_id = $2, pool_address = $3, updated_at = NOW()
+WHERE user_id = $1
+`
+
+type SetMemoRegistrationParams struct {
+	UserID      uuid.UUID      `json:"user_id"`
+	MemoID      sql.NullInt64  `json:"memo_id"`
+	PoolAddress sql.NullString `json:"pool_address"`
+}
+
+func (q *Queries) SetMemoRegistration(ctx context.Context, arg SetMemoRegistrationParams) error {
+	_, err := q.db.ExecContext(ctx, setMemoRegistration, arg.UserID, arg.MemoID, arg.PoolAddress)
+	return err
+}
+
 const upsertBackup = `-- name: UpsertBackup :exec
 INSERT INTO credential_backups
     (id, user_id, encrypted_blob, iv, auth_tag, encryption_version, smart_account_address)

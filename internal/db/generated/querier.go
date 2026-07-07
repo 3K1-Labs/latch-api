@@ -37,6 +37,7 @@ type Querier interface {
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
 	GetCosignRequest(ctx context.Context, id uuid.UUID) (CosignRequest, error)
 	GetLatestWebauthnChallenge(ctx context.Context, arg GetLatestWebauthnChallengeParams) (WebappWebauthnChallenge, error)
+	GetMemoRegistrationByUserID(ctx context.Context, userID uuid.UUID) (GetMemoRegistrationByUserIDRow, error)
 	GetMultisigAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappMultisigAccount, error)
 	GetMultisigAccountByID(ctx context.Context, id uuid.UUID) (WebappMultisigAccount, error)
 	GetMultisigApprovalByProposalAndMember(ctx context.Context, arg GetMultisigApprovalByProposalAndMemberParams) (WebappMultisigApproval, error)
@@ -86,6 +87,7 @@ type Querier interface {
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
 	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
+	ListUnregisteredBackups(ctx context.Context) ([]ListUnregisteredBackupsRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
@@ -93,6 +95,7 @@ type Querier interface {
 	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	SetMemoRegistration(ctx context.Context, arg SetMemoRegistrationParams) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
 	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error

@@ -63,6 +63,8 @@ type CredentialBackup struct {
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
+	MemoID              sql.NullInt64  `json:"memo_id"`
+	PoolAddress         sql.NullString `json:"pool_address"`
 }
 
 type RefreshToken struct {

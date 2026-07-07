@@ -37,3 +37,20 @@ WHERE user_id = $1;
 SELECT client_encrypted_blob
 FROM credential_backups
 WHERE user_id = $1;
+
+-- name: GetMemoRegistrationByUserID :one
+SELECT memo_id, pool_address
+FROM credential_backups
+WHERE user_id = $1;
+
+-- name: SetMemoRegistration :exec
+UPDATE credential_backups
+SET memo_id = $2, pool_address = $3, updated_at = NOW()
+WHERE user_id = $1;
+
+-- name: ListUnregisteredBackups :many
+SELECT user_id, smart_account_address
+FROM credential_backups
+WHERE memo_id IS NULL
+  AND smart_account_address IS NOT NULL
+  AND smart_account_address != '';
