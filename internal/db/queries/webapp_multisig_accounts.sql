@@ -73,6 +73,6 @@ ON CONFLICT (multisig_account_id, g_address) WHERE g_address IS NOT NULL DO UPDA
 RETURNING id;
 
 -- name: GetMultisigMemberByID :one
-SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at
+SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id
 FROM webapp.multisig_members
 WHERE id = $1;

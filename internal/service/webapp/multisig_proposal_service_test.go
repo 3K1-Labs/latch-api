@@ -20,7 +20,7 @@ var multisigAccountColumns = []string{"id", "user_id", "smart_account_address", 
 
 var multisigProposalColumns = []string{"id", "multisig_account_id", "created_by_user_id", "target_contract_id", "operation_kind", "operation_params_json", "tx_xdr", "auth_entries_xdr_json", "smart_account_auth_entry_index", "context_rule_id", "auth_digest_hex", "signature_payload_hex", "valid_until_ledger", "status", "executed_tx_hash", "created_at"}
 
-var multisigMemberColumns = []string{"id", "multisig_account_id", "member_type", "label", "key_data_hex", "credential_id", "g_address", "created_at"}
+var multisigMemberColumns = []string{"id", "multisig_account_id", "member_type", "label", "key_data_hex", "credential_id", "g_address", "created_at", "user_id"}
 
 func TestI128LessThan(t *testing.T) {
 	assert.True(t, i128LessThan(0, 100, 0, 200))
@@ -103,18 +103,33 @@ func TestGetOwnedAccountByAddress(t *testing.T) {
 		require.ErrorIs(t, err, ErrMultisigAccountNotFound)
 	})
 
-	t.Run("owned by someone else", func(t *testing.T) {
+	t.Run("owned by someone else, not a member", func(t *testing.T) {
 		svc, mock := newMockMultisigProposalService(t, &fakeSorobanRPC{}, nil, nil, nil)
 		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, uuid.New(), addr, 2, "aabb", 1000))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns))
 		_, err := svc.getOwnedAccountByAddress(context.Background(), addr, userID.String())
 		require.ErrorIs(t, err, ErrMultisigAccountNotFound)
 	})
 
-	t.Run("success", func(t *testing.T) {
+	t.Run("success as creator", func(t *testing.T) {
 		svc, mock := newMockMultisigProposalService(t, &fakeSorobanRPC{}, nil, nil, nil)
 		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, userID, addr, 2, "aabb", 1000))
+		account, err := svc.getOwnedAccountByAddress(context.Background(), addr, userID.String())
+		require.NoError(t, err)
+		assert.Equal(t, accountID, account.ID)
+	})
+
+	t.Run("success as linked member", func(t *testing.T) {
+		svc, mock := newMockMultisigProposalService(t, &fakeSorobanRPC{}, nil, nil, nil)
+		memberID := uuid.New()
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
+			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, uuid.New(), addr, 2, "aabb", 1000))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).
+				AddRow(memberID, accountID, "webauthn", "m1", "04ab", "cred", nil, 1000, userID))
 		account, err := svc.getOwnedAccountByAddress(context.Background(), addr, userID.String())
 		require.NoError(t, err)
 		assert.Equal(t, accountID, account.ID)
@@ -244,7 +259,7 @@ func TestApproveWebauthn(t *testing.T) {
 		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, userID, addr, 2, "aabb", 1000))
 		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "webauthn", "m1", "04ab", "cred", nil, 1000))
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "webauthn", "m1", "04ab", "cred", nil, 1000, nil))
 		mock.ExpectQuery("INSERT INTO webapp.multisig_approvals").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 
 		approvalID, err := svc.ApproveWebauthn(context.Background(), userID.String(), proposalID.String(), memberID.String(), "aabbcc")
@@ -260,7 +275,7 @@ func TestApproveWebauthn(t *testing.T) {
 		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, userID, addr, 2, "aabb", 1000))
 		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, randomGAddress(t), 1000))
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, randomGAddress(t), 1000, nil))
 
 		_, err := svc.ApproveWebauthn(context.Background(), userID.String(), proposalID.String(), memberID.String(), "aabbcc")
 		require.ErrorIs(t, err, ErrMultisigApprovalWrongMemberType)
@@ -276,6 +291,45 @@ func TestApproveWebauthn(t *testing.T) {
 
 		_, err := svc.ApproveWebauthn(context.Background(), userID.String(), proposalID.String(), memberID.String(), "aabbcc")
 		require.ErrorIs(t, err, ErrMultisigProposalNotPending)
+	})
+
+	t.Run("linked member approves for self", func(t *testing.T) {
+		svc, mock := newMockMultisigProposalService(t, &fakeSorobanRPC{}, nil, nil, nil)
+		creatorID := uuid.New()
+		callerID := uuid.New()
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_proposals").
+			WillReturnRows(sqlmock.NewRows(multisigProposalColumns).
+				AddRow(proposalID, accountID, creatorID, "C", "counter_increment", "{}", "tx", "[]", 0, 1, "d", "p", 1000, "pending", nil, 1000))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
+			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, creatorID, addr, 2, "aabb", 1000))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "webauthn", "m1", "04ab", "cred", nil, 1000, callerID))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "webauthn", "m1", "04ab", "cred", nil, 1000, callerID))
+		mock.ExpectQuery("INSERT INTO webapp.multisig_approvals").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+
+		approvalID, err := svc.ApproveWebauthn(context.Background(), callerID.String(), proposalID.String(), memberID.String(), "aabbcc")
+		require.NoError(t, err)
+		assert.NotEmpty(t, approvalID)
+	})
+
+	t.Run("linked member cannot approve for a different member", func(t *testing.T) {
+		svc, mock := newMockMultisigProposalService(t, &fakeSorobanRPC{}, nil, nil, nil)
+		creatorID := uuid.New()
+		callerID := uuid.New()
+		otherMemberUserID := uuid.New()
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_proposals").
+			WillReturnRows(sqlmock.NewRows(multisigProposalColumns).
+				AddRow(proposalID, accountID, creatorID, "C", "counter_increment", "{}", "tx", "[]", 0, 1, "d", "p", 1000, "pending", nil, 1000))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
+			WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, creatorID, addr, 2, "aabb", 1000))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(uuid.New(), accountID, "webauthn", "caller", "04ab", "cred2", nil, 1000, callerID))
+		mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
+			WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "webauthn", "m1", "04ab", "cred", nil, 1000, otherMemberUserID))
+
+		_, err := svc.ApproveWebauthn(context.Background(), callerID.String(), proposalID.String(), memberID.String(), "aabbcc")
+		require.ErrorIs(t, err, ErrMultisigApprovalMemberNotFound)
 	})
 }
 
@@ -293,7 +347,7 @@ func TestApproveDelegatedFinish_NotStarted(t *testing.T) {
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 		WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, userID, addr, 2, "aabb", 1000))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, randomGAddress(t), 1000))
+		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, randomGAddress(t), 1000, nil))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_approvals").WillReturnError(sql.ErrNoRows)
 
 	_, err := svc.ApproveDelegatedFinish(context.Background(), userID.String(), proposalID.String(), memberID.String(), "sig", randomGAddress(t))
@@ -464,7 +518,7 @@ func TestApproveDelegatedBegin_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 		WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, userID, smartAccountAddr, 2, "aabb", 1000))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, signerG, 1000))
+		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, signerG, 1000, nil))
 	mock.ExpectQuery("INSERT INTO webapp.multisig_approvals").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 
 	result, err := svc.ApproveDelegatedBegin(context.Background(), userID.String(), proposalID.String(), memberID.String())
@@ -500,7 +554,7 @@ func TestApproveDelegatedFinish_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
 		WillReturnRows(sqlmock.NewRows(multisigAccountColumns).AddRow(accountID, userID, smartAccountAddr, 2, "aabb", 1000))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, signerKp.Address(), 1000))
+		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).AddRow(memberID, accountID, "delegated", "m1", nil, nil, signerKp.Address(), 1000, nil))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_approvals").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "proposal_id", "member_id", "approval_type", "webauthn_sig_data_xdr_hex", "delegated_entry_template_xdr", "delegated_signed_auth_entry_base64", "delegated_signer_address", "created_at"}).
 			AddRow(uuid.New(), proposalID, memberID, "delegated", nil, tmpl.EntryTemplateXdrBase64, nil, signerKp.Address(), 1000))
