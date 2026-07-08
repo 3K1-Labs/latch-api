@@ -136,11 +136,6 @@ func TestDeployParams(t *testing.T) {
 	})
 }
 
-// multisigMemberColumnsWithUserID is multisigMemberColumns (defined in
-// multisig_proposal_service_test.go, which matches GetMultisigMemberByID's
-// column set) plus user_id, which ListMultisigMembersForAccount also selects.
-var multisigMemberColumnsWithUserID = append(append([]string{}, multisigMemberColumns...), "user_id")
-
 func TestMultisigListAccounts_Success(t *testing.T) {
 	userID := uuid.New()
 	otherMemberID := uuid.New()
@@ -152,7 +147,7 @@ func TestMultisigListAccounts_Success(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "smart_account_address", "threshold", "account_salt_hex", "created_at", "proposal_count"}).
 			AddRow(accountID, addr, 2, "aabb", 1000, 3))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
-		WillReturnRows(sqlmock.NewRows(multisigMemberColumnsWithUserID).
+		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).
 			AddRow(otherMemberID, accountID, "webauthn", "m1", "04ab", "cred1", nil, 1000, nil).
 			AddRow(uuid.New(), accountID, "delegated", "m2", nil, nil, randomGAddress(t), 1000, userID))
 

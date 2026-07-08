@@ -63,25 +63,14 @@ func (q *Queries) GetMultisigAccountByID(ctx context.Context, id uuid.UUID) (Web
 }
 
 const getMultisigMemberByID = `-- name: GetMultisigMemberByID :one
-SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at
+SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id
 FROM webapp.multisig_members
 WHERE id = $1
 `
 
-type GetMultisigMemberByIDRow struct {
-	ID                uuid.UUID      `json:"id"`
-	MultisigAccountID uuid.UUID      `json:"multisig_account_id"`
-	MemberType        string         `json:"member_type"`
-	Label             sql.NullString `json:"label"`
-	KeyDataHex        sql.NullString `json:"key_data_hex"`
-	CredentialID      sql.NullString `json:"credential_id"`
-	GAddress          sql.NullString `json:"g_address"`
-	CreatedAt         int64          `json:"created_at"`
-}
-
-func (q *Queries) GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (GetMultisigMemberByIDRow, error) {
+func (q *Queries) GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error) {
 	row := q.db.QueryRowContext(ctx, getMultisigMemberByID, id)
-	var i GetMultisigMemberByIDRow
+	var i WebappMultisigMember
 	err := row.Scan(
 		&i.ID,
 		&i.MultisigAccountID,
@@ -91,6 +80,7 @@ func (q *Queries) GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (GetM
 		&i.CredentialID,
 		&i.GAddress,
 		&i.CreatedAt,
+		&i.UserID,
 	)
 	return i, err
 }

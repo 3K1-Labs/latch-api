@@ -42,7 +42,7 @@ type Querier interface {
 	GetMultisigApprovalByProposalAndMember(ctx context.Context, arg GetMultisigApprovalByProposalAndMemberParams) (WebappMultisigApproval, error)
 	GetMultisigDraftByIDForCreator(ctx context.Context, arg GetMultisigDraftByIDForCreatorParams) (WebappMultisigDraft, error)
 	GetMultisigDraftByInviteToken(ctx context.Context, inviteToken string) (WebappMultisigDraft, error)
-	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (GetMultisigMemberByIDRow, error)
+	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error)
 	GetMultisigProposalByID(ctx context.Context, id uuid.UUID) (WebappMultisigProposal, error)
 	GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (WebappOnRampIntent, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)

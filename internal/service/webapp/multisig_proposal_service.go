@@ -191,7 +191,11 @@ func (s *MultisigProposalService) getOwnedAccountByAddress(ctx context.Context, 
 	if err != nil {
 		return db.WebappMultisigAccount{}, fmt.Errorf("get multisig account: %w", err)
 	}
-	if account.UserID.String() != userID {
+	granted, err := s.accountAccessGranted(ctx, account, userID)
+	if err != nil {
+		return db.WebappMultisigAccount{}, err
+	}
+	if !granted {
 		return db.WebappMultisigAccount{}, ErrMultisigAccountNotFound
 	}
 	return account, nil
@@ -205,10 +209,37 @@ func (s *MultisigProposalService) getOwnedAccountByID(ctx context.Context, accou
 	if err != nil {
 		return db.WebappMultisigAccount{}, fmt.Errorf("get multisig account: %w", err)
 	}
-	if account.UserID.String() != userID {
+	granted, err := s.accountAccessGranted(ctx, account, userID)
+	if err != nil {
+		return db.WebappMultisigAccount{}, err
+	}
+	if !granted {
 		return db.WebappMultisigAccount{}, ErrMultisigAccountNotFound
 	}
 	return account, nil
+}
+
+// accountAccessGranted reports whether userID may propose/approve/view on
+// account: either as its creator, or as a session linked to one of its
+// member rows (linked at draft-join time for any signer type, or at
+// register time for a webauthn signer proving ownership of a matching
+// credential — see RegisterAccount's linkCaller). Checking membership
+// requires an extra query, so callers should only reach this once the
+// cheap creator check has already failed.
+func (s *MultisigProposalService) accountAccessGranted(ctx context.Context, account db.WebappMultisigAccount, userID string) (bool, error) {
+	if account.UserID.String() == userID {
+		return true, nil
+	}
+	members, err := s.q.ListMultisigMembersForAccount(ctx, account.ID)
+	if err != nil {
+		return false, fmt.Errorf("list multisig members: %w", err)
+	}
+	for _, m := range members {
+		if m.UserID.Valid && m.UserID.UUID.String() == userID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *MultisigProposalService) getOwnedProposal(ctx context.Context, proposalID, userID string) (db.WebappMultisigProposal, db.WebappMultisigAccount, error) {
@@ -230,23 +261,33 @@ func (s *MultisigProposalService) getOwnedProposal(ctx context.Context, proposal
 	return proposal, account, nil
 }
 
-func (s *MultisigProposalService) getOwnedMember(ctx context.Context, account db.WebappMultisigAccount, memberID, expectedType string) (db.GetMultisigMemberByIDRow, error) {
+// getOwnedMember resolves memberID on account, and enforces who may act as
+// that member: the account creator may approve on behalf of any member
+// (e.g. relaying a signature collected out-of-band), but a non-creator
+// caller — a member acting under their own session — may only approve as
+// themselves.
+func (s *MultisigProposalService) getOwnedMember(ctx context.Context, account db.WebappMultisigAccount, callerUserID, memberID, expectedType string) (db.WebappMultisigMember, error) {
 	mid, err := uuid.Parse(memberID)
 	if err != nil {
-		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalMemberNotFound
+		return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
 	}
 	member, err := s.q.GetMultisigMemberByID(ctx, mid)
 	if errors.Is(err, sql.ErrNoRows) {
-		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalMemberNotFound
+		return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
 	}
 	if err != nil {
-		return db.GetMultisigMemberByIDRow{}, fmt.Errorf("get multisig member: %w", err)
+		return db.WebappMultisigMember{}, fmt.Errorf("get multisig member: %w", err)
 	}
 	if member.MultisigAccountID != account.ID {
-		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalMemberNotFound
+		return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
 	}
 	if member.MemberType != expectedType {
-		return db.GetMultisigMemberByIDRow{}, ErrMultisigApprovalWrongMemberType
+		return db.WebappMultisigMember{}, ErrMultisigApprovalWrongMemberType
+	}
+	if account.UserID.String() != callerUserID {
+		if !member.UserID.Valid || member.UserID.UUID.String() != callerUserID {
+			return db.WebappMultisigMember{}, ErrMultisigApprovalMemberNotFound
+		}
 	}
 	return member, nil
 }
@@ -781,7 +822,7 @@ func (s *MultisigProposalService) ApproveWebauthn(ctx context.Context, userID, p
 	if proposal.Status != "pending" {
 		return "", ErrMultisigProposalNotPending
 	}
-	member, err := s.getOwnedMember(ctx, account, memberID, "webauthn")
+	member, err := s.getOwnedMember(ctx, account, userID, memberID, "webauthn")
 	if err != nil {
 		return "", err
 	}
@@ -814,7 +855,7 @@ func (s *MultisigProposalService) ApproveDelegatedBegin(ctx context.Context, use
 	if err != nil {
 		return DelegatedBeginResult{}, err
 	}
-	member, err := s.getOwnedMember(ctx, account, memberID, "delegated")
+	member, err := s.getOwnedMember(ctx, account, userID, memberID, "delegated")
 	if err != nil {
 		return DelegatedBeginResult{}, err
 	}
@@ -871,7 +912,7 @@ func (s *MultisigProposalService) ApproveDelegatedFinish(ctx context.Context, us
 	if proposal.Status != "pending" {
 		return "", ErrMultisigProposalNotPending
 	}
-	member, err := s.getOwnedMember(ctx, account, memberID, "delegated")
+	member, err := s.getOwnedMember(ctx, account, userID, memberID, "delegated")
 	if err != nil {
 		return "", err
 	}
