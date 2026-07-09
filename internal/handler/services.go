@@ -40,9 +40,14 @@ type auditService interface {
 }
 
 type backupService interface {
-	StoreClientEncrypted(ctx context.Context, userID, clientBlob, smartAccountAddress string) error
+	StoreClientEncrypted(ctx context.Context, userID, clientBlob string) error
 	Exists(ctx context.Context, userID string) (bool, error)
 	GetClientBlob(ctx context.Context, userID string) (string, error)
+}
+
+type accountService interface {
+	Register(ctx context.Context, userID, smartAccountAddress string) error
+	List(ctx context.Context, userID string) ([]service.AccountRegistration, error)
 }
 
 type cosignService interface {

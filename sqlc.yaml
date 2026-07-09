@@ -22,6 +22,8 @@ sql:
       - "migrations/000017_webapp_sign_payloads.up.sql"
       - "migrations/000018_webapp_on_ramp_intents.up.sql"
       - "migrations/000019_webapp_multisig_member_sessions.up.sql"
+      - "migrations/000020_add_memo_registration.up.sql"
+      - "migrations/000021_smart_account_registrations.up.sql"
     gen:
       go:
         package: "db"
@@ -37,5 +39,5 @@ sql:
             go_type: "time.Time"
           - column: "credential_backups.encryption_version"
             go_type: "int32"
-          - column: "credential_backups.smart_account_address"
+          - column: "smart_account_registrations.smart_account_address"
             go_type: "string"

@@ -193,4 +193,13 @@ A background sweep (`internal/service/cleanup_service.go`, scheduled in `cmd/ser
 - `WCK_BUNDLE_RETENTION_DAYS` — delete WCK bundles untouched this long; `0` disables (default `180`)
 - `WALLET_MEMBERSHIP_RETENTION_DAYS` — delete membership rows older than this; `0` disables (default `180`)
 
+### latch-relayer integration
+
+`AccountService` registers a smart account with [`latch-relayer`](../latch-relayer) (`POST {RELAYER_URL}/register`) for pooled-deposit memo routing, storing the returned `memo_id`/`pool_address` on `smart_account_registrations` (one row per smart account address, many per user — a user can own multiple BIP-44 seed indices, passkey accounts, and shared/multisig wallets, each needing its own registration). Registration is triggered by `POST /v1/accounts/register` directly, and implicitly by `POST`/`PUT /v1/backup` for the address it's given. Best-effort: a failure just logs, and a background sweep (`internal/service/memo_registration_sweep.go`) retries later — relayer's `/register` is idempotent, so retrying is always safe. `GET /v1/accounts` lists every registered address and its `memo_id`/`pool_address` once registration lands; `GET /v1/backup` no longer carries memo/pool fields. See `docs/relayer-memo-integration-guide.md` for the full client-facing contract.
+
+- `RELAYER_URL` — base URL of `latch-relayer`; empty disables registration entirely, logged not fatal (default unset)
+- `RELAYER_TIMEOUT_SEC` — HTTP timeout for the registration call (default `10`)
+- `MEMO_SWEEP_ENABLED` — run the retry sweep (default `true`); the sweep only actually starts if `RELAYER_URL` is also set
+- `MEMO_SWEEP_INTERVAL_MIN` — minutes between sweeps (default `15`)
+
 WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.

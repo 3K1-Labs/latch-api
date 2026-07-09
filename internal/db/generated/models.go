@@ -59,10 +59,12 @@ type CredentialBackup struct {
 	Iv                  []byte         `json:"iv"`
 	AuthTag             []byte         `json:"auth_tag"`
 	EncryptionVersion   int32          `json:"encryption_version"`
-	SmartAccountAddress string         `json:"smart_account_address"`
+	SmartAccountAddress sql.NullString `json:"smart_account_address"`
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
+	MemoID              sql.NullInt64  `json:"memo_id"`
+	PoolAddress         sql.NullString `json:"pool_address"`
 }
 
 type RefreshToken struct {
@@ -73,6 +75,16 @@ type RefreshToken struct {
 	Revoked       bool           `json:"revoked"`
 	CreatedAt     time.Time      `json:"created_at"`
 	WalletAddress sql.NullString `json:"wallet_address"`
+}
+
+type SmartAccountRegistration struct {
+	ID                  uuid.UUID      `json:"id"`
+	UserID              uuid.UUID      `json:"user_id"`
+	SmartAccountAddress string         `json:"smart_account_address"`
+	MemoID              sql.NullInt64  `json:"memo_id"`
+	PoolAddress         sql.NullString `json:"pool_address"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
 type User struct {

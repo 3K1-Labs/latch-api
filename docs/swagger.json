@@ -2978,6 +2978,100 @@
                 }
             }
         },
+        "/v1/accounts": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every smart account registered for the authenticated user, with its\nlatch-relayer deposit memo/pool address once registration has landed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "List the caller's registered smart accounts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.accountsListDataResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/accounts/register": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Idempotent: registering the same address again is a no-op. Kicks off\nbest-effort latch-relayer registration in the background — see GET /v1/accounts.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Register a smart account for deposit memo routing",
+                "parameters": [
+                    {
+                        "description": "Smart account C-address",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.registerAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.messageDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/auth/challenge": {
             "post": {
                 "consumes": [
@@ -3284,7 +3378,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns whether the authenticated user has a stored credential backup.",
+                "description": "Returns whether the authenticated user has a stored credential backup. See\nGET /v1/accounts for smart account deposit memo/pool address registration.",
                 "produces": [
                     "application/json"
                 ],
@@ -4405,6 +4499,25 @@
                 }
             }
         },
+        "internal_handler.accountsListDataResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/internal_handler.accountsListResponse"
+                }
+            }
+        },
+        "internal_handler.accountsListResponse": {
+            "type": "object",
+            "properties": {
+                "accounts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.smartAccountResponse"
+                    }
+                }
+            }
+        },
         "internal_handler.addSignatureRequest": {
             "type": "object",
             "required": [
@@ -4654,6 +4767,17 @@
                 }
             }
         },
+        "internal_handler.registerAccountRequest": {
+            "type": "object",
+            "required": [
+                "smart_account_address"
+            ],
+            "properties": {
+                "smart_account_address": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.registerPushTokenRequest": {
             "type": "object",
             "required": [
@@ -4766,6 +4890,23 @@
                 },
                 "transaction_data": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.smartAccountResponse": {
+            "type": "object",
+            "properties": {
+                "memo_id": {
+                    "type": "string",
+                    "example": "17540123456789"
+                },
+                "pool_address": {
+                    "type": "string",
+                    "example": "GB3POOLADDRESSEXAMPLE"
+                },
+                "smart_account_address": {
+                    "type": "string",
+                    "example": "CABC123..."
                 }
             }
         },

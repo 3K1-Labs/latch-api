@@ -12,12 +12,13 @@ import (
 )
 
 type BackupHandler struct {
-	backupSvc backupService
-	auditSvc  auditService
+	backupSvc  backupService
+	accountSvc accountService
+	auditSvc   auditService
 }
 
-func NewBackupHandler(backupSvc backupService, auditSvc auditService) *BackupHandler {
-	return &BackupHandler{backupSvc: backupSvc, auditSvc: auditSvc}
+func NewBackupHandler(backupSvc backupService, accountSvc accountService, auditSvc auditService) *BackupHandler {
+	return &BackupHandler{backupSvc: backupSvc, accountSvc: accountSvc, auditSvc: auditSvc}
 }
 
 type storeBackupRequest struct {
@@ -55,6 +56,10 @@ func (h *BackupHandler) Store(c *gin.Context) {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "encrypted_blob is incomplete")
 		return
 	}
+	if !service.IsContractAddress(req.SmartAccountAddress) {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid smart_account_address")
+		return
+	}
 
 	blobJSON, err := json.Marshal(eb)
 	if err != nil {
@@ -63,10 +68,14 @@ func (h *BackupHandler) Store(c *gin.Context) {
 		return
 	}
 
-	if err := h.backupSvc.StoreClientEncrypted(c.Request.Context(), userID, string(blobJSON), req.SmartAccountAddress); err != nil {
+	if err := h.backupSvc.StoreClientEncrypted(c.Request.Context(), userID, string(blobJSON)); err != nil {
 		slog.Error("store client encrypted backup", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
+	}
+
+	if err := h.accountSvc.Register(c.Request.Context(), userID, req.SmartAccountAddress); err != nil {
+		slog.Error("register smart account", "userID", userID, "err", err)
 	}
 
 	action := service.ActionBackupStored
@@ -82,7 +91,8 @@ func (h *BackupHandler) Store(c *gin.Context) {
 
 // Exists godoc
 // @Summary      Check backup exists
-// @Description  Returns whether the authenticated user has a stored credential backup.
+// @Description  Returns whether the authenticated user has a stored credential backup. See
+// @Description  GET /v1/accounts for smart account deposit memo/pool address registration.
 // @Tags         backup
 // @Produce      json
 // @Success      200 {object} backupExistsDataResponse
@@ -95,7 +105,7 @@ func (h *BackupHandler) Exists(c *gin.Context) {
 
 	exists, err := h.backupSvc.Exists(c.Request.Context(), userID)
 	if err != nil {
-		slog.Error("check backup exists", "userID", userID, "err", err)
+		slog.Error("check backup status", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
