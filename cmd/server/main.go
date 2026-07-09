@@ -85,12 +85,15 @@ func main() {
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
+	relayerSvc := service.NewRelayerService(cfg.RelayerURL, cfg.RelayerTimeout)
 	backupSvc := service.NewBackupService(queries, encSvc)
+	accountSvc := service.NewAccountService(queries, relayerSvc)
 	cosignSvc := service.NewCosignService(queries)
 	wckBundleSvc := service.NewWCKBundleService(queries)
 	pushTokenSvc := service.NewPushTokenService(queries)
 	membershipSvc := service.NewMembershipService(queries)
 	cleanupSvc := service.NewCleanupService(queries, cfg.CosignRetention, cfg.WCKBundleRetention, cfg.WalletMembershipRetention)
+	memoSweepSvc := service.NewMemoRegistrationSweepService(queries, relayerSvc)
 	expoNotifier := service.NewExpoPushNotifier()
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
@@ -159,7 +162,8 @@ func main() {
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
-	backupHandler := handler.NewBackupHandler(backupSvc, auditSvc)
+	backupHandler := handler.NewBackupHandler(backupSvc, accountSvc, auditSvc)
+	accountHandler := handler.NewAccountHandler(accountSvc, auditSvc)
 	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
 	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
 	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
@@ -297,6 +301,13 @@ func main() {
 		{
 			memberships.POST("", membershipHandler.Announce)
 			memberships.GET("", membershipHandler.List)
+		}
+
+		accounts := v1.Group("/accounts")
+		accounts.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			accounts.POST("/register", accountHandler.Register)
+			accounts.GET("", accountHandler.List)
 		}
 	}
 
@@ -456,6 +467,13 @@ func main() {
 		go runCleanupScheduler(ctx, cleanupSvc, cfg.CleanupInterval)
 	}
 
+	// Background memo-registration retry sweep. Only worth running if the
+	// relayer is actually configured — otherwise every pass would just log
+	// "not configured" noise for accounts that will never register.
+	if cfg.MemoSweepEnabled && cfg.RelayerURL != "" {
+		go runMemoSweepScheduler(ctx, memoSweepSvc, cfg.MemoSweepInterval)
+	}
+
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),
 		Handler:           r,
@@ -509,6 +527,32 @@ func runCleanupScheduler(ctx context.Context, svc *service.CleanupService, inter
 				"cosign_requests", res.CosignRequests,
 				"wck_bundles", res.WCKBundles,
 				"wallet_memberships", res.WalletMemberships)
+		}
+	}
+}
+
+// runMemoSweepScheduler retries latch-relayer registration for smart accounts
+// that missed their immediate registration attempt, every interval until ctx
+// is cancelled. Each pass gets its own bounded deadline so a slow sweep can't
+// run forever.
+func runMemoSweepScheduler(ctx context.Context, svc *service.MemoRegistrationSweepService, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			res, err := svc.Run(runCtx)
+			cancel()
+			if err != nil {
+				slog.Error("memo sweep failed", "registered", res.Registered, "failed", res.Failed, "err", err)
+				continue
+			}
+			if res.Registered > 0 || res.Failed > 0 {
+				slog.Info("memo sweep complete", "registered", res.Registered, "failed", res.Failed)
+			}
 		}
 	}
 }

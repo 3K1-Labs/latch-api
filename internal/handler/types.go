@@ -49,6 +49,21 @@ type backupExistsResponse struct {
 	Exists bool `json:"exists" example:"true"`
 }
 
+// smartAccountResponse describes one of the caller's registered smart
+// accounts and its latch-relayer deposit memo registration, if it has landed
+// yet (immediately after POST /v1/accounts/register, or via the retry
+// sweep). MemoID is a decimal string, not a JSON number — it holds a uint64
+// value that can exceed JS's safe integer range.
+type smartAccountResponse struct {
+	SmartAccountAddress string  `json:"smart_account_address" example:"CABC123..."`
+	MemoID              *string `json:"memo_id,omitempty" example:"17540123456789"`
+	PoolAddress         *string `json:"pool_address,omitempty" example:"GB3POOLADDRESSEXAMPLE"`
+}
+
+type accountsListResponse struct {
+	Accounts []smartAccountResponse `json:"accounts"`
+}
+
 // clientEncryptedBlob mirrors the EncryptedBackup type produced by the mobile
 // client (Argon2id key derivation + AES-256-GCM). All fields are hex strings.
 type clientEncryptedBlob struct {
@@ -83,6 +98,10 @@ type backupExistsDataResponse struct {
 
 type blobDataResponse struct {
 	Data encryptedBlobResponse `json:"data"`
+}
+
+type accountsListDataResponse struct {
+	Data accountsListResponse `json:"data"`
 }
 
 type pricesDataResponse struct {

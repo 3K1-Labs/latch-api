@@ -31,6 +31,18 @@ definitions:
         description: base64 XDR return value (ScVal)
         type: string
     type: object
+  internal_handler.accountsListDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.accountsListResponse'
+    type: object
+  internal_handler.accountsListResponse:
+    properties:
+      accounts:
+        items:
+          $ref: '#/definitions/internal_handler.smartAccountResponse'
+        type: array
+    type: object
   internal_handler.addSignatureRequest:
     properties:
       auth_entry_xdr:
@@ -195,6 +207,13 @@ definitions:
     required:
     - refresh_token
     type: object
+  internal_handler.registerAccountRequest:
+    properties:
+      smart_account_address:
+        type: string
+    required:
+    - smart_account_address
+    type: object
   internal_handler.registerPushTokenRequest:
     properties:
       push_token:
@@ -268,6 +287,18 @@ definitions:
           $ref: '#/definitions/github_com_latch_backend_internal_service.SimResultEntry'
         type: array
       transaction_data:
+        type: string
+    type: object
+  internal_handler.smartAccountResponse:
+    properties:
+      memo_id:
+        example: "17540123456789"
+        type: string
+      pool_address:
+        example: GB3POOLADDRESSEXAMPLE
+        type: string
+      smart_account_address:
+        example: CABC123...
         type: string
     type: object
   internal_handler.storeBackupRequest:
@@ -3081,6 +3112,69 @@ paths:
       summary: Finish a WebAuthn registration ceremony
       tags:
       - webauthn
+  /v1/accounts:
+    get:
+      description: |-
+        Returns every smart account registered for the authenticated user, with its
+        latch-relayer deposit memo/pool address once registration has landed.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.accountsListDataResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List the caller's registered smart accounts
+      tags:
+      - accounts
+  /v1/accounts/register:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Idempotent: registering the same address again is a no-op. Kicks off
+        best-effort latch-relayer registration in the background — see GET /v1/accounts.
+      parameters:
+      - description: Smart account C-address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.registerAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.messageDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Register a smart account for deposit memo routing
+      tags:
+      - accounts
   /v1/auth/challenge:
     post:
       consumes:
@@ -3280,8 +3374,9 @@ paths:
       - auth
   /v1/backup:
     get:
-      description: Returns whether the authenticated user has a stored credential
-        backup.
+      description: |-
+        Returns whether the authenticated user has a stored credential backup. See
+        GET /v1/accounts for smart account deposit memo/pool address registration.
       produces:
       - application/json
       responses:

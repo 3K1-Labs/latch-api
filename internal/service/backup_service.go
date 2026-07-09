@@ -20,7 +20,7 @@ func NewBackupService(q *db.Queries, encSvc *EncryptionService) *BackupService {
 }
 
 // Store encrypts the plaintext blob and upserts it for the user.
-func (s *BackupService) Store(ctx context.Context, userID string, plaintext []byte, smartAccountAddress string) error {
+func (s *BackupService) Store(ctx context.Context, userID string, plaintext []byte) error {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return fmt.Errorf("parse user id: %w", err)
@@ -32,23 +32,27 @@ func (s *BackupService) Store(ctx context.Context, userID string, plaintext []by
 	}
 
 	return s.q.UpsertBackup(ctx, db.UpsertBackupParams{
-		ID:                  uuid.New(),
-		UserID:              uid,
-		EncryptedBlob:       encBlob.Ciphertext,
-		Iv:                  encBlob.IV,
-		AuthTag:             encBlob.AuthTag,
-		EncryptionVersion:   int32(encVersion),
-		SmartAccountAddress: smartAccountAddress,
+		ID:                uuid.New(),
+		UserID:            uid,
+		EncryptedBlob:     encBlob.Ciphertext,
+		Iv:                encBlob.IV,
+		AuthTag:           encBlob.AuthTag,
+		EncryptionVersion: int32(encVersion),
 	})
 }
 
-// Exists returns whether the user has a stored credential backup.
+// Exists reports whether the user has a stored credential backup.
 func (s *BackupService) Exists(ctx context.Context, userID string) (bool, error) {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return false, fmt.Errorf("parse user id: %w", err)
 	}
-	return s.q.BackupExists(ctx, uid)
+
+	exists, err := s.q.BackupExists(ctx, uid)
+	if err != nil {
+		return false, fmt.Errorf("check backup exists: %w", err)
+	}
+	return exists, nil
 }
 
 // GetDecrypted retrieves and decrypts the credential backup for the user.
@@ -83,18 +87,21 @@ func (s *BackupService) GetDecrypted(ctx context.Context, userID string) (map[st
 // StoreClientEncrypted persists an opaque client-side encrypted blob.
 // The backend never decrypts it — clientBlob is the JSON-serialised
 // EncryptedBackup produced by the mobile client.
-func (s *BackupService) StoreClientEncrypted(ctx context.Context, userID, clientBlob, smartAccountAddress string) error {
+func (s *BackupService) StoreClientEncrypted(ctx context.Context, userID, clientBlob string) error {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return fmt.Errorf("parse user id: %w", err)
 	}
 
-	return s.q.UpsertClientEncryptedBackup(ctx, db.UpsertClientEncryptedBackupParams{
+	if err := s.q.UpsertClientEncryptedBackup(ctx, db.UpsertClientEncryptedBackupParams{
 		ID:                  uuid.New(),
 		UserID:              uid,
 		ClientEncryptedBlob: sql.NullString{String: clientBlob, Valid: true},
-		SmartAccountAddress: smartAccountAddress,
-	})
+	}); err != nil {
+		return fmt.Errorf("upsert client encrypted backup: %w", err)
+	}
+
+	return nil
 }
 
 // GetClientBlob returns the raw client-encrypted JSON blob for the user.

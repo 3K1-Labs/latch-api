@@ -214,12 +214,15 @@ type stubBackup struct {
 	getErr     error
 }
 
-func (s *stubBackup) StoreClientEncrypted(_ context.Context, _, _, _ string) error {
+func (s *stubBackup) StoreClientEncrypted(_ context.Context, _, _ string) error {
 	return s.storeErr
 }
 
 func (s *stubBackup) Exists(_ context.Context, _ string) (bool, error) {
-	return s.existsBool, s.existsErr
+	if s.existsErr != nil {
+		return false, s.existsErr
+	}
+	return s.existsBool, nil
 }
 
 func (s *stubBackup) GetClientBlob(_ context.Context, _ string) (string, error) {
@@ -230,6 +233,30 @@ func (s *stubBackup) GetClientBlob(_ context.Context, _ string) (string, error) 
 		return s.clientBlob, nil
 	}
 	return `{"version":"2","salt":"aabb","iv":"ccdd","authTag":"eeff","ciphertext":"0011"}`, nil
+}
+
+// ── accountService stub ───────────────────────────────────────────────────────
+
+type stubAccount struct {
+	registerErr error
+	registered  []string
+	listResult  []service.AccountRegistration
+	listErr     error
+}
+
+func (s *stubAccount) Register(_ context.Context, _, smartAccountAddress string) error {
+	if s.registerErr != nil {
+		return s.registerErr
+	}
+	s.registered = append(s.registered, smartAccountAddress)
+	return nil
+}
+
+func (s *stubAccount) List(_ context.Context, _ string) ([]service.AccountRegistration, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.listResult, nil
 }
 
 // ── priceService stub ─────────────────────────────────────────────────────────

@@ -80,7 +80,9 @@ type Querier interface {
 	ListMultisigProposalsWithApprovalCountForAccount(ctx context.Context, multisigAccountID uuid.UUID) ([]ListMultisigProposalsWithApprovalCountForAccountRow, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsByUserIDRow, error)
 	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
+	ListUnregisteredSmartAccounts(ctx context.Context) ([]ListUnregisteredSmartAccountsRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
@@ -88,6 +90,7 @@ type Querier interface {
 	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	SetSmartAccountMemoRegistration(ctx context.Context, arg SetSmartAccountMemoRegistrationParams) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
 	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error
@@ -107,6 +110,7 @@ type Querier interface {
 	UpsertMultisigApprovalDelegatedBegin(ctx context.Context, arg UpsertMultisigApprovalDelegatedBeginParams) (uuid.UUID, error)
 	UpsertMultisigApprovalWebauthn(ctx context.Context, arg UpsertMultisigApprovalWebauthnParams) (uuid.UUID, error)
 	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
+	UpsertSmartAccountRegistration(ctx context.Context, arg UpsertSmartAccountRegistrationParams) (SmartAccountRegistration, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
 	// The conflict update is guarded by uploader: only the original uploader (or a
 	// legacy '' row) can replace a bundle. A mismatched uploader yields no row,

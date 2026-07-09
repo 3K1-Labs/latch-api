@@ -17,7 +17,7 @@ func TestNewBackupService(t *testing.T) {
 
 func TestStore_InvalidUUID(t *testing.T) {
 	svc := NewBackupService(nil, NewEncryptionService(nil, ""))
-	err := svc.Store(context.Background(), "not-a-uuid", []byte("data"), "GABC")
+	err := svc.Store(context.Background(), "not-a-uuid", []byte("data"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
 }
@@ -27,7 +27,7 @@ func TestStore_EncryptError(t *testing.T) {
 	// then UpsertEncryptionKey panics with nil q. Use invalid UUID to stay safe.
 	enc := NewEncryptionService(nil, "")
 	svc := NewBackupService(nil, enc)
-	err := svc.Store(context.Background(), "bad-uuid", []byte("data"), "GABC")
+	err := svc.Store(context.Background(), "bad-uuid", []byte("data"))
 	require.Error(t, err, "Store must propagate encryption errors")
 }
 
@@ -51,6 +51,36 @@ func TestExists_DBError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestExists_True(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	q := db.New(sqlDB)
+	svc := NewBackupService(q, nil)
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	exists, err := svc.Exists(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+func TestExists_False(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	q := db.New(sqlDB)
+	svc := NewBackupService(q, nil)
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	exists, err := svc.Exists(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 func TestGetDecrypted_DBError(t *testing.T) {
 	svc := NewBackupService(errorQueries(), nil)
 	_, err := svc.GetDecrypted(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
@@ -62,21 +92,21 @@ func TestGetDecrypted_DBError(t *testing.T) {
 func TestStore_EncryptionError(t *testing.T) {
 	enc := NewEncryptionService(errorQueries(), "")
 	svc := NewBackupService(errorQueries(), enc)
-	err := svc.Store(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", []byte("data"), "GABC")
+	err := svc.Store(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", []byte("data"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encrypt backup")
 }
 
 func TestStoreClientEncrypted_InvalidUUID(t *testing.T) {
 	svc := NewBackupService(nil, nil)
-	err := svc.StoreClientEncrypted(context.Background(), "not-a-uuid", `{"version":"2"}`, "GABC")
+	err := svc.StoreClientEncrypted(context.Background(), "not-a-uuid", `{"version":"2"}`)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
 }
 
 func TestStoreClientEncrypted_DBError(t *testing.T) {
 	svc := NewBackupService(errorQueries(), nil)
-	err := svc.StoreClientEncrypted(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", `{"version":"2"}`, "GABC")
+	err := svc.StoreClientEncrypted(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", `{"version":"2"}`)
 	require.Error(t, err)
 }
 

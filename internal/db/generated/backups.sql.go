@@ -65,25 +65,23 @@ func (q *Queries) GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (
 
 const upsertBackup = `-- name: UpsertBackup :exec
 INSERT INTO credential_backups
-    (id, user_id, encrypted_blob, iv, auth_tag, encryption_version, smart_account_address)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+    (id, user_id, encrypted_blob, iv, auth_tag, encryption_version)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (user_id) DO UPDATE SET
     encrypted_blob        = EXCLUDED.encrypted_blob,
     iv                    = EXCLUDED.iv,
     auth_tag              = EXCLUDED.auth_tag,
     encryption_version    = EXCLUDED.encryption_version,
-    smart_account_address = EXCLUDED.smart_account_address,
     updated_at            = NOW()
 `
 
 type UpsertBackupParams struct {
-	ID                  uuid.UUID `json:"id"`
-	UserID              uuid.UUID `json:"user_id"`
-	EncryptedBlob       []byte    `json:"encrypted_blob"`
-	Iv                  []byte    `json:"iv"`
-	AuthTag             []byte    `json:"auth_tag"`
-	EncryptionVersion   int32     `json:"encryption_version"`
-	SmartAccountAddress string    `json:"smart_account_address"`
+	ID                uuid.UUID `json:"id"`
+	UserID            uuid.UUID `json:"user_id"`
+	EncryptedBlob     []byte    `json:"encrypted_blob"`
+	Iv                []byte    `json:"iv"`
+	AuthTag           []byte    `json:"auth_tag"`
+	EncryptionVersion int32     `json:"encryption_version"`
 }
 
 func (q *Queries) UpsertBackup(ctx context.Context, arg UpsertBackupParams) error {
@@ -94,19 +92,17 @@ func (q *Queries) UpsertBackup(ctx context.Context, arg UpsertBackupParams) erro
 		arg.Iv,
 		arg.AuthTag,
 		arg.EncryptionVersion,
-		arg.SmartAccountAddress,
 	)
 	return err
 }
 
 const upsertClientEncryptedBackup = `-- name: UpsertClientEncryptedBackup :exec
 INSERT INTO credential_backups
-    (id, user_id, client_encrypted_blob, encryption_version, smart_account_address)
-VALUES ($1, $2, $3, 3, $4)
+    (id, user_id, client_encrypted_blob, encryption_version)
+VALUES ($1, $2, $3, 3)
 ON CONFLICT (user_id) DO UPDATE SET
     client_encrypted_blob = EXCLUDED.client_encrypted_blob,
     encryption_version    = 3,
-    smart_account_address = EXCLUDED.smart_account_address,
     encrypted_blob        = NULL,
     iv                    = NULL,
     auth_tag              = NULL,
@@ -117,15 +113,9 @@ type UpsertClientEncryptedBackupParams struct {
 	ID                  uuid.UUID      `json:"id"`
 	UserID              uuid.UUID      `json:"user_id"`
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
-	SmartAccountAddress string         `json:"smart_account_address"`
 }
 
 func (q *Queries) UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error {
-	_, err := q.db.ExecContext(ctx, upsertClientEncryptedBackup,
-		arg.ID,
-		arg.UserID,
-		arg.ClientEncryptedBlob,
-		arg.SmartAccountAddress,
-	)
+	_, err := q.db.ExecContext(ctx, upsertClientEncryptedBackup, arg.ID, arg.UserID, arg.ClientEncryptedBlob)
 	return err
 }
