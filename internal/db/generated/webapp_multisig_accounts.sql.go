@@ -63,7 +63,7 @@ func (q *Queries) GetMultisigAccountByID(ctx context.Context, id uuid.UUID) (Web
 }
 
 const getMultisigMemberByID = `-- name: GetMultisigMemberByID :one
-SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at
+SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id
 FROM webapp.multisig_members
 WHERE id = $1
 `
@@ -80,13 +80,14 @@ func (q *Queries) GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (Weba
 		&i.CredentialID,
 		&i.GAddress,
 		&i.CreatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const insertMultisigMember = `-- name: InsertMultisigMember :exec
-INSERT INTO webapp.multisig_members (id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO webapp.multisig_members (id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertMultisigMemberParams struct {
@@ -98,6 +99,7 @@ type InsertMultisigMemberParams struct {
 	CredentialID      sql.NullString `json:"credential_id"`
 	GAddress          sql.NullString `json:"g_address"`
 	CreatedAt         int64          `json:"created_at"`
+	UserID            uuid.NullUUID  `json:"user_id"`
 }
 
 func (q *Queries) InsertMultisigMember(ctx context.Context, arg InsertMultisigMemberParams) error {
@@ -110,6 +112,7 @@ func (q *Queries) InsertMultisigMember(ctx context.Context, arg InsertMultisigMe
 		arg.CredentialID,
 		arg.GAddress,
 		arg.CreatedAt,
+		arg.UserID,
 	)
 	return err
 }
@@ -125,6 +128,7 @@ LEFT JOIN (
   GROUP BY multisig_account_id
 ) p ON p.multisig_account_id = a.id
 WHERE a.user_id = $1
+   OR EXISTS (SELECT 1 FROM webapp.multisig_members m WHERE m.multisig_account_id = a.id AND m.user_id = $1)
 ORDER BY a.created_at DESC
 `
 
@@ -137,6 +141,11 @@ type ListMultisigAccountsWithProposalCountForUserRow struct {
 	ProposalCount       int64     `json:"proposal_count"`
 }
 
+// Visible to a user if they created the account OR they have a member row
+// (established at draft-join time or via register) linked to their session.
+// The caller's own member id (needed by the extension for proposal
+// approvals) is resolved separately in Go from ListMultisigMembersForAccount,
+// since sqlc can't reliably infer nullability for a synthetic joined column.
 func (q *Queries) ListMultisigAccountsWithProposalCountForUser(ctx context.Context, userID uuid.UUID) ([]ListMultisigAccountsWithProposalCountForUserRow, error) {
 	rows, err := q.db.QueryContext(ctx, listMultisigAccountsWithProposalCountForUser, userID)
 	if err != nil {
@@ -168,7 +177,7 @@ func (q *Queries) ListMultisigAccountsWithProposalCountForUser(ctx context.Conte
 }
 
 const listMultisigMembersForAccount = `-- name: ListMultisigMembersForAccount :many
-SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at
+SELECT id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id
 FROM webapp.multisig_members
 WHERE multisig_account_id = $1
 ORDER BY created_at ASC
@@ -192,6 +201,7 @@ func (q *Queries) ListMultisigMembersForAccount(ctx context.Context, multisigAcc
 			&i.CredentialID,
 			&i.GAddress,
 			&i.CreatedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -232,6 +242,89 @@ func (q *Queries) UpsertMultisigAccount(ctx context.Context, arg UpsertMultisigA
 		arg.Threshold,
 		arg.AccountSaltHex,
 		arg.CreatedAt,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertMultisigMemberByCredential = `-- name: UpsertMultisigMemberByCredential :one
+INSERT INTO webapp.multisig_members (id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (multisig_account_id, credential_id) WHERE credential_id IS NOT NULL DO UPDATE SET
+  member_type  = EXCLUDED.member_type,
+  label        = EXCLUDED.label,
+  key_data_hex = EXCLUDED.key_data_hex,
+  user_id      = COALESCE(EXCLUDED.user_id, webapp.multisig_members.user_id)
+RETURNING id
+`
+
+type UpsertMultisigMemberByCredentialParams struct {
+	ID                uuid.UUID      `json:"id"`
+	MultisigAccountID uuid.UUID      `json:"multisig_account_id"`
+	MemberType        string         `json:"member_type"`
+	Label             sql.NullString `json:"label"`
+	KeyDataHex        sql.NullString `json:"key_data_hex"`
+	CredentialID      sql.NullString `json:"credential_id"`
+	GAddress          sql.NullString `json:"g_address"`
+	CreatedAt         int64          `json:"created_at"`
+	UserID            uuid.NullUUID  `json:"user_id"`
+}
+
+// Upserts a webauthn signer by credential_id instead of a blind
+// delete+reinsert, so one caller's register doesn't erase another member's
+// already-established user_id link.
+func (q *Queries) UpsertMultisigMemberByCredential(ctx context.Context, arg UpsertMultisigMemberByCredentialParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, upsertMultisigMemberByCredential,
+		arg.ID,
+		arg.MultisigAccountID,
+		arg.MemberType,
+		arg.Label,
+		arg.KeyDataHex,
+		arg.CredentialID,
+		arg.GAddress,
+		arg.CreatedAt,
+		arg.UserID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertMultisigMemberByGAddress = `-- name: UpsertMultisigMemberByGAddress :one
+INSERT INTO webapp.multisig_members (id, multisig_account_id, member_type, label, key_data_hex, credential_id, g_address, created_at, user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (multisig_account_id, g_address) WHERE g_address IS NOT NULL DO UPDATE SET
+  member_type = EXCLUDED.member_type,
+  label       = EXCLUDED.label,
+  user_id     = COALESCE(EXCLUDED.user_id, webapp.multisig_members.user_id)
+RETURNING id
+`
+
+type UpsertMultisigMemberByGAddressParams struct {
+	ID                uuid.UUID      `json:"id"`
+	MultisigAccountID uuid.UUID      `json:"multisig_account_id"`
+	MemberType        string         `json:"member_type"`
+	Label             sql.NullString `json:"label"`
+	KeyDataHex        sql.NullString `json:"key_data_hex"`
+	CredentialID      sql.NullString `json:"credential_id"`
+	GAddress          sql.NullString `json:"g_address"`
+	CreatedAt         int64          `json:"created_at"`
+	UserID            uuid.NullUUID  `json:"user_id"`
+}
+
+// Same as UpsertMultisigMemberByCredential but for delegated (g_address) signers.
+func (q *Queries) UpsertMultisigMemberByGAddress(ctx context.Context, arg UpsertMultisigMemberByGAddressParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, upsertMultisigMemberByGAddress,
+		arg.ID,
+		arg.MultisigAccountID,
+		arg.MemberType,
+		arg.Label,
+		arg.KeyDataHex,
+		arg.CredentialID,
+		arg.GAddress,
+		arg.CreatedAt,
+		arg.UserID,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)

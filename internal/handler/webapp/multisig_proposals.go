@@ -22,7 +22,7 @@ func NewMultisigProposalsHandler(proposalSvc multisigProposalService, cfg *confi
 
 type createProposalRequest struct {
 	SmartAccountAddress       string         `json:"smartAccountAddress" binding:"required"`
-	OperationKind             string         `json:"operationKind" binding:"required"`
+	OperationKind             string         `json:"operationKind" binding:"required"` // "counter_increment" | "sac_transfer"
 	TargetContractID          string         `json:"targetContractId,omitempty"`
 	AssetID                   string         `json:"assetId,omitempty"`
 	ContractID                string         `json:"tokenContractId,omitempty"`
@@ -33,7 +33,7 @@ type createProposalRequest struct {
 
 // Create godoc
 // @Summary      Create a multisig transaction proposal
-// @Description  Builds an unsigned operation (send or contract call) against a multisig smart account and stores it as a pending proposal awaiting signer approvals.
+// @Description  Builds an unsigned operation against a multisig smart account and stores it as a pending proposal awaiting signer approvals. operationKind must be "sac_transfer" (asset transfer) or "counter_increment" (contract call).
 // @Tags         multisig-proposals
 // @Accept       json
 // @Produce      json

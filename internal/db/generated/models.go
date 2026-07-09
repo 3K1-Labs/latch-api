@@ -181,6 +181,7 @@ type WebappMultisigDraftMember struct {
 	PublicKeyHex sql.NullString `json:"public_key_hex"`
 	Source       string         `json:"source"`
 	CreatedAt    int64          `json:"created_at"`
+	UserID       uuid.NullUUID  `json:"user_id"`
 }
 
 type WebappMultisigMember struct {
@@ -192,6 +193,7 @@ type WebappMultisigMember struct {
 	CredentialID      sql.NullString `json:"credential_id"`
 	GAddress          sql.NullString `json:"g_address"`
 	CreatedAt         int64          `json:"created_at"`
+	UserID            uuid.NullUUID  `json:"user_id"`
 }
 
 type WebappMultisigProposal struct {

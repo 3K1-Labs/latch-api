@@ -107,6 +107,7 @@ func (h *MultisigJoinHandler) GetByToken(c *gin.Context) {
 // @Router       /api/multisig/join/{token}/members [post]
 func (h *MultisigJoinHandler) AddMember(c *gin.Context) {
 	token := c.Param("token")
+	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
 	var req draftMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -114,7 +115,7 @@ func (h *MultisigJoinHandler) AddMember(c *gin.Context) {
 		return
 	}
 
-	view, err := h.draftSvc.AddMemberViaInvite(c.Request.Context(), token, req.toDomain())
+	view, err := h.draftSvc.AddMemberViaInvite(c.Request.Context(), token, userID, req.toDomain())
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return

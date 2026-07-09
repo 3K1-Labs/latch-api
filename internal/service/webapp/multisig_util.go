@@ -1,6 +1,10 @@
 package webapp
 
-import "database/sql"
+import (
+	"database/sql"
+
+	"github.com/google/uuid"
+)
 
 // nullStr wraps s as a valid sql.NullString, or an invalid (NULL) one if s
 // is empty — used throughout the multisig services for optional per-kind
@@ -24,4 +28,25 @@ func nullInt64Ptr(n sql.NullInt64) *int64 {
 	}
 	v := n.Int64
 	return &v
+}
+
+// nullUUID parses s as a valid uuid.NullUUID, or an invalid (NULL) one if s
+// is empty or not a well-formed UUID.
+func nullUUID(s string) uuid.NullUUID {
+	if s == "" {
+		return uuid.NullUUID{}
+	}
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.NullUUID{}
+	}
+	return uuid.NullUUID{UUID: id, Valid: true}
+}
+
+// uuidOrEmpty unwraps a uuid.NullUUID to "" when not valid.
+func uuidOrEmpty(n uuid.NullUUID) string {
+	if !n.Valid {
+		return ""
+	}
+	return n.UUID.String()
 }

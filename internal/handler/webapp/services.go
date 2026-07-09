@@ -65,7 +65,7 @@ type multisigDraftService interface {
 	PredictAddress(ctx context.Context, draftID, userID string) (address, paramsXdrBase64 string, draft webapp.SerializedDraft, err error)
 	Deploy(ctx context.Context, draftID, userID string) (address string, alreadyDeployed bool, draft webapp.SerializedDraft, err error)
 	GetPublicDraftByToken(ctx context.Context, token string) (webapp.PublicDraftView, error)
-	AddMemberViaInvite(ctx context.Context, token string, member webapp.DraftMultisigMember) (webapp.PublicDraftView, error)
+	AddMemberViaInvite(ctx context.Context, token, userID string, member webapp.DraftMultisigMember) (webapp.PublicDraftView, error)
 }
 
 type multisigAccountsService interface {
