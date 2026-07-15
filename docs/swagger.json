@@ -2985,7 +2985,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns every smart account registered for the authenticated user, with its\nlatch-relayer deposit memo/pool address once registration has landed.",
+                "description": "Returns every smart account registered for the authenticated user.",
                 "produces": [
                     "application/json"
                 ],
@@ -3015,14 +3015,14 @@
                 }
             }
         },
-        "/v1/accounts/register": {
+        "/v1/accounts/deposit-intent": {
             "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Idempotent: registering the same address again is a no-op. Kicks off\nbest-effort latch-relayer registration in the background — see GET /v1/accounts.",
+                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account the caller already owns. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3032,7 +3032,128 @@
                 "tags": [
                     "accounts"
                 ],
-                "summary": "Register a smart account for deposit memo routing",
+                "summary": "Mint a funding intent for the fund-account flow",
+                "parameters": [
+                    {
+                        "description": "Smart account C-address",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.createDepositIntentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.depositIntentDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/accounts/deposit/status/{memo_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Proxies latch-relayer's deposit-status lookup for memo_id, after verifying\nthe intent's smart account is registered to the caller — latch-relayer has\nno auth of its own, so this ownership check is the authorization boundary.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Get a funding intent's status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Funding intent memo_id",
+                        "name": "memo_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.depositStatusDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/accounts/register": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Idempotent: registering the same address again is a no-op. Records\nownership only — see POST /v1/accounts/deposit-intent to mint a funding memo.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Register a smart account",
                 "parameters": [
                     {
                         "description": "Smart account C-address",
@@ -4641,6 +4762,106 @@
                 }
             }
         },
+        "internal_handler.createDepositIntentRequest": {
+            "type": "object",
+            "required": [
+                "smart_account_address"
+            ],
+            "properties": {
+                "smart_account_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.depositForwardResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "asset": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "forward_tx": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tx_hash": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.depositIntentDataResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/internal_handler.depositIntentResponse"
+                }
+            }
+        },
+        "internal_handler.depositIntentResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string",
+                    "example": "2026-07-15T13:00:00Z"
+                },
+                "intent_id": {
+                    "type": "string",
+                    "example": "b3a1..."
+                },
+                "memo_id": {
+                    "type": "string",
+                    "example": "17540123456789"
+                },
+                "pool_address": {
+                    "type": "string",
+                    "example": "GB3POOLADDRESSEXAMPLE"
+                }
+            }
+        },
+        "internal_handler.depositStatusDataResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/internal_handler.depositStatusResponse"
+                }
+            }
+        },
+        "internal_handler.depositStatusResponse": {
+            "type": "object",
+            "properties": {
+                "c_address": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "forwards": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.depositForwardResponse"
+                    }
+                },
+                "intent_id": {
+                    "type": "string"
+                },
+                "memo_id": {
+                    "type": "string"
+                },
+                "pool_address": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.encryptedBlobResponse": {
             "type": "object",
             "properties": {
@@ -4896,14 +5117,6 @@
         "internal_handler.smartAccountResponse": {
             "type": "object",
             "properties": {
-                "memo_id": {
-                    "type": "string",
-                    "example": "17540123456789"
-                },
-                "pool_address": {
-                    "type": "string",
-                    "example": "GB3POOLADDRESSEXAMPLE"
-                },
                 "smart_account_address": {
                     "type": "string",
                     "example": "CABC123..."

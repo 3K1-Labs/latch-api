@@ -242,6 +242,11 @@ type stubAccount struct {
 	registered  []string
 	listResult  []service.AccountRegistration
 	listErr     error
+
+	createIntentResult  service.Intent
+	createIntentErr     error
+	fundingStatusResult service.DepositStatus
+	fundingStatusErr    error
 }
 
 func (s *stubAccount) Register(_ context.Context, _, smartAccountAddress string) error {
@@ -257,6 +262,20 @@ func (s *stubAccount) List(_ context.Context, _ string) ([]service.AccountRegist
 		return nil, s.listErr
 	}
 	return s.listResult, nil
+}
+
+func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _ string) (service.Intent, error) {
+	if s.createIntentErr != nil {
+		return service.Intent{}, s.createIntentErr
+	}
+	return s.createIntentResult, nil
+}
+
+func (s *stubAccount) GetFundingStatus(_ context.Context, _, _ string) (service.DepositStatus, error) {
+	if s.fundingStatusErr != nil {
+		return service.DepositStatus{}, s.fundingStatusErr
+	}
+	return s.fundingStatusResult, nil
 }
 
 // ── priceService stub ─────────────────────────────────────────────────────────

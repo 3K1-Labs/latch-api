@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/httpx"
@@ -12,10 +12,11 @@ import (
 	"github.com/latch/backend/internal/service"
 )
 
-// AccountHandler registers a user's smart accounts for latch-relayer
-// pooled-deposit memo routing. A user can own many smart accounts (multiple
-// BIP-44 seed indices, multiple passkey accounts, shared/multisig wallets),
-// so registration is per-account, not tied to credential backup storage.
+// AccountHandler tracks ownership of a user's smart accounts and mints
+// latch-relayer funding intents for them. A user can own many smart accounts
+// (multiple BIP-44 seed indices, multiple passkey accounts, shared/multisig
+// wallets), so registration is per-account, not tied to credential backup
+// storage.
 type AccountHandler struct {
 	accountSvc accountService
 	auditSvc   auditService
@@ -30,9 +31,9 @@ type registerAccountRequest struct {
 }
 
 // Register godoc
-// @Summary      Register a smart account for deposit memo routing
-// @Description  Idempotent: registering the same address again is a no-op. Kicks off
-// @Description  best-effort latch-relayer registration in the background — see GET /v1/accounts.
+// @Summary      Register a smart account
+// @Description  Idempotent: registering the same address again is a no-op. Records
+// @Description  ownership only — see POST /v1/accounts/deposit-intent to mint a funding memo.
 // @Tags         accounts
 // @Accept       json
 // @Produce      json
@@ -72,8 +73,7 @@ func (h *AccountHandler) Register(c *gin.Context) {
 
 // List godoc
 // @Summary      List the caller's registered smart accounts
-// @Description  Returns every smart account registered for the authenticated user, with its
-// @Description  latch-relayer deposit memo/pool address once registration has landed.
+// @Description  Returns every smart account registered for the authenticated user.
 // @Tags         accounts
 // @Produce      json
 // @Success      200 {object} accountsListDataResponse
@@ -93,17 +93,125 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 	accounts := make([]gin.H, 0, len(regs))
 	for _, reg := range regs {
-		account := gin.H{"smart_account_address": reg.SmartAccountAddress}
-		if reg.MemoID != nil {
-			// Formatted as the original uint64 (relayer's own representation),
-			// not the raw bit-preserving int64 storage value.
-			account["memo_id"] = strconv.FormatUint(uint64(*reg.MemoID), 10)
-		}
-		if reg.PoolAddress != nil {
-			account["pool_address"] = *reg.PoolAddress
-		}
-		accounts = append(accounts, account)
+		accounts = append(accounts, gin.H{"smart_account_address": reg.SmartAccountAddress})
 	}
 
 	httpx.Success(c, http.StatusOK, gin.H{"accounts": accounts})
+}
+
+type createDepositIntentRequest struct {
+	SmartAccountAddress string `json:"smart_account_address" binding:"required"`
+}
+
+// CreateDepositIntent godoc
+// @Summary      Mint a funding intent for the fund-account flow
+// @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)
+// @Description  for a smart account the caller already owns. Not idempotent — every call
+// @Description  mints a new intent, matching latch-relayer's "one intent per funding session"
+// @Description  model. The caller must have already registered the address via
+// @Description  POST /v1/accounts/register.
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        body body createDepositIntentRequest true "Smart account C-address"
+// @Success      201 {object} depositIntentDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      401 {object} apiErrorResponse
+// @Failure      503 {object} apiErrorResponse
+// @Failure      500 {object} apiErrorResponse
+// @Security     BearerAuth
+// @Router       /v1/accounts/deposit-intent [post]
+func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
+	userID := middleware.UserIDFromContext(c.Request.Context())
+
+	var req createDepositIntentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid request body")
+		return
+	}
+
+	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, req.SmartAccountAddress)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrValidation):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "smart_account_address is not registered to the caller")
+		case errors.Is(err, service.ErrRelayerNotConfigured):
+			httpx.Fail(c, http.StatusServiceUnavailable, httpx.ErrInternal, "funding is temporarily unavailable")
+		default:
+			slog.Error("create deposit intent", "userID", userID, "err", err)
+			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
+		}
+		return
+	}
+
+	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionFundingIntentCreated), c.ClientIP(), c.Request.UserAgent(), map[string]any{
+		"smart_account": req.SmartAccountAddress,
+		"memo_id":       intent.MemoID,
+	})
+
+	httpx.Success(c, http.StatusCreated, gin.H{
+		"intent_id":    intent.IntentID,
+		"memo_id":      intent.MemoID,
+		"pool_address": intent.PoolAddress,
+		"expires_at":   intent.ExpiresAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// DepositStatus godoc
+// @Summary      Get a funding intent's status
+// @Description  Proxies latch-relayer's deposit-status lookup for memo_id, after verifying
+// @Description  the intent's smart account is registered to the caller — latch-relayer has
+// @Description  no auth of its own, so this ownership check is the authorization boundary.
+// @Tags         accounts
+// @Produce      json
+// @Param        memo_id path string true "Funding intent memo_id"
+// @Success      200 {object} depositStatusDataResponse
+// @Failure      400 {object} apiErrorResponse
+// @Failure      401 {object} apiErrorResponse
+// @Failure      404 {object} apiErrorResponse
+// @Failure      500 {object} apiErrorResponse
+// @Security     BearerAuth
+// @Router       /v1/accounts/deposit/status/{memo_id} [get]
+func (h *AccountHandler) DepositStatus(c *gin.Context) {
+	userID := middleware.UserIDFromContext(c.Request.Context())
+	memoID := c.Param("memo_id")
+
+	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, memoID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrValidation):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "memo_id not found")
+		case errors.Is(err, service.ErrIntentNotFound):
+			httpx.Fail(c, http.StatusNotFound, httpx.ErrValidation, "memo_id not found")
+		default:
+			slog.Error("get funding status", "userID", userID, "err", err)
+			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
+		}
+		return
+	}
+
+	forwards := make([]gin.H, 0, len(status.Forwards))
+	for _, f := range status.Forwards {
+		forward := gin.H{
+			"tx_hash":    f.TxHash,
+			"amount":     f.Amount,
+			"asset":      f.Asset,
+			"status":     f.Status,
+			"created_at": f.CreatedAt.UTC().Format(time.RFC3339),
+		}
+		if f.ForwardTx != nil {
+			forward["forward_tx"] = *f.ForwardTx
+		}
+		forwards = append(forwards, forward)
+	}
+
+	httpx.Success(c, http.StatusOK, gin.H{
+		"intent_id":    status.IntentID,
+		"memo_id":      status.MemoID,
+		"c_address":    status.CAddress,
+		"pool_address": status.PoolAddress,
+		"status":       status.Status,
+		"expires_at":   status.ExpiresAt.UTC().Format(time.RFC3339),
+		"forwards":     forwards,
+	})
 }

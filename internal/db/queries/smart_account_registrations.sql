@@ -7,17 +7,12 @@ WHERE smart_account_registrations.user_id = EXCLUDED.user_id
 RETURNING *;
 
 -- name: ListSmartAccountsByUserID :many
-SELECT smart_account_address, memo_id, pool_address, created_at
+SELECT smart_account_address, created_at
 FROM smart_account_registrations
 WHERE user_id = $1
 ORDER BY created_at ASC;
 
--- name: SetSmartAccountMemoRegistration :exec
-UPDATE smart_account_registrations
-SET memo_id = $2, pool_address = $3, updated_at = NOW()
-WHERE smart_account_address = $1;
-
--- name: ListUnregisteredSmartAccounts :many
-SELECT user_id, smart_account_address
+-- name: GetSmartAccountOwner :one
+SELECT user_id
 FROM smart_account_registrations
-WHERE memo_id IS NULL;
+WHERE smart_account_address = $1;

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/service"
@@ -102,12 +103,10 @@ func TestAccountsList_Empty(t *testing.T) {
 	assert.Empty(t, data["accounts"])
 }
 
-func TestAccountsList_MultipleWithMemo(t *testing.T) {
-	memoID := int64(-1) // all-bits-set uint64, exercises the unsigned re-format
-	poolAddr := "GB3POOLADDRESS"
+func TestAccountsList_Multiple(t *testing.T) {
 	stub := &stubAccount{listResult: []service.AccountRegistration{
 		{SmartAccountAddress: "CADDR1"},
-		{SmartAccountAddress: "CADDR2", MemoID: &memoID, PoolAddress: &poolAddr},
+		{SmartAccountAddress: "CADDR2"},
 	}}
 	h := newAccountHandler(stub, nil)
 	r := gin.New()
@@ -127,10 +126,149 @@ func TestAccountsList_MultipleWithMemo(t *testing.T) {
 	first := accounts[0].(map[string]any)
 	assert.Equal(t, "CADDR1", first["smart_account_address"])
 	_, hasMemo := first["memo_id"]
-	assert.False(t, hasMemo, "memo_id must be omitted when not registered")
+	assert.False(t, hasMemo, "List no longer returns memo_id/pool_address")
+}
 
-	second := accounts[1].(map[string]any)
-	assert.Equal(t, "CADDR2", second["smart_account_address"])
-	assert.Equal(t, "18446744073709551615", second["memo_id"])
-	assert.Equal(t, poolAddr, second["pool_address"])
+// ── CreateDepositIntent ──────────────────────────────────────────────────────
+
+func TestCreateDepositIntent_InvalidBody(t *testing.T) {
+	h := newAccountHandler(&stubAccount{}, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateDepositIntent_NotOwner(t *testing.T) {
+	h := newAccountHandler(&stubAccount{createIntentErr: service.ErrValidation}, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateDepositIntent_RelayerNotConfigured(t *testing.T) {
+	h := newAccountHandler(&stubAccount{createIntentErr: service.ErrRelayerNotConfigured}, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestCreateDepositIntent_ServiceError(t *testing.T) {
+	h := newAccountHandler(&stubAccount{createIntentErr: errGeneric}, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestCreateDepositIntent_Success(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC()
+	stub := &stubAccount{createIntentResult: service.Intent{
+		IntentID:    "intent-1",
+		MemoID:      "12345",
+		PoolAddress: "GB3POOL",
+		ExpiresAt:   expiresAt,
+	}}
+	h := newAccountHandler(stub, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, "intent-1", data["intent_id"])
+	assert.Equal(t, "12345", data["memo_id"])
+	assert.Equal(t, "GB3POOL", data["pool_address"])
+}
+
+// ── DepositStatus ────────────────────────────────────────────────────────────
+
+func TestDepositStatus_NotOwner(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: service.ErrValidation}, nil)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDepositStatus_IntentNotFound(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: service.ErrIntentNotFound}, nil)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestDepositStatus_ServiceError(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: errGeneric}, nil)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestDepositStatus_Success(t *testing.T) {
+	stub := &stubAccount{fundingStatusResult: service.DepositStatus{
+		IntentID:    "intent-1",
+		MemoID:      "12345",
+		CAddress:    testContractAddr,
+		PoolAddress: "GB3POOL",
+		Status:      "completed",
+		ExpiresAt:   time.Now().Add(time.Hour).UTC(),
+		Forwards: []service.Forward{
+			{TxHash: "hash1", Amount: "5.0000000", Asset: "native", Status: "done", CreatedAt: time.Now().UTC()},
+		},
+	}}
+	h := newAccountHandler(stub, nil)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	data := resp["data"].(map[string]any)
+	assert.Equal(t, "completed", data["status"])
+	forwards := data["forwards"].([]any)
+	require.Len(t, forwards, 1)
+	assert.Equal(t, "hash1", forwards[0].(map[string]any)["tx_hash"])
 }

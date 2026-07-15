@@ -49,6 +49,7 @@ type Querier interface {
 	GetSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
 	GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error)
+	GetSmartAccountOwner(ctx context.Context, smartAccountAddress string) (uuid.UUID, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
@@ -87,7 +88,6 @@ type Querier interface {
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
 	ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsByUserIDRow, error)
 	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
-	ListUnregisteredSmartAccounts(ctx context.Context) ([]ListUnregisteredSmartAccountsRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
@@ -95,7 +95,6 @@ type Querier interface {
 	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
-	SetSmartAccountMemoRegistration(ctx context.Context, arg SetSmartAccountMemoRegistrationParams) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
 	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error

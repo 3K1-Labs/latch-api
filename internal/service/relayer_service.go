@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -16,14 +15,43 @@ import (
 // and move on rather than fail the caller's own operation.
 var ErrRelayerNotConfigured = errors.New("relayer url not configured")
 
-// RelayerRegistration is the result of registering a C-address with
-// latch-relayer for pooled-deposit memo routing.
-type RelayerRegistration struct {
-	MemoID      int64
+// ErrIntentNotFound is returned when latch-relayer has no intent for a given
+// memo_id (404 from GET /deposit/status/{memo_id}).
+var ErrIntentNotFound = errors.New("funding intent not found")
+
+// Intent is a TTL-bound funding session minted by latch-relayer for a single
+// pooled deposit — one per call, not a permanent per-account registration.
+type Intent struct {
+	IntentID    string
+	MemoID      string // decimal string; uint64 on the relayer side
 	PoolAddress string
+	ExpiresAt   time.Time
 }
 
-// RelayerService calls latch-relayer's registration API.
+// Forward is one inbound payment latch-relayer has matched to an intent and
+// forwarded (or attempted to forward) on-chain.
+type Forward struct {
+	TxHash    string
+	Amount    string
+	Asset     string
+	Status    string
+	ForwardTx *string
+	CreatedAt time.Time
+}
+
+// DepositStatus is the current state of a funding intent, including any
+// forwards latch-relayer's watcher has matched to it so far.
+type DepositStatus struct {
+	IntentID    string
+	MemoID      string
+	CAddress    string
+	PoolAddress string
+	Status      string
+	ExpiresAt   time.Time
+	Forwards    []Forward
+}
+
+// RelayerService calls latch-relayer's funding-intent API.
 type RelayerService struct {
 	baseURL    string
 	httpClient *http.Client
@@ -36,57 +64,153 @@ func NewRelayerService(baseURL string, timeout time.Duration) *RelayerService {
 	}
 }
 
-type relayerRegisterRequest struct {
-	CAddress string `json:"c_address"`
+// CreateIntentInput are the parameters for a new funding intent. ExpectedAmt,
+// ExternalID, and ExpiresIn are optional passthroughs to latch-relayer.
+type CreateIntentInput struct {
+	CAddress    string
+	ExpectedAmt string
+	ExternalID  string
+	ExpiresIn   int
 }
 
-type relayerRegisterResponse struct {
+type createIntentRequest struct {
+	CAddress    string `json:"c_address"`
+	ExpectedAmt string `json:"expected_amt,omitempty"`
+	ExternalID  string `json:"external_id,omitempty"`
+	ExpiresIn   int    `json:"expires_in,omitempty"`
+}
+
+type createIntentResponse struct {
+	IntentID    string `json:"intent_id"`
 	MemoID      string `json:"memo_id"`
 	PoolAddress string `json:"pool_address"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
-// Register calls latch-relayer's idempotent POST /register for cAddress.
-// Calling it more than once for the same address is safe — the relayer
-// returns the existing registration.
-//
-// memo_id is a uint64 on the relayer side, transmitted as a decimal string
-// and stored here as a bit-preserving int64 cast, matching latch-relayer's
-// own BIGINT column (see latch-relayer/migrations/001_init.up.sql).
-func (s *RelayerService) Register(ctx context.Context, cAddress string) (RelayerRegistration, error) {
+// CreateIntent calls latch-relayer's POST /intents to mint a fresh, TTL-bound
+// funding intent for cAddress. Every call creates a new intent — this is not
+// idempotent by design (latch-relayer models "one row per funding session").
+func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput) (Intent, error) {
 	if s.baseURL == "" {
-		return RelayerRegistration{}, ErrRelayerNotConfigured
+		return Intent{}, ErrRelayerNotConfigured
 	}
 
-	body, err := json.Marshal(relayerRegisterRequest{CAddress: cAddress})
+	body, err := json.Marshal(createIntentRequest(in))
 	if err != nil {
-		return RelayerRegistration{}, fmt.Errorf("marshal register request: %w", err)
+		return Intent{}, fmt.Errorf("marshal create intent request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/register", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/intents", bytes.NewReader(body))
 	if err != nil {
-		return RelayerRegistration{}, fmt.Errorf("build register request: %w", err)
+		return Intent{}, fmt.Errorf("build create intent request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return RelayerRegistration{}, fmt.Errorf("call relayer register: %w", err)
+		return Intent{}, fmt.Errorf("call relayer create intent: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return RelayerRegistration{}, fmt.Errorf("relayer register: unexpected status %d", resp.StatusCode)
+		return Intent{}, fmt.Errorf("relayer create intent: unexpected status %d", resp.StatusCode)
 	}
 
-	var out relayerRegisterResponse
+	var out createIntentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return RelayerRegistration{}, fmt.Errorf("decode register response: %w", err)
+		return Intent{}, fmt.Errorf("decode create intent response: %w", err)
 	}
 
-	rawMemoID, err := strconv.ParseUint(out.MemoID, 10, 64)
+	expiresAt, err := time.Parse(time.RFC3339, out.ExpiresAt)
 	if err != nil {
-		return RelayerRegistration{}, fmt.Errorf("parse memo_id %q: %w", out.MemoID, err)
+		return Intent{}, fmt.Errorf("parse expires_at %q: %w", out.ExpiresAt, err)
 	}
 
-	return RelayerRegistration{MemoID: int64(rawMemoID), PoolAddress: out.PoolAddress}, nil
+	return Intent{
+		IntentID:    out.IntentID,
+		MemoID:      out.MemoID,
+		PoolAddress: out.PoolAddress,
+		ExpiresAt:   expiresAt,
+	}, nil
+}
+
+type depositStatusResponse struct {
+	IntentID    string           `json:"intent_id"`
+	MemoID      string           `json:"memo_id"`
+	CAddress    string           `json:"c_address"`
+	PoolAddress string           `json:"pool_address"`
+	Status      string           `json:"status"`
+	ExpiresAt   string           `json:"expires_at"`
+	Forwards    []forwardPayload `json:"forwards"`
+}
+
+type forwardPayload struct {
+	TxHash    string  `json:"tx_hash"`
+	Amount    string  `json:"amount"`
+	Asset     string  `json:"asset"`
+	Status    string  `json:"status"`
+	ForwardTx *string `json:"forward_tx"`
+	CreatedAt string  `json:"created_at"`
+}
+
+// DepositStatus calls latch-relayer's GET /deposit/status/{memo_id} for the
+// current state of a funding intent and any forwards matched to it.
+func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (DepositStatus, error) {
+	if s.baseURL == "" {
+		return DepositStatus{}, ErrRelayerNotConfigured
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/deposit/status/"+memoID, nil)
+	if err != nil {
+		return DepositStatus{}, fmt.Errorf("build deposit status request: %w", err)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return DepositStatus{}, fmt.Errorf("call relayer deposit status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return DepositStatus{}, ErrIntentNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return DepositStatus{}, fmt.Errorf("relayer deposit status: unexpected status %d", resp.StatusCode)
+	}
+
+	var out depositStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return DepositStatus{}, fmt.Errorf("decode deposit status response: %w", err)
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339, out.ExpiresAt)
+	if err != nil {
+		return DepositStatus{}, fmt.Errorf("parse expires_at %q: %w", out.ExpiresAt, err)
+	}
+
+	forwards := make([]Forward, 0, len(out.Forwards))
+	for _, f := range out.Forwards {
+		createdAt, err := time.Parse(time.RFC3339, f.CreatedAt)
+		if err != nil {
+			return DepositStatus{}, fmt.Errorf("parse forward created_at %q: %w", f.CreatedAt, err)
+		}
+		forwards = append(forwards, Forward{
+			TxHash:    f.TxHash,
+			Amount:    f.Amount,
+			Asset:     f.Asset,
+			Status:    f.Status,
+			ForwardTx: f.ForwardTx,
+			CreatedAt: createdAt,
+		})
+	}
+
+	return DepositStatus{
+		IntentID:    out.IntentID,
+		MemoID:      out.MemoID,
+		CAddress:    out.CAddress,
+		PoolAddress: out.PoolAddress,
+		Status:      out.Status,
+		ExpiresAt:   expiresAt,
+		Forwards:    forwards,
+	}, nil
 }

@@ -33,6 +33,7 @@ const (
 	ActionPushUnregistered       AuditAction = "push_unregistered"
 	ActionMembershipAnnounced    AuditAction = "membership_announced"
 	ActionSmartAccountRegistered AuditAction = "smart_account_registered"
+	ActionFundingIntentCreated   AuditAction = "funding_intent_created"
 )
 
 type AuditService struct {

@@ -48,6 +48,8 @@ type backupService interface {
 type accountService interface {
 	Register(ctx context.Context, userID, smartAccountAddress string) error
 	List(ctx context.Context, userID string) ([]service.AccountRegistration, error)
+	CreateFundingIntent(ctx context.Context, userID, smartAccountAddress string) (service.Intent, error)
+	GetFundingStatus(ctx context.Context, userID, memoID string) (service.DepositStatus, error)
 }
 
 type cosignService interface {

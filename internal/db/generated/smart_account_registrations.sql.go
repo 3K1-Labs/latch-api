@@ -7,24 +7,34 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+const getSmartAccountOwner = `-- name: GetSmartAccountOwner :one
+SELECT user_id
+FROM smart_account_registrations
+WHERE smart_account_address = $1
+`
+
+func (q *Queries) GetSmartAccountOwner(ctx context.Context, smartAccountAddress string) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, getSmartAccountOwner, smartAccountAddress)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const listSmartAccountsByUserID = `-- name: ListSmartAccountsByUserID :many
-SELECT smart_account_address, memo_id, pool_address, created_at
+SELECT smart_account_address, created_at
 FROM smart_account_registrations
 WHERE user_id = $1
 ORDER BY created_at ASC
 `
 
 type ListSmartAccountsByUserIDRow struct {
-	SmartAccountAddress string         `json:"smart_account_address"`
-	MemoID              sql.NullInt64  `json:"memo_id"`
-	PoolAddress         sql.NullString `json:"pool_address"`
-	CreatedAt           time.Time      `json:"created_at"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 func (q *Queries) ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsByUserIDRow, error) {
@@ -36,12 +46,7 @@ func (q *Queries) ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUI
 	var items []ListSmartAccountsByUserIDRow
 	for rows.Next() {
 		var i ListSmartAccountsByUserIDRow
-		if err := rows.Scan(
-			&i.SmartAccountAddress,
-			&i.MemoID,
-			&i.PoolAddress,
-			&i.CreatedAt,
-		); err != nil {
+		if err := rows.Scan(&i.SmartAccountAddress, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -53,57 +58,6 @@ func (q *Queries) ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUI
 		return nil, err
 	}
 	return items, nil
-}
-
-const listUnregisteredSmartAccounts = `-- name: ListUnregisteredSmartAccounts :many
-SELECT user_id, smart_account_address
-FROM smart_account_registrations
-WHERE memo_id IS NULL
-`
-
-type ListUnregisteredSmartAccountsRow struct {
-	UserID              uuid.UUID `json:"user_id"`
-	SmartAccountAddress string    `json:"smart_account_address"`
-}
-
-func (q *Queries) ListUnregisteredSmartAccounts(ctx context.Context) ([]ListUnregisteredSmartAccountsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listUnregisteredSmartAccounts)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUnregisteredSmartAccountsRow
-	for rows.Next() {
-		var i ListUnregisteredSmartAccountsRow
-		if err := rows.Scan(&i.UserID, &i.SmartAccountAddress); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const setSmartAccountMemoRegistration = `-- name: SetSmartAccountMemoRegistration :exec
-UPDATE smart_account_registrations
-SET memo_id = $2, pool_address = $3, updated_at = NOW()
-WHERE smart_account_address = $1
-`
-
-type SetSmartAccountMemoRegistrationParams struct {
-	SmartAccountAddress string         `json:"smart_account_address"`
-	MemoID              sql.NullInt64  `json:"memo_id"`
-	PoolAddress         sql.NullString `json:"pool_address"`
-}
-
-func (q *Queries) SetSmartAccountMemoRegistration(ctx context.Context, arg SetSmartAccountMemoRegistrationParams) error {
-	_, err := q.db.ExecContext(ctx, setSmartAccountMemoRegistration, arg.SmartAccountAddress, arg.MemoID, arg.PoolAddress)
-	return err
 }
 
 const upsertSmartAccountRegistration = `-- name: UpsertSmartAccountRegistration :one
@@ -112,7 +66,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (smart_account_address) DO UPDATE SET
     updated_at = NOW()
 WHERE smart_account_registrations.user_id = EXCLUDED.user_id
-RETURNING id, user_id, smart_account_address, memo_id, pool_address, created_at, updated_at
+RETURNING id, user_id, smart_account_address, created_at, updated_at
 `
 
 type UpsertSmartAccountRegistrationParams struct {
@@ -128,8 +82,6 @@ func (q *Queries) UpsertSmartAccountRegistration(ctx context.Context, arg Upsert
 		&i.ID,
 		&i.UserID,
 		&i.SmartAccountAddress,
-		&i.MemoID,
-		&i.PoolAddress,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
