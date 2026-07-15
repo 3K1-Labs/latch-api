@@ -1,20 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch",
-      "WebFetch(domain:docs.ready.co)",
-      "mcp__plugin_claude-video-vision_claude-video-vision__video_info",
-      "mcp__plugin_claude-video-vision_claude-video-vision__video_watch",
-      "mcp__plugin_claude-video-vision_claude-video-vision__video_detail",
-      "Bash(ls -la app)",
-      "Bash(ls src *)",
-      "Bash(grep -iA6 \"splash\" app.config.js)",
-      "Bash(find . -type d -iname \"splashscreen\" -not -path \"*/node_modules/*\")",
-      "Bash(find . -ipath \"*splashscreen*\" -not -path \"*/node_modules/*\" \\\\\\( -iname \"*.png\" -o -iname \"*.svg\" \\\\\\))",
-      "Bash(sips -g pixelWidth -g pixelHeight src/assets/splashscreen/g.png)",
-      "Bash(sips -g pixelWidth -g pixelHeight src/assets/splashscreen/c.png)",
-      "Bash(sips -g pixelWidth -g pixelHeight src/assets/images/logoLoading.png)",
-      "Bash(git branch *)"
+      "Bash(gh repo *)",
+      "Bash(gh issue create --repo 3000-Labs/latch-mobile --title 'Backup upload failure during onboarding is silent and unrecovered' --body ' *)",
+      "Bash(gh issue create --repo 3000-Labs/latch-mobile --title 'POST /v1/backup payload shape doesn'\\\\''t match backend contract — every backup upload fails' --body ' *)",
+      "Bash(go install *)",
+      "Bash(git add *)",
+      "Bash(gofmt -w internal/config/config.go)",
+      "Bash(gofmt -l internal/config/config.go)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(git rebase *)",
+      "Bash(gh pr create --repo 3000-Labs/latch-api --base master --head feat/relayer-memo-registration --title 'Register smart accounts with latch-relayer for pooled-deposit memo routing' --body ' *)"
     ]
   }
 }

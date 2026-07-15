@@ -1,0 +1,276 @@
+# AGENTS.md
+
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+# Development
+make run              # Start dev server with hot-reload (air)
+make docker-up        # Start Postgres + Redis + app in Docker
+make docker-down      # Stop containers
+make docker-logs      # Follow container logs
+
+# Build
+make build            # Compile production binary to ./bin/latch-backend
+
+# Testing & Linting
+make test             # Run all tests with race detection
+go test ./path/to/pkg -run TestFunctionName -race -count=1 -timeout 60s  # Single test
+make lint             # Run golangci-lint (install: brew install golangci-lint)
+
+# Database
+make migrate-up                    # Apply pending migrations
+make migrate-down                  # Rollback one migration (N= for N steps)
+make migrate-create name=<name>    # Create new migration pair
+make migrate-force V=<version>     # Force-set version (recover dirty state)
+make sqlc                          # Regenerate DB code from SQL queries
+
+# Setup
+make install-tools    # Install air and sqlc
+make tidy             # Tidy and verify go modules
+```
+
+## Architecture
+
+Go REST API backend for a Stellar blockchain mobile wallet. Handles auth, encrypted credential backup, and recovery.
+
+**Stack:** gin · pgx v5 + pgxpool · go-redis v9 · golang-jwt v5 · Resend API for email · golang-migrate · sqlc for type-safe DB code
+
+**Layer flow:** `Handler → Service → Store (DB/Redis)`
+
+### Endpoints
+
+| Method | Path                        | Auth         | Purpose                                           |
+| ------ | --------------------------- | ------------ | ------------------------------------------------- |
+| GET    | `/health`                   | None         | DB + Redis liveness check                         |
+| POST   | `/v1/auth/register`         | None         | Upsert user, send OTP email                       |
+| POST   | `/v1/auth/verify`           | None         | Verify OTP → access + refresh tokens              |
+| POST   | `/v1/auth/refresh`          | None         | Rotate refresh token → new access token           |
+| POST   | `/v1/auth/logout`           | Bearer JWT   | Revoke refresh token                              |
+| POST   | `/v1/backup`                | Bearer JWT   | Encrypt and store credential blob (upsert)        |
+| PUT    | `/v1/backup`                | Bearer JWT   | Same upsert as POST                               |
+| GET    | `/v1/backup`                | Bearer JWT   | Check whether a backup exists                     |
+| POST   | `/v1/recovery/initiate`     | None         | Send recovery OTP (rate-limited per email)        |
+| POST   | `/v1/recovery/verify`       | None         | Verify recovery OTP → short-lived recovery token  |
+| GET    | `/v1/recovery/blob`         | Recovery JWT | Decrypt and return credential blob                |
+| GET    | `/v1/prices`                | None         | Live USD prices for Stellar assets (Redis-cached) |
+| GET    | `/v1/history`               | Bearer JWT   | Transaction history for the authenticated user    |
+| POST   | `/api/transaction/simulate` | None         | Simulate a Soroban transaction                    |
+
+### Encryption (two-phase)
+
+- **Phase 1:** Per-user AES-256 key stored in `user_encryption_keys` table
+- **Phase 2:** Key derived from email + server pepper via PBKDF2 (activated by setting `SERVER_PEPPER` env var)
+
+See [`docs/encryption.md`](docs/encryption.md) for full details, security model, and migration path.
+
+### Key Directories
+
+```
+cmd/server/main.go          # Entry point; wires routes, services, middleware
+cmd/migrate/main.go         # Migration CLI
+internal/config/            # Env var loading and validation
+internal/handler/           # HTTP handlers (auth, backup, recovery)
+internal/service/           # Business logic: OTP, email, encryption, audit
+internal/middleware/        # JWT auth, CORS, Redis-backed rate limiting
+internal/store/             # pgxpool and redis-go initialization
+internal/db/queries/        # SQL source files (input to sqlc)
+internal/db/generated/      # Auto-generated type-safe code (do not edit)
+migrations/                 # golang-migrate SQL files
+references/latch-mobile/    # Primary client — React Native Expo wallet
+references/freighter/       # Freighter browser extension (Yarn monorepo)
+references/freighter-mobile/ # Freighter React Native wallet
+```
+
+### Database Schema
+
+- `users` — email, timestamps
+- `credential_backups` — encrypted blob + smart account address (one per user)
+- `user_encryption_keys` — per-user AES-256 key (Phase 1)
+- `refresh_tokens` — JWT refresh tokens with TTL
+- `audit_log` — auth actions with email, IP, user agent
+
+### Rate Limiting
+
+- Per-IP: 300 req/min (general, global DoS backstop)
+- Per-wallet: 100 req/min on authenticated routes (JWT subject; key `rl:sub:`) so users sharing one IP don't collide
+- Per-email: 3 OTPs/hour, 3 recovery initiations/24h
+
+## Reference Projects
+
+These projects live in `references/` and must be consulted when designing or changing any API surface, auth flow, or data shape — the backend must stay compatible with how these clients consume it.
+
+### latch-mobile (`references/latch-mobile/`)
+
+The primary client. React Native + Expo 55, Bun package manager, Expo Router, Zustand + React Query, `@stellar/stellar-sdk` 15.
+
+**Endpoints it calls against this backend:**
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/v1/auth/register` | Send OTP to email |
+| POST | `/v1/auth/verify` | Verify OTP → JWT tokens |
+| POST | `/v1/auth/refresh` | Rotate refresh token |
+| POST | `/v1/auth/logout` | Revoke refresh token |
+| POST | `/v1/backup` | Upload encrypted credential blob |
+| GET | `/v1/backup` | Check if backup exists |
+| POST | `/v1/recovery/initiate` | Send recovery OTP |
+| POST | `/v1/recovery/verify` | Verify recovery OTP → recovery token |
+| GET | `/v1/recovery/blob` | Fetch encrypted backup blob (client decrypts locally with recovery password) |
+| GET | `/v1/prices` | Live asset prices (XLM etc.) |
+| GET | `/v1/history` | Transaction history |
+
+**Key client-side details to keep in mind:**
+
+- Auth tokens are stored in `expo-secure-store`; auth/backup/recovery calls use a custom XHR-based `latchFetch` (in `src/api/latch-auth.ts`) with a built-in 401→refresh→retry cycle — not the Axios interceptor in `src/api/client.ts`
+- The credential blob sent to `/v1/backup` is **pre-encrypted by the mobile client** (Argon2id key derivation + AES-256-GCM). The backend stores the opaque ciphertext and never decrypts it.
+- Smart account users: BIP-44 index ≥ 0 for seed wallets, index = -1 for passkey wallets
+- Android Soroban calls bypass Axios (raw XMLHttpRequest) due to OkHttp TLS incompatibility — keep `/api/transaction/*` responses simple and avoid chunked transfer encoding
+- `BUNDLER_SECRET` is currently embedded in the mobile app (testnet only); the production path is for the backend to own the bundler keypair and sign outer transactions server-side
+
+### freighter (`references/freighter/`)
+
+Browser extension wallet (Chrome/Firefox/Safari). Yarn 4 monorepo with workspaces: `@shared/api`, `@shared/constants`, `@stellar/freighter-api` (published npm package), and the `extension/` popup + background service worker.
+
+This project does **not** call latch-backend. Consult it when:
+
+- Implementing Stellar transaction signing patterns compatible with Freighter's signing model
+- Building features that users may also access via the Freighter browser extension
+- Understanding the `@stellar/freighter-api` SDK that latch-mobile imports
+
+### freighter-mobile (`references/freighter-mobile/`)
+
+React Native 0.81 wallet with WalletConnect v2, Nativewind (Tailwind), Redux (ducks pattern), Sentry, and Amplitude analytics. Calls its own separate backend (`FREIGHTER_BACKEND_V1_URL` / `V2_URL`) — not latch-backend.
+
+Consult it for:
+
+- Patterns for account balance fetching, token metadata, and transaction history via Stellar Horizon/RPC
+- WalletConnect session handling (`stellar_signXDR`, `stellar_signMessage`)
+- Blockaid transaction validation integration
+- Redux ducks patterns and `src/services/backend.ts` as a reference for API service layering
+
+### stellar-dev-skill (`references/stellar-dev-skill/`)
+
+Modular AI skill documentation covering Soroban smart contracts, Stellar SDKs, SEP/CAP standards, and ecosystem tooling. Read `skill/SKILL.md` as a quick-reference index; individual topic files cover Soroban Rust SDK, ZK proofs, security checklists, and common pitfalls.
+
+## Rules
+
+@.Codex/rules/principles.md
+@.Codex/rules/golang.md
+@.Codex/rules/security.md
+@.Codex/rules/api-conventions.md
+
+## Generated Code
+
+After modifying any file in `internal/db/queries/`, run `make sqlc` to regenerate `internal/db/generated/`. Never edit generated files directly.
+
+## Environment Variables
+
+Copy `.env.example` to `.env`. Key variables:
+
+- `DATABASE_URL`, `REDIS_URL`
+- `JWT_SECRET`, `ACCESS_TOKEN_TTL_MIN`, `REFRESH_TOKEN_TTL_DAY`
+- `RESEND_API_KEY`, `EMAIL_FROM_ADDR`
+- `SERVER_PEPPER` — empty until Phase 2 encryption migration is complete
+- `ENCRYPTION_MASTER_KEY` — currently unused; required by config but not consumed by any service
+
+### Retention / GC
+
+A background sweep (`internal/service/cleanup_service.go`, scheduled in `cmd/server/main.go`) bounds growth of the multisig tables. All optional; sane defaults bake in.
+
+- `CLEANUP_ENABLED` — run the sweep (default `true`)
+- `CLEANUP_INTERVAL_MIN` — minutes between sweeps (default `60`)
+- `COSIGN_RETENTION_HOURS` — grace kept past a cosign request's `expires_at` before it (and its cascaded signatures) is deleted (default `24`)
+- `WCK_BUNDLE_RETENTION_DAYS` — delete WCK bundles untouched this long; `0` disables (default `180`)
+- `WALLET_MEMBERSHIP_RETENTION_DAYS` — delete membership rows older than this; `0` disables (default `180`)
+
+WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.
+
+## PR Review Workflow
+
+Use this checklist for substantive pull-request reviews. A review is not complete
+after reporting bugs or running tests; it must also teach the reviewer how the
+change works.
+
+### Pass 1: Overall Assessment
+
+- [ ] State the PR's intended result in plain language.
+- [ ] Summarize its size: commits, files changed, additions/deletions, CI state,
+      mergeability, and whether it overlaps or supersedes another PR.
+- [ ] Trace the main behavior from entry point to result using the repository's
+      `Handler -> Service -> Store` flow.
+- [ ] Report correctness, security, compatibility, migration, operational, and
+      test findings first, ordered by severity and tied to exact files/lines.
+- [ ] Make every actionable finding implementation-ready: include the exact
+      repository path and line, quote the relevant current code, explain the
+      failure mode, show the intended replacement or a focused patch outline,
+      and name the test that should be added or changed.
+- [ ] Separate confirmed merge blockers from follow-up improvements and accepted
+      design tradeoffs.
+- [ ] Recommend a disposition: approve, approve after CI, request changes, or
+      close/supersede.
+
+### Pass 2: Guided Code Walkthrough
+
+Review every important changed file in dependency/runtime order, not merely in
+GitHub's alphabetical order:
+
+1. `cmd/server/main.go`: wiring, constructors, middleware, routes, schedulers,
+   startup/shutdown behavior, and the runtime path exposed by the PR.
+2. Handlers and API types: endpoint contract, validation, authentication,
+   response/error shapes, and audit behavior.
+3. Services: business rules, orchestration, external calls, authorization
+   boundaries, retries, concurrency, and failure behavior.
+4. Store/query/migration files: schema intent, constraints, ownership/scoping,
+   idempotency, migration safety, rollback behavior, and generated sqlc output.
+5. Configuration and environment variables: defaults, enable/disable behavior,
+   deployment impact, and stale settings removed by the change.
+6. Client-facing docs and reference clients: whether the documented flow and
+   actual consumer behavior match the implementation.
+7. Tests and tooling: what behavior is covered, meaningful missing cases, and
+   results from test, race, lint, build, tidy, migration, and generation checks.
+
+For each important file or cohesive file group, explain:
+
+- [ ] What the code did before.
+- [ ] What was added, changed, or removed.
+- [ ] Why the change was made.
+- [ ] How it works at runtime, including its callers and downstream effects.
+- [ ] What replaced removed code and whether any behavior was lost.
+- [ ] The important lines or focused diff to inspect together.
+- [ ] Risks, edge cases, and the tests that prove the behavior.
+
+Use this finding format unless the change is too small to need every field:
+
+```text
+[Severity] Short finding title
+File: path/to/file.go:line
+Current code: focused quote
+Why it matters: concrete runtime effect or failure scenario
+Suggested change: replacement code or precise implementation steps
+Verification: exact test case or command
+```
+
+### Diff Handling
+
+- [ ] Do not skip a file merely because GitHub says the diff is too large.
+      Inspect it locally with focused `git diff` commands.
+- [ ] Group generated artifacts such as `docs/docs.go`, Swagger JSON/YAML, and
+      `internal/db/generated/` rather than narrating generated lines one by one.
+- [ ] For generated files, verify that the source annotation/query changed as
+      intended and that regeneration produces no additional diff.
+- [ ] Call out mechanical diffs separately from files containing design or
+      behavioral decisions.
+- [ ] Explain removals as carefully as additions. For example, when a sweep
+      service is deleted and routes are added, explain the old asynchronous
+      retry model, the new request-driven model, why the replacement was chosen,
+      and what happens when the external dependency is unavailable.
+
+### Review Handoff
+
+- [ ] End with a short list of required fixes and follow-up issues.
+- [ ] Record unresolved questions and assumptions explicitly.
+- [ ] Do not post a GitHub review, modify the contributor's branch, close a PR,
+      or merge until the user explicitly asks for that action.
+- [ ] After fixes, repeat the affected walkthrough and verification rather than
+      relying only on green CI.
