@@ -49,7 +49,7 @@ type Querier interface {
 	GetSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
 	GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error)
-	GetSmartAccountOwner(ctx context.Context, smartAccountAddress string) (uuid.UUID, error)
+	GetSmartAccountRegistrationUserID(ctx context.Context, smartAccountAddress string) (uuid.UUID, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)
 	GetVerifiedUserByEmail(ctx context.Context, email string) (uuid.UUID, error)

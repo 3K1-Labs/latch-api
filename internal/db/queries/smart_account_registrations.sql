@@ -12,7 +12,7 @@ FROM smart_account_registrations
 WHERE user_id = $1
 ORDER BY created_at ASC;
 
--- name: GetSmartAccountOwner :one
+-- name: GetSmartAccountRegistrationUserID :one
 SELECT user_id
 FROM smart_account_registrations
 WHERE smart_account_address = $1;

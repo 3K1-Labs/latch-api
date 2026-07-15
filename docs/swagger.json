@@ -3022,7 +3022,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account the caller already owns. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register.",
+                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3085,7 +3085,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Proxies latch-relayer's deposit-status lookup for memo_id, after verifying\nthe intent's smart account is registered to the caller — latch-relayer has\nno auth of its own, so this ownership check is the authorization boundary.",
+                "description": "Proxies latch-relayer's deposit-status lookup for memo_id, after verifying\nthe intent's smart account is registered to the caller — latch-relayer has\nno auth of its own, so this account-association check is the authorization boundary.",
                 "produces": [
                     "application/json"
                 ],

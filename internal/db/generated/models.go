@@ -59,12 +59,9 @@ type CredentialBackup struct {
 	Iv                  []byte         `json:"iv"`
 	AuthTag             []byte         `json:"auth_tag"`
 	EncryptionVersion   int32          `json:"encryption_version"`
-	SmartAccountAddress sql.NullString `json:"smart_account_address"`
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
-	MemoID              sql.NullInt64  `json:"memo_id"`
-	PoolAddress         sql.NullString `json:"pool_address"`
 }
 
 type RefreshToken struct {
