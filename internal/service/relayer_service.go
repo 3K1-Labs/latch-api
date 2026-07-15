@@ -95,12 +95,7 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 		return Intent{}, ErrRelayerNotConfigured
 	}
 
-	body, err := json.Marshal(createIntentRequest{
-		CAddress:    in.CAddress,
-		ExpectedAmt: in.ExpectedAmt,
-		ExternalID:  in.ExternalID,
-		ExpiresIn:   in.ExpiresIn,
-	})
+	body, err := json.Marshal(createIntentRequest(in))
 	if err != nil {
 		return Intent{}, fmt.Errorf("marshal create intent request: %w", err)
 	}
