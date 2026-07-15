@@ -24,6 +24,7 @@ sql:
       - "migrations/000019_webapp_multisig_member_sessions.up.sql"
       - "migrations/000020_add_memo_registration.up.sql"
       - "migrations/000021_smart_account_registrations.up.sql"
+      - "migrations/000023_smart_account_registrations_ownership_only.up.sql"
     gen:
       go:
         package: "db"

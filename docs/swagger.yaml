@@ -125,6 +125,72 @@ definitions:
     - threshold
     - unsigned_tx_xdr
     type: object
+  internal_handler.createDepositIntentRequest:
+    properties:
+      smart_account_address:
+        type: string
+    required:
+    - smart_account_address
+    type: object
+  internal_handler.depositForwardResponse:
+    properties:
+      amount:
+        type: string
+      asset:
+        type: string
+      created_at:
+        type: string
+      forward_tx:
+        type: string
+      status:
+        type: string
+      tx_hash:
+        type: string
+    type: object
+  internal_handler.depositIntentDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.depositIntentResponse'
+    type: object
+  internal_handler.depositIntentResponse:
+    properties:
+      expires_at:
+        example: "2026-07-15T13:00:00Z"
+        type: string
+      intent_id:
+        example: b3a1...
+        type: string
+      memo_id:
+        example: "17540123456789"
+        type: string
+      pool_address:
+        example: GB3POOLADDRESSEXAMPLE
+        type: string
+    type: object
+  internal_handler.depositStatusDataResponse:
+    properties:
+      data:
+        $ref: '#/definitions/internal_handler.depositStatusResponse'
+    type: object
+  internal_handler.depositStatusResponse:
+    properties:
+      c_address:
+        type: string
+      expires_at:
+        type: string
+      forwards:
+        items:
+          $ref: '#/definitions/internal_handler.depositForwardResponse'
+        type: array
+      intent_id:
+        type: string
+      memo_id:
+        type: string
+      pool_address:
+        type: string
+      status:
+        type: string
+    type: object
   internal_handler.encryptedBlobResponse:
     properties:
       encrypted_blob:
@@ -291,12 +357,6 @@ definitions:
     type: object
   internal_handler.smartAccountResponse:
     properties:
-      memo_id:
-        example: "17540123456789"
-        type: string
-      pool_address:
-        example: GB3POOLADDRESSEXAMPLE
-        type: string
       smart_account_address:
         example: CABC123...
         type: string
@@ -3115,9 +3175,7 @@ paths:
       - webauthn
   /v1/accounts:
     get:
-      description: |-
-        Returns every smart account registered for the authenticated user, with its
-        latch-relayer deposit memo/pool address once registration has landed.
+      description: Returns every smart account registered for the authenticated user.
       produces:
       - application/json
       responses:
@@ -3138,13 +3196,98 @@ paths:
       summary: List the caller's registered smart accounts
       tags:
       - accounts
+  /v1/accounts/deposit-intent:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)
+        for a smart account the caller already owns. Not idempotent — every call
+        mints a new intent, matching latch-relayer's "one intent per funding session"
+        model. The caller must have already registered the address via
+        POST /v1/accounts/register.
+      parameters:
+      - description: Smart account C-address
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.createDepositIntentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handler.depositIntentDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Mint a funding intent for the fund-account flow
+      tags:
+      - accounts
+  /v1/accounts/deposit/status/{memo_id}:
+    get:
+      description: |-
+        Proxies latch-relayer's deposit-status lookup for memo_id, after verifying
+        the intent's smart account is registered to the caller — latch-relayer has
+        no auth of its own, so this ownership check is the authorization boundary.
+      parameters:
+      - description: Funding intent memo_id
+        in: path
+        name: memo_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.depositStatusDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a funding intent's status
+      tags:
+      - accounts
   /v1/accounts/register:
     post:
       consumes:
       - application/json
       description: |-
-        Idempotent: registering the same address again is a no-op. Kicks off
-        best-effort latch-relayer registration in the background — see GET /v1/accounts.
+        Idempotent: registering the same address again is a no-op. Records
+        ownership only — see POST /v1/accounts/deposit-intent to mint a funding memo.
       parameters:
       - description: Smart account C-address
         in: body
@@ -3173,7 +3316,7 @@ paths:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:
       - BearerAuth: []
-      summary: Register a smart account for deposit memo routing
+      summary: Register a smart account
       tags:
       - accounts
   /v1/auth/challenge:

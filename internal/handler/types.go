@@ -50,18 +50,51 @@ type backupExistsResponse struct {
 }
 
 // smartAccountResponse describes one of the caller's registered smart
-// accounts and its latch-relayer deposit memo registration, if it has landed
-// yet (immediately after POST /v1/accounts/register, or via the retry
-// sweep). MemoID is a decimal string, not a JSON number — it holds a uint64
-// value that can exceed JS's safe integer range.
+// accounts (an ownership record only — see POST /v1/accounts/deposit-intent
+// for minting a funding memo).
 type smartAccountResponse struct {
-	SmartAccountAddress string  `json:"smart_account_address" example:"CABC123..."`
-	MemoID              *string `json:"memo_id,omitempty" example:"17540123456789"`
-	PoolAddress         *string `json:"pool_address,omitempty" example:"GB3POOLADDRESSEXAMPLE"`
+	SmartAccountAddress string `json:"smart_account_address" example:"CABC123..."`
 }
 
 type accountsListResponse struct {
 	Accounts []smartAccountResponse `json:"accounts"`
+}
+
+// depositIntentResponse is a fresh, TTL-bound funding intent minted by
+// latch-relayer. MemoID is a decimal string, not a JSON number — it holds a
+// uint64 value that can exceed JS's safe integer range.
+type depositIntentResponse struct {
+	IntentID    string `json:"intent_id" example:"b3a1..."`
+	MemoID      string `json:"memo_id" example:"17540123456789"`
+	PoolAddress string `json:"pool_address" example:"GB3POOLADDRESSEXAMPLE"`
+	ExpiresAt   string `json:"expires_at" example:"2026-07-15T13:00:00Z"`
+}
+
+type depositIntentDataResponse struct {
+	Data depositIntentResponse `json:"data"`
+}
+
+type depositForwardResponse struct {
+	TxHash    string  `json:"tx_hash"`
+	Amount    string  `json:"amount"`
+	Asset     string  `json:"asset"`
+	Status    string  `json:"status"`
+	ForwardTx *string `json:"forward_tx,omitempty"`
+	CreatedAt string  `json:"created_at"`
+}
+
+type depositStatusResponse struct {
+	IntentID    string                   `json:"intent_id"`
+	MemoID      string                   `json:"memo_id"`
+	CAddress    string                   `json:"c_address"`
+	PoolAddress string                   `json:"pool_address"`
+	Status      string                   `json:"status"`
+	ExpiresAt   string                   `json:"expires_at"`
+	Forwards    []depositForwardResponse `json:"forwards"`
+}
+
+type depositStatusDataResponse struct {
+	Data depositStatusResponse `json:"data"`
 }
 
 // clientEncryptedBlob mirrors the EncryptedBackup type produced by the mobile

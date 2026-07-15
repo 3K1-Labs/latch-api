@@ -117,14 +117,13 @@ type Config struct {
 	WCKBundleRetention        time.Duration // 0 disables WCK-bundle GC
 	WalletMembershipRetention time.Duration // 0 disables membership GC
 
-	// latch-relayer integration: registers deployed smart accounts for
-	// pooled-deposit memo routing (POST {RelayerURL}/register). Empty
-	// RelayerURL disables registration entirely — logged, not fatal, since
-	// mobile traffic must keep flowing regardless of relayer availability.
-	RelayerURL        string
-	RelayerTimeout    time.Duration
-	MemoSweepEnabled  bool
-	MemoSweepInterval time.Duration // between sweeps
+	// latch-relayer integration: mints per-session funding intents
+	// (POST {RelayerURL}/intents) and proxies their status
+	// (GET {RelayerURL}/deposit/status/{memo_id}). Empty RelayerURL disables
+	// the fund-account flow entirely — logged, not fatal, since mobile
+	// traffic must keep flowing regardless of relayer availability.
+	RelayerURL     string
+	RelayerTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -189,10 +188,8 @@ func Load() (*Config, error) {
 		WCKBundleRetention:        time.Duration(getEnvInt("WCK_BUNDLE_RETENTION_DAYS", 180)) * 24 * time.Hour,
 		WalletMembershipRetention: time.Duration(getEnvInt("WALLET_MEMBERSHIP_RETENTION_DAYS", 180)) * 24 * time.Hour,
 
-		RelayerURL:        getEnv("RELAYER_URL", ""),
-		RelayerTimeout:    time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 10)) * time.Second,
-		MemoSweepEnabled:  getEnvBool("MEMO_SWEEP_ENABLED", true),
-		MemoSweepInterval: time.Duration(getEnvInt("MEMO_SWEEP_INTERVAL_MIN", 15)) * time.Minute,
+		RelayerURL:     getEnv("RELAYER_URL", ""),
+		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 10)) * time.Second,
 	}
 
 	var err error

@@ -78,13 +78,11 @@ type RefreshToken struct {
 }
 
 type SmartAccountRegistration struct {
-	ID                  uuid.UUID      `json:"id"`
-	UserID              uuid.UUID      `json:"user_id"`
-	SmartAccountAddress string         `json:"smart_account_address"`
-	MemoID              sql.NullInt64  `json:"memo_id"`
-	PoolAddress         sql.NullString `json:"pool_address"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
+	ID                  uuid.UUID `json:"id"`
+	UserID              uuid.UUID `json:"user_id"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type User struct {
