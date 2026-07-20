@@ -12,14 +12,14 @@ import (
 	"github.com/google/uuid"
 )
 
-const getSmartAccountOwner = `-- name: GetSmartAccountOwner :one
+const getSmartAccountRegistrationUserID = `-- name: GetSmartAccountRegistrationUserID :one
 SELECT user_id
 FROM smart_account_registrations
 WHERE smart_account_address = $1
 `
 
-func (q *Queries) GetSmartAccountOwner(ctx context.Context, smartAccountAddress string) (uuid.UUID, error) {
-	row := q.db.QueryRowContext(ctx, getSmartAccountOwner, smartAccountAddress)
+func (q *Queries) GetSmartAccountRegistrationUserID(ctx context.Context, smartAccountAddress string) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, getSmartAccountRegistrationUserID, smartAccountAddress)
 	var user_id uuid.UUID
 	err := row.Scan(&user_id)
 	return user_id, err

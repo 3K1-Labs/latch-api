@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -156,6 +157,9 @@ type forwardPayload struct {
 // DepositStatus calls latch-relayer's GET /deposit/status/{memo_id} for the
 // current state of a funding intent and any forwards matched to it.
 func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (DepositStatus, error) {
+	if _, err := strconv.ParseUint(memoID, 10, 64); err != nil {
+		return DepositStatus{}, fmt.Errorf("%w: invalid memo id", ErrValidation)
+	}
 	if s.baseURL == "" {
 		return DepositStatus{}, ErrRelayerNotConfigured
 	}

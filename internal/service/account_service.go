@@ -15,8 +15,8 @@ type AccountRegistration struct {
 	SmartAccountAddress string
 }
 
-// AccountService tracks the smart accounts a user has deployed (an ownership
-// registry) and mints latch-relayer funding intents for them. A user can own
+// AccountService tracks the smart accounts associated with a user and mints
+// latch-relayer funding intents for them. A user can register
 // many smart accounts (multiple BIP-44 seed indices, multiple passkey
 // accounts, shared/multisig wallets), so registration is modeled per-account,
 // not per-user.
@@ -88,14 +88,14 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, smartA
 		return Intent{}, fmt.Errorf("parse user id: %w", err)
 	}
 
-	owner, err := s.q.GetSmartAccountOwner(ctx, smartAccountAddress)
+	registeredUserID, err := s.q.GetSmartAccountRegistrationUserID(ctx, smartAccountAddress)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Intent{}, ErrValidation
 		}
-		return Intent{}, fmt.Errorf("get smart account owner: %w", err)
+		return Intent{}, fmt.Errorf("get smart account registration: %w", err)
 	}
-	if owner != uid {
+	if registeredUserID != uid {
 		return Intent{}, ErrValidation
 	}
 
@@ -104,8 +104,8 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, smartA
 
 // GetFundingStatus fetches a funding intent's status from latch-relayer by
 // memo_id, then verifies the intent's c_address is registered to userID
-// before returning it. latch-relayer has no auth of its own, so this
-// ownership check is the actual authorization boundary for status lookups.
+// before returning it. latch-relayer has no auth of its own, so this account
+// association check is the authorization boundary for status lookups.
 func (s *AccountService) GetFundingStatus(ctx context.Context, userID, memoID string) (DepositStatus, error) {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
@@ -117,14 +117,14 @@ func (s *AccountService) GetFundingStatus(ctx context.Context, userID, memoID st
 		return DepositStatus{}, err
 	}
 
-	owner, err := s.q.GetSmartAccountOwner(ctx, status.CAddress)
+	registeredUserID, err := s.q.GetSmartAccountRegistrationUserID(ctx, status.CAddress)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return DepositStatus{}, ErrValidation
 		}
-		return DepositStatus{}, fmt.Errorf("get smart account owner: %w", err)
+		return DepositStatus{}, fmt.Errorf("get smart account registration: %w", err)
 	}
-	if owner != uid {
+	if registeredUserID != uid {
 		return DepositStatus{}, ErrValidation
 	}
 
