@@ -82,7 +82,21 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // userID (including "not registered at all"), or ErrRelayerNotConfigured if
 // RELAYER_URL is unset — the fund flow has nothing to fall back to without a
 // memo, so callers should surface this as a hard error, not a silent no-op.
-func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, smartAccountAddress string) (Intent, error) {
+//
+// Wallet-scoped callers (scope == "wallet", e.g. the browser extension's
+// SEP-10-style sign-in) have no users row and so can never appear in
+// smart_account_registrations. For them, ownership is self-evident from the
+// token: userID is the wallet's own address, so it's compared directly
+// against smartAccountAddress instead of going through the registration
+// table.
+func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress string) (Intent, error) {
+	if scope == ScopeWallet {
+		if userID != smartAccountAddress {
+			return Intent{}, ErrValidation
+		}
+		return s.relayerSvc.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
+	}
+
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return Intent{}, fmt.Errorf("parse user id: %w", err)
@@ -106,7 +120,22 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, smartA
 // memo_id, then verifies the intent's c_address is registered to userID
 // before returning it. latch-relayer has no auth of its own, so this
 // ownership check is the actual authorization boundary for status lookups.
-func (s *AccountService) GetFundingStatus(ctx context.Context, userID, memoID string) (DepositStatus, error) {
+//
+// Wallet-scoped callers (see CreateFundingIntent) have no registration row;
+// ownership is verified by comparing userID (the wallet's own address)
+// directly against the intent's c_address instead.
+func (s *AccountService) GetFundingStatus(ctx context.Context, userID, scope, memoID string) (DepositStatus, error) {
+	if scope == ScopeWallet {
+		status, err := s.relayerSvc.DepositStatus(ctx, memoID)
+		if err != nil {
+			return DepositStatus{}, err
+		}
+		if status.CAddress != userID {
+			return DepositStatus{}, ErrValidation
+		}
+		return status, nil
+	}
+
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return DepositStatus{}, fmt.Errorf("parse user id: %w", err)

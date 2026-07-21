@@ -264,14 +264,14 @@ func (s *stubAccount) List(_ context.Context, _ string) ([]service.AccountRegist
 	return s.listResult, nil
 }
 
-func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _ string) (service.Intent, error) {
+func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _, _ string) (service.Intent, error) {
 	if s.createIntentErr != nil {
 		return service.Intent{}, s.createIntentErr
 	}
 	return s.createIntentResult, nil
 }
 
-func (s *stubAccount) GetFundingStatus(_ context.Context, _, _ string) (service.DepositStatus, error) {
+func (s *stubAccount) GetFundingStatus(_ context.Context, _, _, _ string) (service.DepositStatus, error) {
 	if s.fundingStatusErr != nil {
 		return service.DepositStatus{}, s.fundingStatusErr
 	}
