@@ -123,7 +123,7 @@ func TestAccountList_MultipleRows(t *testing.T) {
 
 func TestCreateFundingIntent_InvalidUUID(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
-	_, err := svc.CreateFundingIntent(context.Background(), "not-a-uuid", validWalletRef)
+	_, err := svc.CreateFundingIntent(context.Background(), "not-a-uuid", "", validWalletRef)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
 }
@@ -137,7 +137,7 @@ func TestCreateFundingIntent_NotRegistered(t *testing.T) {
 
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").WillReturnError(sql.ErrNoRows)
 
-	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", validWalletRef)
+	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef)
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -152,7 +152,7 @@ func TestCreateFundingIntent_NotOwner(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(otherUser))
 
-	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", validWalletRef)
+	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef)
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -167,8 +167,42 @@ func TestCreateFundingIntent_RelayerNotConfigured(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	_, err = svc.CreateFundingIntent(context.Background(), uid.String(), validWalletRef)
+	_, err = svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef)
 	require.ErrorIs(t, err, ErrRelayerNotConfigured)
+}
+
+func TestCreateFundingIntent_WalletScope_AddressMismatch(t *testing.T) {
+	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
+	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, "CSOMEOTHERADDRESS")
+	require.ErrorIs(t, err, ErrValidation)
+}
+
+func TestCreateFundingIntent_WalletScope_RelayerNotConfigured(t *testing.T) {
+	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
+	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef)
+	require.ErrorIs(t, err, ErrRelayerNotConfigured)
+}
+
+func TestCreateFundingIntent_WalletScope_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"intent_id":    "intent-1",
+			"memo_id":      "12345",
+			"pool_address": "GB3POOL",
+			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		})
+	}))
+	defer ts.Close()
+
+	// No DB queries expected: wallet-scoped ownership check never touches
+	// smart_account_registrations, so errorQueries() (which fails any query)
+	// must not be hit.
+	svc := NewAccountService(errorQueries(), NewRelayerService(ts.URL, time.Second))
+
+	intent, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef)
+	require.NoError(t, err)
+	assert.Equal(t, "intent-1", intent.IntentID)
 }
 
 func TestCreateFundingIntent_Success(t *testing.T) {
@@ -193,7 +227,7 @@ func TestCreateFundingIntent_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	intent, err := svc.CreateFundingIntent(context.Background(), uid.String(), validWalletRef)
+	intent, err := svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef)
 	require.NoError(t, err)
 	assert.Equal(t, "intent-1", intent.IntentID)
 	assert.Equal(t, "12345", intent.MemoID)
@@ -204,7 +238,7 @@ func TestCreateFundingIntent_Success(t *testing.T) {
 
 func TestGetFundingStatus_InvalidUUID(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
-	_, err := svc.GetFundingStatus(context.Background(), "not-a-uuid", "12345")
+	_, err := svc.GetFundingStatus(context.Background(), "not-a-uuid", "", "12345")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
 }
@@ -216,7 +250,7 @@ func TestGetFundingStatus_IntentNotFound(t *testing.T) {
 	defer ts.Close()
 
 	svc := NewAccountService(errorQueries(), NewRelayerService(ts.URL, time.Second))
-	_, err := svc.GetFundingStatus(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "12345")
+	_, err := svc.GetFundingStatus(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", "12345")
 	require.ErrorIs(t, err, ErrIntentNotFound)
 }
 
@@ -244,7 +278,7 @@ func TestGetFundingStatus_NotOwner(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(otherUser))
 
-	_, err = svc.GetFundingStatus(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "12345")
+	_, err = svc.GetFundingStatus(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", "12345")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -280,9 +314,52 @@ func TestGetFundingStatus_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	status, err := svc.GetFundingStatus(context.Background(), uid.String(), "12345")
+	status, err := svc.GetFundingStatus(context.Background(), uid.String(), "", "12345")
 	require.NoError(t, err)
 	assert.Equal(t, "completed", status.Status)
 	require.Len(t, status.Forwards, 1)
 	assert.Equal(t, "abc123", status.Forwards[0].TxHash)
+}
+
+func TestGetFundingStatus_WalletScope_AddressMismatch(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"intent_id":    "intent-1",
+			"memo_id":      "12345",
+			"c_address":    validWalletRef,
+			"pool_address": "GB3POOL",
+			"status":       "pending",
+			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"forwards":     []any{},
+		})
+	}))
+	defer ts.Close()
+
+	svc := NewAccountService(errorQueries(), NewRelayerService(ts.URL, time.Second))
+	_, err := svc.GetFundingStatus(context.Background(), "CSOMEOTHERADDRESS", ScopeWallet, "12345")
+	require.ErrorIs(t, err, ErrValidation)
+}
+
+func TestGetFundingStatus_WalletScope_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"intent_id":    "intent-1",
+			"memo_id":      "12345",
+			"c_address":    validWalletRef,
+			"pool_address": "GB3POOL",
+			"status":       "completed",
+			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"forwards":     []any{},
+		})
+	}))
+	defer ts.Close()
+
+	// No DB queries expected: wallet-scoped ownership check never touches
+	// smart_account_registrations, so errorQueries() (which fails any query)
+	// must not be hit.
+	svc := NewAccountService(errorQueries(), NewRelayerService(ts.URL, time.Second))
+
+	status, err := svc.GetFundingStatus(context.Background(), validWalletRef, ScopeWallet, "12345")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", status.Status)
 }

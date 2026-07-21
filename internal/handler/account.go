@@ -123,6 +123,7 @@ type createDepositIntentRequest struct {
 // @Router       /v1/accounts/deposit-intent [post]
 func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
 	var req createDepositIntentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -130,7 +131,7 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 		return
 	}
 
-	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, req.SmartAccountAddress)
+	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrValidation):
@@ -174,9 +175,10 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 // @Router       /v1/accounts/deposit/status/{memo_id} [get]
 func (h *AccountHandler) DepositStatus(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 	memoID := c.Param("memo_id")
 
-	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, memoID)
+	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, scope, memoID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrValidation):

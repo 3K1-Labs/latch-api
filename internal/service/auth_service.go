@@ -14,6 +14,10 @@ import (
 	db "github.com/latch/backend/internal/db/generated"
 )
 
+// ScopeWallet is the JWT "scope" claim value for wallet-scoped tokens minted
+// by IssueWalletTokenPair — sub is a wallet address, not a user UUID.
+const ScopeWallet = "wallet"
+
 type AuthService struct {
 	db         *sql.DB
 	q          *db.Queries
@@ -239,7 +243,7 @@ func (s *AuthService) IssueWalletTokenPair(ctx context.Context, wallet, keyType 
 func (s *AuthService) issueWalletAccessToken(wallet, keyType string) (string, error) {
 	claims := jwt.MapClaims{
 		"sub":   wallet,
-		"scope": "wallet",
+		"scope": ScopeWallet,
 		"kty":   keyType,
 		"exp":   time.Now().Add(s.accessTTL).Unix(),
 		"iat":   time.Now().Unix(),

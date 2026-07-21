@@ -13,6 +13,7 @@ import (
 type contextKey string
 
 const UserIDKey contextKey = "userID"
+const ScopeKey contextKey = "scope"
 
 // RequireAuth validates the Bearer JWT and injects the user ID into the request context.
 func RequireAuth(jwtSecret string) gin.HandlerFunc {
@@ -43,8 +44,11 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
+		scope, _ := claims["scope"].(string)
+
 		// Propagate into request context so services receive it via context.Context.
 		ctx := context.WithValue(c.Request.Context(), UserIDKey, userID)
+		ctx = context.WithValue(ctx, ScopeKey, scope)
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
@@ -54,4 +58,13 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 func UserIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(UserIDKey).(string)
 	return id
+}
+
+// ScopeFromContext retrieves the authenticated token's scope claim from the
+// request context. Empty for regular user tokens; "wallet" for wallet-scoped
+// (SEP-10-style) tokens minted by /v1/auth/sign-in, whose sub is a wallet
+// address rather than a user UUID.
+func ScopeFromContext(ctx context.Context) string {
+	scope, _ := ctx.Value(ScopeKey).(string)
+	return scope
 }
