@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -65,6 +66,63 @@ func NewRelayerService(baseURL string, timeout time.Duration) *RelayerService {
 	}
 }
 
+// relayerRetryableStatus reports whether status is a gateway-level failure
+// worth retrying. latch-relayer runs on a platform tier that spins down on
+// idle; the platform edge returns these while the app container cold-starts
+// back up, rather than queuing the request.
+func relayerRetryableStatus(status int) bool {
+	return status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
+}
+
+const (
+	relayerMaxRetries    = 2
+	relayerRetryBaseWait = time.Second
+)
+
+// doWithRetry sends method/url (with optional JSON body) and retries up to
+// relayerMaxRetries times, with linear backoff, on a retryable gateway
+// status. Returns the last response received — the caller's existing status
+// check reports the final failure the same way it would a non-retried one.
+func (s *RelayerService) doWithRetry(ctx context.Context, method, url string, body []byte) (*http.Response, error) {
+	var resp *http.Response
+
+	for attempt := 0; attempt <= relayerMaxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(relayerRetryBaseWait * time.Duration(attempt)):
+			}
+		}
+
+		var bodyReader io.Reader
+		if body != nil {
+			bodyReader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+		if err != nil {
+			return nil, err
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		var doErr error
+		resp, doErr = s.httpClient.Do(req)
+		if doErr != nil {
+			return nil, doErr
+		}
+		if !relayerRetryableStatus(resp.StatusCode) {
+			return resp, nil
+		}
+		resp.Body.Close()
+	}
+
+	return resp, nil
+}
+
 // CreateIntentInput are the parameters for a new funding intent. ExpectedAmt,
 // ExternalID, and ExpiresIn are optional passthroughs to latch-relayer.
 type CreateIntentInput struct {
@@ -101,13 +159,7 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 		return Intent{}, fmt.Errorf("marshal create intent request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/intents", bytes.NewReader(body))
-	if err != nil {
-		return Intent{}, fmt.Errorf("build create intent request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doWithRetry(ctx, http.MethodPost, s.baseURL+"/intents", body)
 	if err != nil {
 		return Intent{}, fmt.Errorf("call relayer create intent: %w", err)
 	}
@@ -164,12 +216,7 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 		return DepositStatus{}, ErrRelayerNotConfigured
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+"/deposit/status/"+memoID, nil)
-	if err != nil {
-		return DepositStatus{}, fmt.Errorf("build deposit status request: %w", err)
-	}
-
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doWithRetry(ctx, http.MethodGet, s.baseURL+"/deposit/status/"+memoID, nil)
 	if err != nil {
 		return DepositStatus{}, fmt.Errorf("call relayer deposit status: %w", err)
 	}

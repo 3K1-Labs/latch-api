@@ -74,6 +74,46 @@ func TestRelayerService_CreateIntent_MalformedResponse(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRelayerService_CreateIntent_RetriesOnBadGateway_Succeeds(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(createIntentResponse{
+			IntentID:    "intent-1",
+			MemoID:      "12345",
+			PoolAddress: "GB3POOL",
+			ExpiresAt:   expiresAt,
+		})
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, time.Second)
+	intent, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.NoError(t, err)
+	assert.Equal(t, "intent-1", intent.IntentID)
+	assert.Equal(t, int32(2), attempts.Load())
+}
+
+func TestRelayerService_CreateIntent_RetriesExhausted_ReturnsError(t *testing.T) {
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, time.Second)
+	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "502")
+	assert.Equal(t, int32(relayerMaxRetries+1), attempts.Load())
+}
+
 func TestRelayerService_CreateIntent_BadExpiresAt(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -119,6 +159,34 @@ func TestRelayerService_DepositStatus_Success(t *testing.T) {
 	assert.Equal(t, "completed", status.Status)
 	require.Len(t, status.Forwards, 1)
 	assert.Equal(t, "hash1", status.Forwards[0].TxHash)
+}
+
+func TestRelayerService_DepositStatus_RetriesOnBadGateway_Succeeds(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(depositStatusResponse{
+			IntentID:    "intent-1",
+			MemoID:      "12345",
+			CAddress:    "CABC123",
+			PoolAddress: "GB3POOL",
+			Status:      "pending",
+			ExpiresAt:   expiresAt,
+			Forwards:    []forwardPayload{},
+		})
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, time.Second)
+	status, err := svc.DepositStatus(context.Background(), "12345")
+	require.NoError(t, err)
+	assert.Equal(t, "pending", status.Status)
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestRelayerService_DepositStatus_NotConfigured(t *testing.T) {
