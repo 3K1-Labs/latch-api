@@ -178,6 +178,7 @@ func main() {
 	// one IP (CGNAT, a home NAT, two devices) don't collide on a single bucket.
 	generalLimiter := middleware.NewIPRateLimiter(redisClient, 300, time.Minute)
 	authedLimiter := middleware.NewSubjectRateLimiter(redisClient, 100, time.Minute)
+	fundingIntentLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "funding-intent", 5, time.Minute)
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
@@ -307,7 +308,7 @@ func main() {
 		{
 			accounts.POST("/register", accountHandler.Register)
 			accounts.GET("", accountHandler.List)
-			accounts.POST("/deposit-intent", accountHandler.CreateDepositIntent)
+			accounts.POST("/deposit-intent", fundingIntentLimiter, accountHandler.CreateDepositIntent)
 			accounts.GET("/deposit/status/:memo_id", accountHandler.DepositStatus)
 		}
 	}

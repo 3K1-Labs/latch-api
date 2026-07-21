@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,6 +125,24 @@ func TestRelayerService_DepositStatus_NotConfigured(t *testing.T) {
 	svc := NewRelayerService("", time.Second)
 	_, err := svc.DepositStatus(context.Background(), "12345")
 	assert.ErrorIs(t, err, ErrRelayerNotConfigured)
+}
+
+func TestRelayerService_DepositStatus_InvalidMemoID(t *testing.T) {
+	var called atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Store(true)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, time.Second)
+	for _, memoID := range []string{"abc", "123?admin=true", "-1", "18446744073709551616"} {
+		t.Run(memoID, func(t *testing.T) {
+			_, err := svc.DepositStatus(context.Background(), memoID)
+			require.ErrorIs(t, err, ErrValidation)
+		})
+	}
+	assert.False(t, called.Load(), "invalid memo IDs must not reach the relayer")
 }
 
 func TestRelayerService_DepositStatus_NotFound(t *testing.T) {

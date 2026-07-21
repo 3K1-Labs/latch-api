@@ -106,7 +106,7 @@ type createDepositIntentRequest struct {
 // CreateDepositIntent godoc
 // @Summary      Mint a funding intent for the fund-account flow
 // @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)
-// @Description  for a smart account the caller already owns. Not idempotent — every call
+// @Description  for a smart account already associated with the caller. Not idempotent — every call
 // @Description  mints a new intent, matching latch-relayer's "one intent per funding session"
 // @Description  model. The caller must have already registered the address via
 // @Description  POST /v1/accounts/register.
@@ -162,7 +162,7 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 // @Summary      Get a funding intent's status
 // @Description  Proxies latch-relayer's deposit-status lookup for memo_id, after verifying
 // @Description  the intent's smart account is registered to the caller — latch-relayer has
-// @Description  no auth of its own, so this ownership check is the authorization boundary.
+// @Description  no auth of its own, so this account-association check is the authorization boundary.
 // @Tags         accounts
 // @Produce      json
 // @Param        memo_id path string true "Funding intent memo_id"

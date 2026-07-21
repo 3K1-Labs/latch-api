@@ -67,6 +67,21 @@ func NewSubjectRateLimiter(redisClient *redis.Client, limit int, window time.Dur
 	return newRateLimiter(redisClient, limit, window, subjectRateLimitKey)
 }
 
+func subjectActionRateLimitKey(action string) func(*gin.Context) string {
+	return func(c *gin.Context) string {
+		if sub := UserIDFromContext(c.Request.Context()); sub != "" {
+			return fmt.Sprintf("rl:sub-action:%s:%s", action, sub)
+		}
+		return fmt.Sprintf("rl:ip-action:%s:%s", action, c.ClientIP())
+	}
+}
+
+// NewSubjectActionRateLimiter limits one authenticated action independently
+// from the general per-subject request budget. It must run after RequireAuth.
+func NewSubjectActionRateLimiter(redisClient *redis.Client, action string, limit int, window time.Duration) gin.HandlerFunc {
+	return newRateLimiter(redisClient, limit, window, subjectActionRateLimitKey(action))
+}
+
 func newRateLimiter(redisClient *redis.Client, limit int, window time.Duration, keyFn func(*gin.Context) string) gin.HandlerFunc {
 	rl := &RateLimiter{redis: redisClient, limit: limit, window: window}
 	return func(c *gin.Context) {

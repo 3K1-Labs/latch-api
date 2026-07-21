@@ -15,8 +15,8 @@ type AccountRegistration struct {
 	SmartAccountAddress string
 }
 
-// AccountService tracks the smart accounts a user has deployed (an ownership
-// registry) and mints latch-relayer funding intents for them. A user can own
+// AccountService tracks the smart accounts associated with a user and mints
+// latch-relayer funding intents for them. A user can register
 // many smart accounts (multiple BIP-44 seed indices, multiple passkey
 // accounts, shared/multisig wallets), so registration is modeled per-account,
 // not per-user.
@@ -83,7 +83,7 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // RELAYER_URL is unset — the fund flow has nothing to fall back to without a
 // memo, so callers should surface this as a hard error, not a silent no-op.
 //
-// Wallet-scoped callers (scope == "wallet", e.g. the browser extension's
+// Wallet-scoped callers (scope == ScopeWallet, e.g. the browser extension's
 // SEP-10-style sign-in) have no users row and so can never appear in
 // smart_account_registrations. For them, ownership is self-evident from the
 // token: userID is the wallet's own address, so it's compared directly
@@ -102,14 +102,14 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 		return Intent{}, fmt.Errorf("parse user id: %w", err)
 	}
 
-	owner, err := s.q.GetSmartAccountOwner(ctx, smartAccountAddress)
+	registeredUserID, err := s.q.GetSmartAccountRegistrationUserID(ctx, smartAccountAddress)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Intent{}, ErrValidation
 		}
-		return Intent{}, fmt.Errorf("get smart account owner: %w", err)
+		return Intent{}, fmt.Errorf("get smart account registration: %w", err)
 	}
-	if owner != uid {
+	if registeredUserID != uid {
 		return Intent{}, ErrValidation
 	}
 
@@ -118,8 +118,8 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 
 // GetFundingStatus fetches a funding intent's status from latch-relayer by
 // memo_id, then verifies the intent's c_address is registered to userID
-// before returning it. latch-relayer has no auth of its own, so this
-// ownership check is the actual authorization boundary for status lookups.
+// before returning it. latch-relayer has no auth of its own, so this account
+// association check is the authorization boundary for status lookups.
 //
 // Wallet-scoped callers (see CreateFundingIntent) have no registration row;
 // ownership is verified by comparing userID (the wallet's own address)
@@ -146,14 +146,14 @@ func (s *AccountService) GetFundingStatus(ctx context.Context, userID, scope, me
 		return DepositStatus{}, err
 	}
 
-	owner, err := s.q.GetSmartAccountOwner(ctx, status.CAddress)
+	registeredUserID, err := s.q.GetSmartAccountRegistrationUserID(ctx, status.CAddress)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return DepositStatus{}, ErrValidation
 		}
-		return DepositStatus{}, fmt.Errorf("get smart account owner: %w", err)
+		return DepositStatus{}, fmt.Errorf("get smart account registration: %w", err)
 	}
-	if owner != uid {
+	if registeredUserID != uid {
 		return DepositStatus{}, ErrValidation
 	}
 

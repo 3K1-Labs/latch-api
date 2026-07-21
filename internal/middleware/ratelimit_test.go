@@ -84,3 +84,14 @@ func TestSubjectRateLimiter_FailOpen_RedisDown(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	assert.Equal(t, http.StatusOK, w.Code, "limiter must fail open when Redis is unreachable")
 }
+
+func TestSubjectActionRateLimitKey_UsesIndependentNamespace(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	c.Request = req.WithContext(context.WithValue(req.Context(), UserIDKey, "wallet-A"))
+
+	key := subjectActionRateLimitKey("funding-intent")(c)
+	assert.Equal(t, "rl:sub-action:funding-intent:wallet-A", key)
+	assert.NotEqual(t, subjectRateLimitKey(c), key)
+}
