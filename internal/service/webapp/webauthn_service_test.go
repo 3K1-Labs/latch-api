@@ -35,13 +35,34 @@ func noneAttestationObject(t *testing.T, authData []byte) []byte {
 func TestBeginRegistration_Success(t *testing.T) {
 	svc, mock := newMockWebAuthnService(t)
 	mock.ExpectExec("INSERT INTO webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT id, credential_id, created_at").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "credential_id", "created_at"}))
 
 	uid := uuid.New()
 	opts, err := svc.BeginRegistration(context.Background(), uid.String(), "latch.finance", "https://latch.finance")
 	require.NoError(t, err)
 	assert.NotEmpty(t, opts.Challenge)
 	assert.Equal(t, "latch.finance", opts.RPID)
-	assert.Equal(t, base64.RawURLEncoding.EncodeToString(uid[:]), opts.UserID)
+	assert.NotEmpty(t, opts.UserID)
+	// The WebAuthn user.id must be a fresh opaque handle, never the session
+	// user's own UUID — otherwise every registration under the same session
+	// collapses onto one authenticator entry (GPM overwrite bug).
+	assert.NotEqual(t, base64.RawURLEncoding.EncodeToString(uid[:]), opts.UserID)
+	assert.Empty(t, opts.ExcludeCredentials)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestBeginRegistration_ExcludesExistingCredentials(t *testing.T) {
+	svc, mock := newMockWebAuthnService(t)
+	mock.ExpectExec("INSERT INTO webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT id, credential_id, created_at").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "credential_id", "created_at"}).
+			AddRow(uuid.New(), "cred-abc", time.Now().UnixMilli()))
+
+	uid := uuid.New()
+	opts, err := svc.BeginRegistration(context.Background(), uid.String(), "latch.finance", "https://latch.finance")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"cred-abc"}, opts.ExcludeCredentials)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

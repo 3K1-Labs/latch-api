@@ -103,6 +103,58 @@ func TestMultisigJoinRegistrationBegin_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"challenge":"chal"`)
 }
 
+func TestMultisigJoinRegistrationBegin_HonorsDisplayName(t *testing.T) {
+	stub := &stubMultisigDraft{publicView: samplePublicDraftView()}
+	webauthnStub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid", Timeout: 60000}}
+	h := NewMultisigJoinHandler(stub, webauthnStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/join/:token/webauthn/register/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/join/tok/webauthn/register/begin", postJSONBody(map[string]any{"displayName": "Latch account 2 · Family multisig"})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"displayName":"Latch account 2 · Family multisig"`)
+	assert.NotContains(t, w.Body.String(), `"name":"Multisig Signer"`)
+}
+
+func TestMultisigJoinRegistrationBegin_IncludesExcludeCredentials(t *testing.T) {
+	stub := &stubMultisigDraft{publicView: samplePublicDraftView()}
+	webauthnStub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{
+		Challenge:          "chal",
+		RPID:               "latch.finance",
+		UserID:             "uid",
+		ExcludeCredentials: []string{"cred-existing"},
+		Timeout:            60000,
+	}}
+	h := NewMultisigJoinHandler(stub, webauthnStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/join/:token/webauthn/register/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/join/tok/webauthn/register/begin", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"excludeCredentials":[{"id":"cred-existing","type":"public-key"}]`)
+}
+
+func TestMultisigJoinAuthenticationBegin_NoCredentials_OmitsAllowCredentials(t *testing.T) {
+	stub := &stubMultisigDraft{publicView: samplePublicDraftView()}
+	webauthnStub := &stubWebauthn{beginAuthOpts: webapp.AuthenticationOptions{Challenge: "chal", RPID: "latch.finance", Timeout: 60000}}
+	h := NewMultisigJoinHandler(stub, webauthnStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/join/:token/webauthn/authenticate/begin", h.AuthenticationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/join/tok/webauthn/authenticate/begin", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "allowCredentials")
+}
+
 func TestMultisigJoinAuthenticationBegin_Success(t *testing.T) {
 	stub := &stubMultisigDraft{publicView: samplePublicDraftView()}
 	webauthnStub := &stubWebauthn{beginAuthOpts: webapp.AuthenticationOptions{Challenge: "chal", RPID: "latch.finance", Timeout: 60000}}

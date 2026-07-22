@@ -137,10 +137,11 @@ func (s *WebAuthnService) consumeChallenge(ctx context.Context, id uuid.UUID) er
 // RegistrationOptions is the subset of WebAuthn PublicKeyCredentialCreationOptions
 // this service produces; the handler assembles the full options JSON around it.
 type RegistrationOptions struct {
-	Challenge string // base64url
-	RPID      string
-	UserID    string // base64url
-	Timeout   int
+	Challenge          string // base64url
+	RPID               string
+	UserID             string   // base64url
+	ExcludeCredentials []string // base64url credential IDs already owned by the session user
+	Timeout            int
 }
 
 // BeginRegistration issues a fresh registration challenge for userID.
@@ -149,15 +150,34 @@ func (s *WebAuthnService) BeginRegistration(ctx context.Context, userID, rpID, o
 	if err != nil {
 		return RegistrationOptions{}, err
 	}
+
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return RegistrationOptions{}, fmt.Errorf("parse user id: %w", err)
 	}
+	rows, err := s.q.ListWebauthnCredentialsForUser(ctx, uid)
+	if err != nil {
+		return RegistrationOptions{}, fmt.Errorf("list credentials: %w", err)
+	}
+	exclude := make([]string, 0, len(rows))
+	for _, r := range rows {
+		exclude = append(exclude, r.CredentialID)
+	}
+
+	// Each passkey enrollment gets its own opaque WebAuthn user.id — never
+	// the session user's UUID — so authenticators/GPM treat every new
+	// passkey as a distinct account instead of overwriting a previously
+	// enrolled one under the same handle. Credential ownership is still
+	// tracked by session userID at FinishRegistration; this handle only
+	// ever appears in the outgoing creation options.
+	handle := uuid.New()
+
 	return RegistrationOptions{
-		Challenge: challengeB64,
-		RPID:      rpID,
-		UserID:    base64.RawURLEncoding.EncodeToString(uid[:]),
-		Timeout:   60000,
+		Challenge:          challengeB64,
+		RPID:               rpID,
+		UserID:             base64.RawURLEncoding.EncodeToString(handle[:]),
+		ExcludeCredentials: exclude,
+		Timeout:            60000,
 	}, nil
 }
 

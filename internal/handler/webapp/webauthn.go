@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/latch/backend/internal/config"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service/webapp"
@@ -59,6 +61,32 @@ type beginCeremonyRequest struct {
 	ChromeExtensionID string `json:"chromeExtensionId,omitempty"`
 }
 
+// webauthnUserLabels resolves the WebAuthn user.name / user.displayName for
+// a registration ceremony. A client-supplied displayName always wins, so
+// GPM/authenticators show the label the extension asked for; the fallback
+// is unique per call so it never collapses two enrollments under one
+// shared label (e.g. "Latch User"). Shared by every registration-begin
+// handler (personal, multisig draft, multisig join) so labels stay
+// consistent across flows.
+func webauthnUserLabels(displayName string) (name, display string) {
+	d := strings.TrimSpace(displayName)
+	if d == "" {
+		d = "Latch passkey " + uuid.NewString()[:8]
+	}
+	return d, d
+}
+
+// credentialDescriptorsJSON converts base64url credential IDs into the
+// WebAuthn PublicKeyCredentialDescriptor JSON shape used by both
+// excludeCredentials (registration) and allowCredentials (authentication).
+func credentialDescriptorsJSON(ids []string) []gin.H {
+	out := make([]gin.H, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, gin.H{"id": id, "type": "public-key"})
+	}
+	return out
+}
+
 // RegistrationBegin godoc
 // @Summary      Begin a WebAuthn registration ceremony
 // @Description  Returns PublicKeyCredentialCreationOptions for the session user to pass to navigator.credentials.create(). The session cookie is set automatically if missing.
@@ -95,15 +123,21 @@ func (h *WebAuthnHandler) RegistrationBegin(c *gin.Context) {
 		return
 	}
 
-	webappx.Success(c, http.StatusOK, gin.H{"options": gin.H{
+	name, display := webauthnUserLabels(req.DisplayName)
+	options := gin.H{
 		"challenge":              opts.Challenge,
 		"rp":                     gin.H{"id": opts.RPID, "name": "Latch"},
-		"user":                   gin.H{"id": opts.UserID, "name": "Latch User", "displayName": "Latch User"},
+		"user":                   gin.H{"id": opts.UserID, "name": name, "displayName": display},
 		"pubKeyCredParams":       []gin.H{{"alg": -7, "type": "public-key"}},
 		"authenticatorSelection": gin.H{"residentKey": "preferred", "userVerification": "preferred"},
 		"timeout":                opts.Timeout,
 		"attestation":            "none",
-	}})
+	}
+	if len(opts.ExcludeCredentials) > 0 {
+		options["excludeCredentials"] = credentialDescriptorsJSON(opts.ExcludeCredentials)
+	}
+
+	webappx.Success(c, http.StatusOK, gin.H{"options": options})
 }
 
 type publicKeyCredentialResponseJSON struct {
@@ -242,18 +276,20 @@ func (h *WebAuthnHandler) AuthenticationBegin(c *gin.Context) {
 		return
 	}
 
-	allowCreds := make([]gin.H, 0, len(opts.AllowedCredentials))
-	for _, id := range opts.AllowedCredentials {
-		allowCreds = append(allowCreds, gin.H{"id": id, "type": "public-key"})
-	}
-
-	webappx.Success(c, http.StatusOK, gin.H{"options": gin.H{
+	options := gin.H{
 		"challenge":        opts.Challenge,
 		"rpId":             opts.RPID,
 		"userVerification": "preferred",
-		"allowCredentials": allowCreds,
 		"timeout":          opts.Timeout,
-	}})
+	}
+	if len(opts.AllowedCredentials) > 0 {
+		options["allowCredentials"] = credentialDescriptorsJSON(opts.AllowedCredentials)
+	}
+	// If zero credentials: allowCredentials stays unset (discoverable login)
+	// — an empty JSON array means "allow nobody" and hides GPM's Latch
+	// passkeys even though they exist.
+
+	webappx.Success(c, http.StatusOK, gin.H{"options": options})
 }
 
 // AuthenticationFinish godoc
