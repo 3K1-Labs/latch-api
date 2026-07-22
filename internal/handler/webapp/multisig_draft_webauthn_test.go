@@ -41,6 +41,43 @@ func TestMultisigDraftWebAuthnRegistrationBegin_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"draftId":"draft-1"`)
 }
 
+func TestMultisigDraftWebAuthnRegistrationBegin_HonorsDisplayName(t *testing.T) {
+	stub := &stubMultisigDraft{draft: sampleSerializedDraft()}
+	webauthnStub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid", Timeout: 60000}}
+	h := NewMultisigDraftWebAuthnHandler(stub, webauthnStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/drafts/:id/webauthn/register/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts/draft-1/webauthn/register/begin", postJSONBody(map[string]any{"displayName": "Latch account 2 · Family multisig"})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"displayName":"Latch account 2 · Family multisig"`)
+	assert.NotContains(t, w.Body.String(), `"name":"Multisig Signer"`)
+}
+
+func TestMultisigDraftWebAuthnRegistrationBegin_IncludesExcludeCredentials(t *testing.T) {
+	stub := &stubMultisigDraft{draft: sampleSerializedDraft()}
+	webauthnStub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{
+		Challenge:          "chal",
+		RPID:               "latch.finance",
+		UserID:             "uid",
+		ExcludeCredentials: []string{"cred-existing"},
+		Timeout:            60000,
+	}}
+	h := NewMultisigDraftWebAuthnHandler(stub, webauthnStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/drafts/:id/webauthn/register/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts/draft-1/webauthn/register/begin", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"excludeCredentials":[{"id":"cred-existing","type":"public-key"}]`)
+}
+
 func TestMultisigDraftWebAuthnRegistrationBegin_DraftNotFound(t *testing.T) {
 	stub := &stubMultisigDraft{draftErr: webapp.ErrMultisigDraftNotFound}
 	h := NewMultisigDraftWebAuthnHandler(stub, &stubWebauthn{}, testCfg())
@@ -67,6 +104,21 @@ func TestMultisigDraftWebAuthnAuthenticationBegin_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"challenge":"chal"`)
+}
+
+func TestMultisigDraftWebAuthnAuthenticationBegin_NoCredentials_OmitsAllowCredentials(t *testing.T) {
+	stub := &stubMultisigDraft{draft: sampleSerializedDraft()}
+	webauthnStub := &stubWebauthn{beginAuthOpts: webapp.AuthenticationOptions{Challenge: "chal", RPID: "latch.finance", Timeout: 60000}}
+	h := NewMultisigDraftWebAuthnHandler(stub, webauthnStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/drafts/:id/webauthn/authenticate/begin", h.AuthenticationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts/draft-1/webauthn/authenticate/begin", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "allowCredentials")
 }
 
 func TestMultisigDraftWebAuthnRegistrationFinish_InvalidBody(t *testing.T) {

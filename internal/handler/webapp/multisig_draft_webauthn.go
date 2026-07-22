@@ -96,16 +96,22 @@ func (h *MultisigDraftWebAuthnHandler) RegistrationBegin(c *gin.Context) {
 		return
 	}
 
+	name, display := webauthnUserLabels(req.DisplayName)
+	options := gin.H{
+		"challenge":              opts.Challenge,
+		"rp":                     gin.H{"id": opts.RPID, "name": "Latch"},
+		"user":                   gin.H{"id": opts.UserID, "name": name, "displayName": display},
+		"pubKeyCredParams":       []gin.H{{"alg": -7, "type": "public-key"}},
+		"authenticatorSelection": gin.H{"residentKey": "preferred", "userVerification": "preferred"},
+		"timeout":                opts.Timeout,
+		"attestation":            "none",
+	}
+	if len(opts.ExcludeCredentials) > 0 {
+		options["excludeCredentials"] = credentialDescriptorsJSON(opts.ExcludeCredentials)
+	}
+
 	webappx.Success(c, http.StatusOK, gin.H{
-		"options": gin.H{
-			"challenge":              opts.Challenge,
-			"rp":                     gin.H{"id": opts.RPID, "name": "Latch"},
-			"user":                   gin.H{"id": opts.UserID, "name": "Multisig Signer", "displayName": "Multisig Signer"},
-			"pubKeyCredParams":       []gin.H{{"alg": -7, "type": "public-key"}},
-			"authenticatorSelection": gin.H{"residentKey": "preferred", "userVerification": "preferred"},
-			"timeout":                opts.Timeout,
-			"attestation":            "none",
-		},
+		"options": options,
 		"draftId": c.Param("id"),
 	})
 }
@@ -207,18 +213,17 @@ func (h *MultisigDraftWebAuthnHandler) AuthenticationBegin(c *gin.Context) {
 		return
 	}
 
-	allowCreds := make([]gin.H, 0, len(opts.AllowedCredentials))
-	for _, id := range opts.AllowedCredentials {
-		allowCreds = append(allowCreds, gin.H{"id": id, "type": "public-key"})
+	options := gin.H{
+		"challenge":        opts.Challenge,
+		"rpId":             opts.RPID,
+		"userVerification": "preferred",
+		"timeout":          opts.Timeout,
+	}
+	if len(opts.AllowedCredentials) > 0 {
+		options["allowCredentials"] = credentialDescriptorsJSON(opts.AllowedCredentials)
 	}
 	webappx.Success(c, http.StatusOK, gin.H{
-		"options": gin.H{
-			"challenge":        opts.Challenge,
-			"rpId":             opts.RPID,
-			"userVerification": "preferred",
-			"allowCredentials": allowCreds,
-			"timeout":          opts.Timeout,
-		},
+		"options": options,
 		"draftId": c.Param("id"),
 	})
 }

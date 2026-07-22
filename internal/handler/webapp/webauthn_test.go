@@ -57,6 +57,77 @@ func TestRegistrationBegin_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"attestation":"none"`)
 }
 
+func TestRegistrationBegin_HonorsDisplayName(t *testing.T) {
+	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubAudit{}, testCfg())
+
+	r := gin.New()
+	r.POST("/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/begin", postJSONBody(map[string]any{"displayName": "Latch account 2 · Family multisig"})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"displayName":"Latch account 2 · Family multisig"`)
+	assert.Contains(t, w.Body.String(), `"name":"Latch account 2 · Family multisig"`)
+}
+
+func TestRegistrationBegin_FallbackDisplayNameIsUnique(t *testing.T) {
+	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubAudit{}, testCfg())
+
+	r := gin.New()
+	r.POST("/begin", h.RegistrationBegin)
+
+	var bodies []string
+	for range 2 {
+		req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/begin", nil), "user-1")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), `"name":"Latch User"`)
+		bodies = append(bodies, w.Body.String())
+	}
+	assert.NotEqual(t, bodies[0], bodies[1])
+}
+
+func TestRegistrationBegin_IncludesExcludeCredentials(t *testing.T) {
+	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{
+		Challenge:          "chal",
+		RPID:               "latch.finance",
+		UserID:             "uid-b64",
+		ExcludeCredentials: []string{"cred-existing"},
+		Timeout:            60000,
+	}}
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubAudit{}, testCfg())
+
+	r := gin.New()
+	r.POST("/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/begin", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"excludeCredentials":[{"id":"cred-existing","type":"public-key"}]`)
+}
+
+func TestRegistrationBegin_OmitsExcludeCredentialsWhenEmpty(t *testing.T) {
+	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubAudit{}, testCfg())
+
+	r := gin.New()
+	r.POST("/begin", h.RegistrationBegin)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/begin", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "excludeCredentials")
+}
+
 func TestRegistrationBegin_ConflictingExtensionID(t *testing.T) {
 	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubAudit{}, testCfg())
 	r := gin.New()
@@ -185,6 +256,24 @@ func TestAuthenticationBegin_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"challenge":"chal"`)
+	assert.Contains(t, w.Body.String(), `"allowCredentials":[{"id":"cred-1","type":"public-key"}]`)
+}
+
+// A response with allowCredentials: [] blocks discoverable login — Chrome
+// treats an empty array as "allow nobody" even when GPM has Latch
+// passkeys. Zero credentials must omit the field entirely.
+func TestAuthenticationBegin_NoCredentials_OmitsAllowCredentials(t *testing.T) {
+	stub := &stubWebauthn{beginAuthOpts: webapp.AuthenticationOptions{Challenge: "chal", RPID: "latch.finance", Timeout: 60000}}
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubAudit{}, testCfg())
+	r := gin.New()
+	r.POST("/begin", h.AuthenticationBegin)
+
+	req := httptest.NewRequest(http.MethodPost, "/begin", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), "allowCredentials")
 }
 
 // ── AuthenticationFinish ─────────────────────────────────────────────────────
