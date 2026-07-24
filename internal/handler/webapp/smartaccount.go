@@ -301,7 +301,10 @@ func (h *SmartAccountHandler) Balances(c *gin.Context) {
 	}
 	includeZero := c.Query("all") == "1"
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
+	// Balances is testnet-only for now — mainnet needs its own
+	// BalancesService instance; see LATCH_GO_BACKEND_MAINNET_SUPPORT.md's
+	// phasing (this endpoint isn't in the send-path phase this pass covers).
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, webapp.NetworkTestnet))
 	if err != nil {
 		slog.Error("load asset catalog", "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")

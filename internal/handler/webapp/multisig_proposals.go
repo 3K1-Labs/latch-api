@@ -52,7 +52,10 @@ func (h *MultisigProposalsHandler) Create(c *gin.Context) {
 		return
 	}
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
+	// Multisig proposals are testnet-only for now — mainnet support for
+	// multisig is a separate follow-up (needs its own mainnet-scoped
+	// services); see LATCH_GO_BACKEND_MAINNET_SUPPORT.md's phase 3.
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, webapp.NetworkTestnet))
 	if err != nil {
 		slog.Error("load asset catalog", "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")

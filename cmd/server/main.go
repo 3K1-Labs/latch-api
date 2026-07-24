@@ -158,6 +158,31 @@ func main() {
 		}
 	}
 
+	// Mainnet counterpart of webappTransactionSvc above, independent of the
+	// testnet switch — mainnet's availability must not depend on testnet's
+	// gate. Send-path handlers (build-send/setup-send-rules/submit-*) select
+	// between the two per-request based on the client's network field; nil
+	// here means those requests get mainnet_not_configured rather than
+	// silently falling back to testnet. Only the send path is wired to
+	// mainnet so far — swap, deploy, and multisig stay testnet-only (see
+	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's phasing).
+	webappContextRulesSvcMainnet := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLMainnet)
+	var webappTransactionSvcMainnet *webapp.TransactionService
+	switch cfg.WebAppBundlerSecretMainnet {
+	case "":
+		slog.Warn("BUNDLER_SECRET_MAINNET not configured — mainnet webapp transaction routes will return mainnet_not_configured")
+	default:
+		if bundlerSvcMainnet, err := webapp.NewBundlerService(cfg.WebAppBundlerSecretMainnet, ""); err != nil {
+			slog.Warn("invalid BUNDLER_SECRET_MAINNET — mainnet webapp transaction routes will return mainnet_not_configured", "err", err)
+		} else {
+			webappTransactionSvcMainnet = webapp.NewTransactionService(
+				sorobanSvc, bundlerSvcMainnet, webappContextRulesSvcMainnet,
+				cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppWebAuthnVerifierAddressMainnet,
+				cfg.WebAppEd25519VerifierAddressMainnet, cfg.WebAppCounterContractAddress,
+			)
+		}
+	}
+
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
@@ -363,7 +388,9 @@ func main() {
 	}
 
 	if webappTransactionSvc != nil {
-		webappTransactionHandler := webapphandler.NewTransactionHandler(webappTransactionSvc, cfg)
+		webappTransactionHandler := webapphandler.NewTransactionHandler(
+			webappTransactionSvc, webapphandler.TransactionServiceOrNil(webappTransactionSvcMainnet), cfg,
+		)
 		transactionGroup := webappGroup.Group("/transaction")
 		{
 			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)

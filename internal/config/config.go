@@ -76,6 +76,16 @@ type Config struct {
 	WebAppEd25519VerifierAddress string
 	WebAppNetworkPassphrase      string
 
+	// Mainnet counterparts of the bundler/factory/verifier/passphrase fields
+	// above. Empty WebAppBundlerSecretMainnet disables mainnet webapp
+	// transaction routes (they return mainnet_not_configured) without
+	// affecting testnet — see docs/webapp-port.md and
+	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's compatibility rule.
+	WebAppBundlerSecretMainnet           string
+	WebAppWebAuthnVerifierAddressMainnet string
+	WebAppEd25519VerifierAddressMainnet  string
+	WebAppNetworkPassphraseMainnet       string
+
 	// Browser WebAuthn (passkey) ceremony config — distinct from
 	// WebAuthnAllowedOrigins/WalletAuthSorobanURL above, which serve mobile's
 	// passkey wallet-sign-in signature verification, a different flow.
@@ -88,6 +98,7 @@ type Config struct {
 	// NativeSACIDTestnet/Mainnet above (same contract regardless of caller);
 	// USDC has no existing mobile equivalent, so it gets its own field.
 	WebAppUSDCSACAddressTestnet string
+	WebAppUSDCSACAddressMainnet string
 	WebAppAssetAllowlistJSON    string
 
 	// Demo counter contract used by GET /api/counter and the multisig demo
@@ -146,7 +157,7 @@ func Load() (*Config, error) {
 		HorizonURLTestnet:      getEnv("HORIZON_URL_TESTNET", "https://horizon-testnet.stellar.org"),
 		HorizonURLMainnet:      getEnv("HORIZON_URL_MAINNET", "https://horizon.stellar.org"),
 		NativeSACIDTestnet:     getEnv("NATIVE_SAC_ID_TESTNET", ""),
-		NativeSACIDMainnet:     getEnv("NATIVE_SAC_ID_MAINNET", ""),
+		NativeSACIDMainnet:     getEnv("NATIVE_SAC_ID_MAINNET", "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"),
 		CoinGeckoAPIKey:        getEnv("COINGECKO_API_KEY", ""),
 		WalletAuthSorobanURL:   getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
 		WebAuthnAllowedOrigins: splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "latch.finance")),
@@ -162,12 +173,18 @@ func Load() (*Config, error) {
 		WebAppEd25519VerifierAddress:  getEnv("NEXT_PUBLIC_VERIFIER_ADDRESS", ""),
 		WebAppNetworkPassphrase:       getEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"),
 
+		WebAppBundlerSecretMainnet:           getEnv("BUNDLER_SECRET_MAINNET", ""),
+		WebAppWebAuthnVerifierAddressMainnet: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS_MAINNET", ""),
+		WebAppEd25519VerifierAddressMainnet:  getEnv("NEXT_PUBLIC_VERIFIER_ADDRESS_MAINNET", ""),
+		WebAppNetworkPassphraseMainnet:       getEnv("MAINNET_NETWORK_PASSPHRASE", "Public Global Stellar Network ; September 2015"),
+
 		WebAppWebAuthnRPID:            getEnv("WEBAUTHN_RP_ID", ""),
 		WebAppWebAuthnOrigin:          getEnv("WEBAUTHN_ORIGIN", ""),
 		WebAppWebAuthnDevTrustReqHost: getEnv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "") != "",
 		WebAppAllowedDevOrigins:       splitCSV(getEnv("ALLOWED_DEV_ORIGINS", "")),
 
 		WebAppUSDCSACAddressTestnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS", "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"),
+		WebAppUSDCSACAddressMainnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS_MAINNET", ""),
 		WebAppAssetAllowlistJSON:    getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
 
 		WebAppCounterContractAddress: getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),

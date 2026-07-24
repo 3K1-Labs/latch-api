@@ -18,7 +18,7 @@ func TestSetupSendRules_Success(t *testing.T) {
 		ConfiguredAsset:            webapp.CatalogAsset{AssetID: "USDC", ContractID: "CCONTRACT"},
 		RemainingSetupCount:        1,
 	}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
 
@@ -37,7 +37,7 @@ func TestSetupSendRules_Success(t *testing.T) {
 
 func TestSetupSendRules_AlreadyConfigured(t *testing.T) {
 	stub := &stubTransaction{setupSendRulesResult: webapp.SetupSendRulesResult{AlreadyConfigured: true, Message: "already done"}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
 
@@ -53,7 +53,7 @@ func TestSetupSendRules_AlreadyConfigured(t *testing.T) {
 }
 
 func TestSetupSendRules_InvalidSignerType(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
 
@@ -68,7 +68,7 @@ func TestSetupSendRules_InvalidSignerType(t *testing.T) {
 }
 
 func TestSetupSendRules_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{setupSendRulesErr: assertErr}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{setupSendRulesErr: assertErr}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
 
@@ -83,7 +83,7 @@ func TestSetupSendRules_ServiceError(t *testing.T) {
 }
 
 func TestSetupSendRules_BadBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
 
@@ -96,6 +96,80 @@ func TestSetupSendRules_BadBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestSetupSendRules_AssetNotFound(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{setupSendRulesErr: webapp.ErrAssetNotFound}, nil, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-send-rules", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"signerType":          "passkey",
+		"assetId":             "native",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"asset_not_found"`)
+}
+
+func TestSetupSendRules_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
+	testnetStub := &stubTransaction{setupSendRulesResult: webapp.SetupSendRulesResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
+	}}
+	mainnetStub := &stubTransaction{setupSendRulesResult: webapp.SetupSendRulesResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
+	}}
+	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-send-rules", postJSONBody(map[string]any{
+		"network":             "mainnet",
+		"smartAccountAddress": "CADDRESS",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"txXdr":"MAINNET_TX"`)
+}
+
+func TestSetupSendRules_NetworkMainnet_NotConfigured(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-send-rules", postJSONBody(map[string]any{
+		"network":             "mainnet",
+		"smartAccountAddress": "CADDRESS",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
+}
+
+func TestSetupSendRules_NetworkInvalid(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-send-rules", postJSONBody(map[string]any{
+		"network":             "devnet",
+		"smartAccountAddress": "CADDRESS",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
+}
+
 // ── SetupSwapRules ───────────────────────────────────────────────────────────
 
 func TestSetupSwapRules_Success(t *testing.T) {
@@ -103,7 +177,7 @@ func TestSetupSwapRules_Success(t *testing.T) {
 		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "AAAAtx==", SubmitMethod: "webauthn"},
 		RouterContractID:           "CROUTER",
 	}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
 
@@ -121,7 +195,7 @@ func TestSetupSwapRules_Success(t *testing.T) {
 
 func TestSetupSwapRules_AlreadyConfigured(t *testing.T) {
 	stub := &stubTransaction{setupSwapRulesResult: webapp.SetupSwapRulesResult{AlreadyConfigured: true, Message: "already done", RouterContractID: "CROUTER"}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
 
@@ -136,7 +210,7 @@ func TestSetupSwapRules_AlreadyConfigured(t *testing.T) {
 }
 
 func TestSetupSwapRules_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{setupSwapRulesErr: assertErr}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{setupSwapRulesErr: assertErr}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
 
@@ -150,7 +224,7 @@ func TestSetupSwapRules_ServiceError(t *testing.T) {
 }
 
 func TestSetupSwapRules_BadBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
 
@@ -167,7 +241,7 @@ func TestBuildCounter_Success(t *testing.T) {
 	stub := &stubTransaction{buildCounterResult: webapp.BuildCounterResult{
 		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "AAAAtx=="},
 	}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build", h.BuildCounter)
 
@@ -182,7 +256,7 @@ func TestBuildCounter_Success(t *testing.T) {
 }
 
 func TestBuildCounter_BadBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build", h.BuildCounter)
 
@@ -194,7 +268,7 @@ func TestBuildCounter_BadBody(t *testing.T) {
 }
 
 func TestBuildCounter_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildCounterErr: assertErr}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildCounterErr: assertErr}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build", h.BuildCounter)
 
@@ -211,7 +285,7 @@ func TestBuildCounter_ServiceError(t *testing.T) {
 
 func TestBuildDelegatedCounter_Success(t *testing.T) {
 	stub := &stubTransaction{buildDelegatedCounterResult: webapp.BuildDelegatedCounterResult{TxXdr: "AAAAtx=="}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-delegated", h.BuildDelegatedCounter)
 
@@ -227,7 +301,7 @@ func TestBuildDelegatedCounter_Success(t *testing.T) {
 }
 
 func TestBuildDelegatedCounter_BadBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-delegated", h.BuildDelegatedCounter)
 
@@ -241,7 +315,7 @@ func TestBuildDelegatedCounter_BadBody(t *testing.T) {
 }
 
 func TestBuildDelegatedCounter_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildDelegatedCounterErr: assertErr}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildDelegatedCounterErr: assertErr}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-delegated", h.BuildDelegatedCounter)
 
@@ -262,7 +336,7 @@ func TestBuildSwap_Success(t *testing.T) {
 		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "AAAAtx==", SubmitMethod: "webauthn"},
 		RouterContractID:           "CROUTER",
 	}}
-	h := NewTransactionHandler(stub, testCfg())
+	h := NewTransactionHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
@@ -282,7 +356,7 @@ func TestBuildSwap_Success(t *testing.T) {
 }
 
 func TestBuildSwap_InvalidSignerType(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
@@ -301,7 +375,7 @@ func TestBuildSwap_InvalidSignerType(t *testing.T) {
 }
 
 func TestBuildSwap_FreighterMissingSignerG(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
@@ -320,7 +394,7 @@ func TestBuildSwap_FreighterMissingSignerG(t *testing.T) {
 }
 
 func TestBuildSwap_BadBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
@@ -332,7 +406,7 @@ func TestBuildSwap_BadBody(t *testing.T) {
 }
 
 func TestBuildSwap_SignerMismatchError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSwapErr: webapp.ErrSwapSignerMismatch}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSwapErr: webapp.ErrSwapSignerMismatch}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
@@ -353,7 +427,7 @@ func TestBuildSwap_SignerMismatchError(t *testing.T) {
 }
 
 func TestBuildSwap_ValidationError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSwapErr: webapp.ErrSwapValidation}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSwapErr: webapp.ErrSwapValidation}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
@@ -373,7 +447,7 @@ func TestBuildSwap_ValidationError(t *testing.T) {
 }
 
 func TestBuildSwap_InternalError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSwapErr: assertErr}, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSwapErr: assertErr}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 

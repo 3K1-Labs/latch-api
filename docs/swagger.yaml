@@ -535,6 +535,8 @@ definitions:
         type: string
       contractId:
         type: string
+      network:
+        type: string
       recipient:
         type: string
       signerG:
@@ -975,6 +977,8 @@ definitions:
         type: string
       keyDataHex:
         type: string
+      network:
+        type: string
       publicKeyHex:
         type: string
       signerType:
@@ -1018,6 +1022,8 @@ definitions:
         type: boolean
       gAddressEntryTemplateXdr:
         type: string
+      network:
+        type: string
       signedAuthEntryBase64:
         type: string
       signerAddress:
@@ -1046,6 +1052,8 @@ definitions:
         type: string
       contextRuleId:
         type: integer
+      network:
+        type: string
       prefixedMessage:
         type: string
       publicKeyHex:
@@ -1070,6 +1078,8 @@ definitions:
       delegatedGAuthEntrySynthesized:
         type: boolean
       keyDataHex:
+        type: string
+      network:
         type: string
       sigDataXdr:
         type: string
