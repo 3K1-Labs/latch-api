@@ -26,4 +26,14 @@ const (
 	// failures that aren't a signer mismatch (e.g. malformed amounts,
 	// insufficient balance, signerG equal to the bundler fee-payer).
 	ErrValidation ErrorCode = "validation_error"
+	// ErrInvalidNetwork is returned when a request's network field is
+	// neither empty, "testnet", nor "mainnet".
+	ErrInvalidNetwork ErrorCode = "invalid_network"
+	// ErrMainnetNotConfigured is returned when network: "mainnet" is
+	// requested but this server has no mainnet bundler/RPC configured —
+	// never silently falls back to testnet.
+	ErrMainnetNotConfigured ErrorCode = "mainnet_not_configured"
+	// ErrAssetNotFound is returned when assetId/contractId doesn't resolve
+	// against the active network's asset catalog.
+	ErrAssetNotFound ErrorCode = "asset_not_found"
 )

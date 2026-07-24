@@ -5386,6 +5386,9 @@
                 "contractId": {
                     "type": "string"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "recipient": {
                     "type": "string"
                 },
@@ -6022,6 +6025,9 @@
                 "keyDataHex": {
                     "type": "string"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "publicKeyHex": {
                     "type": "string"
                 },
@@ -6089,6 +6095,9 @@
                 "gAddressEntryTemplateXdr": {
                     "type": "string"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "signedAuthEntryBase64": {
                     "type": "string"
                 },
@@ -6129,6 +6138,9 @@
                 "contextRuleId": {
                     "type": "integer"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "prefixedMessage": {
                     "type": "string"
                 },
@@ -6164,6 +6176,9 @@
                     "type": "boolean"
                 },
                 "keyDataHex": {
+                    "type": "string"
+                },
+                "network": {
                     "type": "string"
                 },
                 "sigDataXdr": {

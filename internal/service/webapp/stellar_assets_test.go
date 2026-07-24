@@ -31,6 +31,26 @@ func TestGetAssetCatalog_MainnetEmptyWithoutAllowlist(t *testing.T) {
 	assert.Empty(t, catalog)
 }
 
+func TestGetAssetCatalog_MainnetNativeOnly(t *testing.T) {
+	nativeSAC := testContractAddress(t)
+	catalog, err := GetAssetCatalog(AssetCatalogConfig{IsMainnet: true, NativeSACMainnet: nativeSAC})
+	require.NoError(t, err)
+	require.Len(t, catalog, 1)
+	assert.Equal(t, "native", catalog[0].AssetID)
+	assert.Equal(t, nativeSAC, catalog[0].ContractID)
+}
+
+func TestGetAssetCatalog_MainnetNativeAndUSDC(t *testing.T) {
+	nativeSAC := testContractAddress(t)
+	usdcSAC := testContractAddress(t)
+	catalog, err := GetAssetCatalog(AssetCatalogConfig{IsMainnet: true, NativeSACMainnet: nativeSAC, USDCSACMainnet: usdcSAC})
+	require.NoError(t, err)
+	require.Len(t, catalog, 2)
+	assert.Equal(t, "native", catalog[0].AssetID)
+	assert.Equal(t, "USDC", catalog[1].AssetID)
+	assert.Equal(t, usdcSAC, catalog[1].ContractID)
+}
+
 func TestGetAssetCatalog_AllowlistTakesPriority(t *testing.T) {
 	addr := testContractAddress(t)
 	allowlist := `[{"assetId":"custom","symbol":"CST","name":"Custom","contractId":"` + addr + `","decimals":7}]`

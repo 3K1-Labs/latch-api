@@ -32,14 +32,18 @@ type AssetCatalogConfig struct {
 	AllowlistJSON    string
 	NativeSACTestnet string // falls back to defaultTestnetNativeSAC if empty
 	USDCSACTestnet   string // falls back to defaultTestnetUSDCSAC if empty
+	NativeSACMainnet string // empty means no mainnet catalog (see GetAssetCatalog)
+	USDCSACMainnet   string // optional; omitted from the mainnet catalog if empty
 	IsMainnet        bool
 }
 
 // GetAssetCatalog returns the configured asset catalog. Ports
 // lib/stellar-assets.ts's getAssetCatalog(): an explicit allowlist JSON
 // takes priority; otherwise testnet gets built-in native/USDC defaults
-// (overridable), and mainnet gets an empty catalog unless an allowlist is
-// configured.
+// (overridable). Mainnet gets a native-only (or native+USDC, if configured)
+// catalog when NativeSACMainnet is set, else an empty catalog — matching the
+// pre-mainnet-support behavior for any caller that hasn't wired the mainnet
+// field yet.
 func GetAssetCatalog(cfg AssetCatalogConfig) ([]CatalogAsset, error) {
 	if cfg.AllowlistJSON != "" {
 		var catalog []CatalogAsset
@@ -50,7 +54,16 @@ func GetAssetCatalog(cfg AssetCatalogConfig) ([]CatalogAsset, error) {
 	}
 
 	if cfg.IsMainnet {
-		return nil, nil
+		if cfg.NativeSACMainnet == "" {
+			return nil, nil
+		}
+		catalog := []CatalogAsset{
+			{AssetID: "native", Symbol: "XLM", Name: "Stellar Lumens", ContractID: cfg.NativeSACMainnet, Decimals: 7},
+		}
+		if cfg.USDCSACMainnet != "" {
+			catalog = append(catalog, CatalogAsset{AssetID: "USDC", Symbol: "USDC", Name: "USD Coin", ContractID: cfg.USDCSACMainnet, Decimals: 7})
+		}
+		return filterValidSACCatalog(catalog), nil
 	}
 
 	nativeSAC := cfg.NativeSACTestnet

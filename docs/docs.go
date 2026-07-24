@@ -5392,6 +5392,9 @@ const docTemplate = `{
                 "contractId": {
                     "type": "string"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "recipient": {
                     "type": "string"
                 },
@@ -6028,6 +6031,9 @@ const docTemplate = `{
                 "keyDataHex": {
                     "type": "string"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "publicKeyHex": {
                     "type": "string"
                 },
@@ -6095,6 +6101,9 @@ const docTemplate = `{
                 "gAddressEntryTemplateXdr": {
                     "type": "string"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "signedAuthEntryBase64": {
                     "type": "string"
                 },
@@ -6135,6 +6144,9 @@ const docTemplate = `{
                 "contextRuleId": {
                     "type": "integer"
                 },
+                "network": {
+                    "type": "string"
+                },
                 "prefixedMessage": {
                     "type": "string"
                 },
@@ -6170,6 +6182,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "keyDataHex": {
+                    "type": "string"
+                },
+                "network": {
                     "type": "string"
                 },
                 "sigDataXdr": {
