@@ -158,28 +158,41 @@ func main() {
 		}
 	}
 
-	// Mainnet counterpart of webappTransactionSvc above, independent of the
-	// testnet switch — mainnet's availability must not depend on testnet's
-	// gate. Send-path handlers (build-send/setup-send-rules/submit-*) select
-	// between the two per-request based on the client's network field; nil
-	// here means those requests get mainnet_not_configured rather than
-	// silently falling back to testnet. Only the send path is wired to
-	// mainnet so far — swap, deploy, and multisig stay testnet-only (see
-	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's phasing).
+	// Mainnet counterparts of webappTransactionSvc/webappSmartAccountSvc
+	// above, independent of the testnet switch — mainnet's availability must
+	// not depend on testnet's gate. Send-path and stateless smart-account
+	// handlers select between the two per-request based on the client's
+	// network field; nil here means those requests get
+	// mainnet_not_configured rather than silently falling back to testnet.
+	// Deploy/multisig (persisted, multi-request flows) stay testnet-only —
+	// they need a DB-level network column to track which network an
+	// already-deployed account lives on, which is out of scope here; see
+	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's phasing.
 	webappContextRulesSvcMainnet := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLMainnet)
+	webappBalancesSvcMainnet := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLMainnet)
 	var webappTransactionSvcMainnet *webapp.TransactionService
+	var webappSmartAccountSvcMainnet *webapp.SmartAccountService
 	switch cfg.WebAppBundlerSecretMainnet {
 	case "":
-		slog.Warn("BUNDLER_SECRET_MAINNET not configured — mainnet webapp transaction routes will return mainnet_not_configured")
+		slog.Warn("BUNDLER_SECRET_MAINNET not configured — mainnet webapp transaction/smart-account routes will return mainnet_not_configured")
 	default:
 		if bundlerSvcMainnet, err := webapp.NewBundlerService(cfg.WebAppBundlerSecretMainnet, ""); err != nil {
-			slog.Warn("invalid BUNDLER_SECRET_MAINNET — mainnet webapp transaction routes will return mainnet_not_configured", "err", err)
+			slog.Warn("invalid BUNDLER_SECRET_MAINNET — mainnet webapp transaction/smart-account routes will return mainnet_not_configured", "err", err)
 		} else {
 			webappTransactionSvcMainnet = webapp.NewTransactionService(
 				sorobanSvc, bundlerSvcMainnet, webappContextRulesSvcMainnet,
 				cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppWebAuthnVerifierAddressMainnet,
 				cfg.WebAppEd25519VerifierAddressMainnet, cfg.WebAppCounterContractAddress,
 			)
+
+			if cfg.WebAppFactoryAddressMainnet == "" {
+				slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET not configured — mainnet smart-account creation routes will return mainnet_not_configured")
+			} else {
+				webappSmartAccountSvcMainnet = webapp.NewSmartAccountService(
+					sorobanSvc, bundlerSvcMainnet, queries,
+					cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppFactoryAddressMainnet,
+				)
+			}
 		}
 	}
 
@@ -361,7 +374,12 @@ func main() {
 
 	// Context-rules/balances are pure reads and never touch the bundler, so
 	// they're always mounted regardless of bundler config completeness.
-	webappSmartAccountHandler := webapphandler.NewSmartAccountHandler(webappSmartAccountSvc, webappContextRulesSvc, webappBalancesSvc, cfg)
+	webappSmartAccountHandler := webapphandler.NewSmartAccountHandler(
+		webappSmartAccountSvc, webapphandler.SmartAccountServiceOrNil(webappSmartAccountSvcMainnet),
+		webappContextRulesSvc, webappContextRulesSvcMainnet,
+		webappBalancesSvc, webappBalancesSvcMainnet,
+		cfg,
+	)
 	smartAccountGroup := webappGroup.Group("/smart-account")
 	{
 		smartAccountGroup.GET("/context-rules", webappSmartAccountHandler.ContextRules)

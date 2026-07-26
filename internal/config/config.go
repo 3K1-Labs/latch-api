@@ -67,6 +67,7 @@ type Config struct {
 	WebAppLegacyDelegatedSignerSecret string
 
 	WebAppFactoryAddress          string
+	WebAppFactoryAddressMainnet   string
 	WebAppWebAuthnVerifierAddress string
 	// WebAppEd25519VerifierAddress is the Ed25519PhantomVerifier contract
 	// address configured as the factory's ed25519_verifier — verifies a
@@ -80,7 +81,10 @@ type Config struct {
 	// above. Empty WebAppBundlerSecretMainnet disables mainnet webapp
 	// transaction routes (they return mainnet_not_configured) without
 	// affecting testnet — see docs/webapp-port.md and
-	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's compatibility rule.
+	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's compatibility rule. Empty
+	// WebAppFactoryAddressMainnet independently disables mainnet
+	// smart-account creation routes only (transaction routes above don't
+	// need a factory address).
 	WebAppBundlerSecretMainnet           string
 	WebAppWebAuthnVerifierAddressMainnet string
 	WebAppEd25519VerifierAddressMainnet  string
@@ -108,7 +112,8 @@ type Config struct {
 	// (hex-encoded) POST /api/smart-account (Phantom connect) deploys via a
 	// direct createContractV2 host function — the legacy, pre-factory
 	// deployment path, distinct from WebAppFactoryAddress's create_account.
-	WebAppSmartAccountWasmHash string
+	WebAppSmartAccountWasmHash        string
+	WebAppSmartAccountWasmHashMainnet string
 
 	// MoonPay on-ramp — dev-only, /api/on-ramp/* returns 403 in production
 	// regardless of whether these are configured.
@@ -169,6 +174,7 @@ func Load() (*Config, error) {
 		WebAppLegacyDelegatedSignerSecret: getEnv("LEGACY_DELEGATED_SIGNER_SECRET", getEnv("LEGACY_BUNDLER_SECRET", "")),
 
 		WebAppFactoryAddress:          getEnv("NEXT_PUBLIC_FACTORY_ADDRESS", ""),
+		WebAppFactoryAddressMainnet:   getEnv("NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET", ""),
 		WebAppWebAuthnVerifierAddress: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", ""),
 		WebAppEd25519VerifierAddress:  getEnv("NEXT_PUBLIC_VERIFIER_ADDRESS", ""),
 		WebAppNetworkPassphrase:       getEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"),
@@ -187,8 +193,9 @@ func Load() (*Config, error) {
 		WebAppUSDCSACAddressMainnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS_MAINNET", ""),
 		WebAppAssetAllowlistJSON:    getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
 
-		WebAppCounterContractAddress: getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
-		WebAppSmartAccountWasmHash:   getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH", "c00f972cb8ed5eba151f4cd6e97519db679a7a31cc657838449b405fb9cf53c4"),
+		WebAppCounterContractAddress:      getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
+		WebAppSmartAccountWasmHash:        getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH", "c00f972cb8ed5eba151f4cd6e97519db679a7a31cc657838449b405fb9cf53c4"),
+		WebAppSmartAccountWasmHashMainnet: getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH_MAINNET", ""),
 
 		WebAppMoonPaySecretKey:         getEnv("MOONPAY_SECRET_KEY", ""),
 		WebAppMoonPayPublishableKey:    getEnv("MOONPAY_PUBLISHABLE_KEY", ""),
