@@ -11,26 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// ── SmartAccountServiceOrNil ────────────────────────────────────────────────
-
-func TestSmartAccountServiceOrNil_NilPointerYieldsTrueNilInterface(t *testing.T) {
-	var svc *webapp.SmartAccountService
-	got := SmartAccountServiceOrNil(svc)
-	// A naive `smartAccountService(svc)` conversion would produce a non-nil
-	// interface wrapping a nil pointer; this must be a true nil.
-	assert.Nil(t, got)
-}
-
-func TestSmartAccountServiceOrNil_NonNilPointerPreserved(t *testing.T) {
-	svc := &webapp.SmartAccountService{}
-	got := SmartAccountServiceOrNil(svc)
-	assert.NotNil(t, got)
-}
-
 // ── Query ────────────────────────────────────────────────────────────────────
 
 func TestSmartAccountQuery_Success(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryAddress: "CADDRESS", queryDeployed: true}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{queryAddress: "CADDRESS", queryDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/webauthn", h.Query)
 
@@ -44,7 +28,7 @@ func TestSmartAccountQuery_Success(t *testing.T) {
 }
 
 func TestSmartAccountQuery_MissingParams(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/webauthn", h.Query)
 
@@ -56,7 +40,7 @@ func TestSmartAccountQuery_MissingParams(t *testing.T) {
 }
 
 func TestSmartAccountQuery_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{queryErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/webauthn", h.Query)
 
@@ -67,51 +51,10 @@ func TestSmartAccountQuery_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestSmartAccountQuery_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubSmartAccount{queryAddress: "CTESTNET"}
-	mainnetStub := &stubSmartAccount{queryAddress: "CMAINNET"}
-	h := NewSmartAccountHandler(testnetStub, mainnetStub, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/webauthn", h.Query)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/webauthn?credentialId=cred&keyDataHex=aabb&network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CMAINNET"`)
-}
-
-func TestSmartAccountQuery_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/webauthn", h.Query)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/webauthn?credentialId=cred&keyDataHex=aabb&network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
-func TestSmartAccountQuery_NetworkInvalid(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/webauthn", h.Query)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/webauthn?credentialId=cred&keyDataHex=aabb&network=devnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
-}
-
 // ── Deploy ───────────────────────────────────────────────────────────────────
 
 func TestSmartAccountDeploy_Success(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployByKeyAddress: "CADDRESS", deployByKeyAlreadyDeployed: true}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployByKeyAddress: "CADDRESS", deployByKeyAlreadyDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.Deploy)
 
@@ -129,7 +72,7 @@ func TestSmartAccountDeploy_Success(t *testing.T) {
 }
 
 func TestSmartAccountDeploy_KeyDataHexTooShort(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.Deploy)
 
@@ -144,7 +87,7 @@ func TestSmartAccountDeploy_KeyDataHexTooShort(t *testing.T) {
 }
 
 func TestSmartAccountDeploy_MissingCredentialID(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.Deploy)
 
@@ -158,7 +101,7 @@ func TestSmartAccountDeploy_MissingCredentialID(t *testing.T) {
 }
 
 func TestSmartAccountDeploy_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployByKeyErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployByKeyErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.Deploy)
 
@@ -173,24 +116,6 @@ func TestSmartAccountDeploy_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestSmartAccountDeploy_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.POST("/smart-account/webauthn", h.Deploy)
-
-	longHex := strings.Repeat("a", 140)
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/webauthn", postJSONBody(map[string]any{
-		"network":      "mainnet",
-		"keyDataHex":   longHex,
-		"credentialId": "cred-1",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 // ── ContextRules ─────────────────────────────────────────────────────────────
 
 func TestSmartAccountContextRules_Success(t *testing.T) {
@@ -199,7 +124,7 @@ func TestSmartAccountContextRules_Success(t *testing.T) {
 			{Kind: "webauthn", VerifierAddress: "CVERIFIER", KeyDataHex: "aabbcc"},
 		}},
 	}}
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, stub, stub, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, stub, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/context-rules", h.ContextRules)
 
@@ -212,37 +137,8 @@ func TestSmartAccountContextRules_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"network":"testnet"`)
 }
 
-func TestSmartAccountContextRules_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubContextRules{rules: []webapp.ContextRuleSummary{{ID: 1, Name: "testnet-rule"}}}
-	mainnetStub := &stubContextRules{rules: []webapp.ContextRuleSummary{{ID: 2, Name: "mainnet-rule"}}}
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, testnetStub, mainnetStub, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/context-rules", h.ContextRules)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/context-rules?address=CADDRESS&network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"network":"mainnet"`)
-	assert.Contains(t, w.Body.String(), `"name":"mainnet-rule"`)
-}
-
-func TestSmartAccountContextRules_NetworkInvalid(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/context-rules", h.ContextRules)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/context-rules?address=CADDRESS&network=devnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
-}
-
 func TestSmartAccountContextRules_MissingAddress(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/context-rules", h.ContextRules)
 
@@ -254,7 +150,7 @@ func TestSmartAccountContextRules_MissingAddress(t *testing.T) {
 }
 
 func TestSmartAccountContextRules_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{err: assertErr}, &stubContextRules{err: assertErr}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{err: assertErr}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/context-rules", h.ContextRules)
 
@@ -271,7 +167,7 @@ func TestSmartAccountBalances_Success(t *testing.T) {
 	stub := &stubBalances{balances: []webapp.AssetBalance{
 		{AssetID: "native", Symbol: "XLM", ContractID: "CCONTRACT", Decimals: 7, Balance: "1.5", BalanceRaw: "15000000"},
 	}}
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, stub, stub, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, stub, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/balances", h.Balances)
 
@@ -283,38 +179,8 @@ func TestSmartAccountBalances_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"balance":"1.5"`)
 }
 
-func TestSmartAccountBalances_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubBalances{balances: []webapp.AssetBalance{{AssetID: "native", Symbol: "XLM", Balance: "1.0"}}}
-	mainnetStub := &stubBalances{balances: []webapp.AssetBalance{{AssetID: "native", Symbol: "XLM", Balance: "2.0"}}}
-	cfg := testCfg()
-	cfg.NativeSACIDMainnet = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, testnetStub, mainnetStub, cfg)
-	r := gin.New()
-	r.GET("/smart-account/balances", h.Balances)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/balances?smartAccountAddress=CADDRESS&network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"balance":"2.0"`)
-}
-
-func TestSmartAccountBalances_NetworkInvalid(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/balances", h.Balances)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/balances?smartAccountAddress=CADDRESS&network=devnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
-}
-
 func TestSmartAccountBalances_MissingAddress(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/balances", h.Balances)
 
@@ -326,7 +192,7 @@ func TestSmartAccountBalances_MissingAddress(t *testing.T) {
 }
 
 func TestSmartAccountBalances_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{err: assertErr}, &stubBalances{err: assertErr}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{err: assertErr}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/balances", h.Balances)
 
@@ -340,7 +206,7 @@ func TestSmartAccountBalances_ServiceError(t *testing.T) {
 func TestSmartAccountBalances_BadAssetAllowlistJSON(t *testing.T) {
 	cfg := testCfg()
 	cfg.WebAppAssetAllowlistJSON = "{not json"
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, cfg)
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, cfg)
 	r := gin.New()
 	r.GET("/smart-account/balances", h.Balances)
 
@@ -356,7 +222,7 @@ func TestSmartAccountBalances_BadAssetAllowlistJSON(t *testing.T) {
 const testHandlerGAddress = "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
 
 func TestQueryFreighter_Success(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterAddress: "CADDRESS", queryFreighterDeployed: true}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterAddress: "CADDRESS", queryFreighterDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/freighter", h.QueryFreighter)
 
@@ -370,7 +236,7 @@ func TestQueryFreighter_Success(t *testing.T) {
 }
 
 func TestQueryFreighter_InvalidGAddress(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/freighter", h.QueryFreighter)
 
@@ -382,7 +248,7 @@ func TestQueryFreighter_InvalidGAddress(t *testing.T) {
 }
 
 func TestQueryFreighter_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/freighter", h.QueryFreighter)
 
@@ -393,36 +259,8 @@ func TestQueryFreighter_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestQueryFreighter_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubSmartAccount{queryFreighterAddress: "CTESTNET"}
-	mainnetStub := &stubSmartAccount{queryFreighterAddress: "CMAINNET"}
-	h := NewSmartAccountHandler(testnetStub, mainnetStub, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/freighter", h.QueryFreighter)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress="+testHandlerGAddress+"&network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CMAINNET"`)
-}
-
-func TestQueryFreighter_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account/freighter", h.QueryFreighter)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress="+testHandlerGAddress+"&network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 func TestDeployFreighter_Success(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS", deployFreighterAlreadyDeployed: true}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS", deployFreighterAlreadyDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/freighter", h.DeployFreighter)
 
@@ -438,7 +276,7 @@ func TestDeployFreighter_Success(t *testing.T) {
 }
 
 func TestDeployFreighter_InvalidGAddress(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/freighter", h.DeployFreighter)
 
@@ -451,40 +289,8 @@ func TestDeployFreighter_InvalidGAddress(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestDeployFreighter_NetworkMainnet_Rejected(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS"}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
-		"network":  "mainnet",
-		"gAddress": testHandlerGAddress,
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
-func TestDeployFreighter_NetworkInvalid(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
-		"network":  "devnet",
-		"gAddress": testHandlerGAddress,
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
-}
-
 func TestDeployFreighter_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/freighter", h.DeployFreighter)
 
@@ -505,7 +311,7 @@ func TestConnectPhantom_Success(t *testing.T) {
 		GAddress:            testHandlerGAddress,
 		AlreadyDeployed:     true,
 	}}
-	h := NewSmartAccountHandler(stub, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(stub, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account", h.ConnectPhantom)
 
@@ -522,7 +328,7 @@ func TestConnectPhantom_Success(t *testing.T) {
 }
 
 func TestConnectPhantom_InvalidPublicKey(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account", h.ConnectPhantom)
 
@@ -536,7 +342,7 @@ func TestConnectPhantom_InvalidPublicKey(t *testing.T) {
 }
 
 func TestConnectPhantom_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{connectPhantomErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{connectPhantomErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account", h.ConnectPhantom)
 
@@ -549,49 +355,11 @@ func TestConnectPhantom_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestConnectPhantom_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubSmartAccount{connectPhantomResult: webapp.ConnectPhantomResult{SmartAccountAddress: "CTESTNET"}}
-	mainnetStub := &stubSmartAccount{connectPhantomResult: webapp.ConnectPhantomResult{SmartAccountAddress: "CMAINNET"}}
-	cfg := testCfg()
-	cfg.WebAppEd25519VerifierAddress = "CVERIFIER_TESTNET"
-	cfg.WebAppEd25519VerifierAddressMainnet = "CVERIFIER_MAINNET"
-	h := NewSmartAccountHandler(testnetStub, mainnetStub, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, cfg)
-	r := gin.New()
-	r.POST("/smart-account", h.ConnectPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account", postJSONBody(map[string]any{
-		"network":      "mainnet",
-		"publicKeyHex": strings.Repeat("ab", 32),
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CMAINNET"`)
-	assert.Contains(t, w.Body.String(), `"verifierAddress":"CVERIFIER_MAINNET"`)
-}
-
-func TestConnectPhantom_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.POST("/smart-account", h.ConnectPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account", postJSONBody(map[string]any{
-		"network":      "mainnet",
-		"publicKeyHex": strings.Repeat("ab", 32),
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 func TestPhantomConfig_Success(t *testing.T) {
 	cfg := testCfg()
 	cfg.WebAppEd25519VerifierAddress = "CVERIFIER"
 	cfg.WebAppCounterContractAddress = "CCOUNTER"
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, cfg)
+	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, cfg)
 	r := gin.New()
 	r.GET("/smart-account", h.PhantomConfig)
 
@@ -602,35 +370,4 @@ func TestPhantomConfig_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"verifierAddress":"CVERIFIER"`)
 	assert.Contains(t, w.Body.String(), `"counterAddress":"CCOUNTER"`)
-}
-
-func TestPhantomConfig_NetworkMainnet(t *testing.T) {
-	cfg := testCfg()
-	cfg.WebAppEd25519VerifierAddress = "CVERIFIER_TESTNET"
-	cfg.WebAppEd25519VerifierAddressMainnet = "CVERIFIER_MAINNET"
-	cfg.WebAppCounterContractAddress = "CCOUNTER"
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, cfg)
-	r := gin.New()
-	r.GET("/smart-account", h.PhantomConfig)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account?network=mainnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"verifierAddress":"CVERIFIER_MAINNET"`)
-	assert.Contains(t, w.Body.String(), `"network":"mainnet"`)
-}
-
-func TestPhantomConfig_NetworkInvalid(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
-	r := gin.New()
-	r.GET("/smart-account", h.PhantomConfig)
-
-	req := httptest.NewRequest(http.MethodGet, "/smart-account?network=devnet", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
 }

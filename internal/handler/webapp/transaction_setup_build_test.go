@@ -193,58 +193,6 @@ func TestSetupSwapRules_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"routerContractId":"CROUTER"`)
 }
 
-func TestSetupSwapRules_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{setupSwapRulesResult: webapp.SetupSwapRulesResult{RouterContractID: "CTESTNET_ROUTER"}}
-	mainnetStub := &stubTransaction{setupSwapRulesResult: webapp.SetupSwapRulesResult{RouterContractID: "CMAINNET_ROUTER"}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-swap-rules", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "passkey",
-		"keyDataHex":          "aabbcc",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"routerContractId":"CMAINNET_ROUTER"`)
-}
-
-func TestSetupSwapRules_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-swap-rules", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
-func TestSetupSwapRules_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
-
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/setup-swap-rules", postJSONBody(map[string]any{
-		"network":             "not-a-network",
-		"smartAccountAddress": "CADDRESS",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
-}
-
 func TestSetupSwapRules_AlreadyConfigured(t *testing.T) {
 	stub := &stubTransaction{setupSwapRulesResult: webapp.SetupSwapRulesResult{AlreadyConfigured: true, Message: "already done", RouterContractID: "CROUTER"}}
 	h := NewTransactionHandler(stub, nil, testCfg())
@@ -405,71 +353,6 @@ func TestBuildSwap_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"routerContractId":"CROUTER"`)
-}
-
-func TestBuildSwap_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{buildSwapResult: webapp.BuildSwapResult{RouterContractID: "CTESTNET_ROUTER"}}
-	mainnetStub := &stubTransaction{buildSwapResult: webapp.BuildSwapResult{RouterContractID: "CMAINNET_ROUTER"}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/build-swap", h.BuildSwap)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/build-swap", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "passkey",
-		"swapChainXdr":        "AAAAswap==",
-		"tokenInContractId":   "CTOKEN",
-		"amountInRaw":         "100",
-		"amountOutMinRaw":     "90",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"routerContractId":"CMAINNET_ROUTER"`)
-}
-
-func TestBuildSwap_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/build-swap", h.BuildSwap)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/build-swap", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "passkey",
-		"swapChainXdr":        "AAAAswap==",
-		"tokenInContractId":   "CTOKEN",
-		"amountInRaw":         "100",
-		"amountOutMinRaw":     "90",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
-func TestBuildSwap_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/build-swap", h.BuildSwap)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/build-swap", postJSONBody(map[string]any{
-		"network":             "not-a-network",
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "passkey",
-		"swapChainXdr":        "AAAAswap==",
-		"tokenInContractId":   "CTOKEN",
-		"amountInRaw":         "100",
-		"amountOutMinRaw":     "90",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
 }
 
 func TestBuildSwap_InvalidSignerType(t *testing.T) {
