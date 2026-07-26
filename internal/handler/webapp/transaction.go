@@ -609,18 +609,12 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
-	if err != nil {
-		failNetworkResolution(c, err)
-		return
-	}
-
 	providerID := req.ProviderID
 	if providerID == "" {
 		providerID = "aquarius"
 	}
 
-	result, err := txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
+	result, err := h.txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		RouterContractID:    req.RouterContractID,
@@ -629,7 +623,7 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		GAddress:            req.GAddress,
 	})
 	if err != nil {
-		slog.Error("build setup-swap-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
+		slog.Error("build setup-swap-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build swap setup transaction")
 		return
 	}
@@ -800,18 +794,12 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
-		failNetworkResolution(c, err)
-		return
-	}
-
 	providerID := req.ProviderID
 	if providerID == "" {
 		providerID = "aquarius"
 	}
 
-	result, err := txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
+	result, err := h.txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
