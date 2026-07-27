@@ -740,6 +740,90 @@ func TestPrepareSign_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"network":"testnet"`)
 }
 
+func TestPrepareSign_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
+	testnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
+	}}
+	mainnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
+	}}
+	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"network":             "mainnet",
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"txXdr":"MAINNET_TX"`)
+	assert.Contains(t, w.Body.String(), `"network":"mainnet"`)
+}
+
+func TestPrepareSign_NetworkMainnet_NotConfigured(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"network":             "mainnet",
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
+}
+
+func TestPrepareSign_NetworkInvalid(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"network":             "devnet",
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
+}
+
+func TestPrepareSign_NetworkTestnetOmitted_UsesTestnetService(t *testing.T) {
+	testnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
+	}}
+	mainnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
+		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
+	}}
+	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"txXdr":"TESTNET_TX"`)
+}
+
 func TestPrepareSign_InvalidBody(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
 	r := gin.New()
