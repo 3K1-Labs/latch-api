@@ -448,20 +448,26 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		return
 	}
 
-	result, err := h.txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
+	txSvc, network, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	result, err := txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		UnsignedTxXdr:       req.UnsignedTxXdr,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
 	})
 	if err != nil {
-		slog.Error("prepare sign transaction", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		slog.Error("prepare sign transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to prepare transaction")
 		return
 	}
 
 	webappx.Success(c, http.StatusOK, gin.H{
-		"network":                               req.Network,
+		"network":                               network,
 		"smartAccountAddress":                   req.SmartAccountAddress,
 		"txXdr":                                 result.TxXdr,
 		"authEntryXdr":                          result.AuthEntryXdr,
