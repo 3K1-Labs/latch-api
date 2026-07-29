@@ -5,6 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
+)
+
+// Networks a wallet can sign in on. A smart account exists on exactly one
+// network, so the network selects which Soroban RPC its signers are read from.
+const (
+	NetworkTestnet = "testnet"
+	NetworkMainnet = "mainnet"
 )
 
 var (
@@ -16,38 +24,81 @@ var (
 	ErrPasskeyNotEnabled = errors.New("passkey wallet sign-in is not enabled")
 	// ErrUnsupportedKeyType is returned for an unknown key_type.
 	ErrUnsupportedKeyType = errors.New("unsupported key_type")
+	// ErrInvalidNetwork is returned for a network other than testnet/mainnet.
+	ErrInvalidNetwork = errors.New("network must be testnet or mainnet")
 )
+
+// ParseWalletNetwork normalizes a request's network field. Empty means testnet,
+// matching the pre-mainnet-support behavior of the wallet sign-in flow.
+func ParseWalletNetwork(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", NetworkTestnet:
+		return NetworkTestnet, nil
+	case NetworkMainnet:
+		return NetworkMainnet, nil
+	default:
+		return "", ErrInvalidNetwork
+	}
+}
+
+// SorobanURLs holds the per-network Soroban RPC endpoints passkey sign-in reads
+// smart-account signers from.
+type SorobanURLs struct {
+	Testnet string
+	Mainnet string
+}
+
+func (u SorobanURLs) forNetwork(network string) string {
+	if network == NetworkMainnet {
+		return u.Mainnet
+	}
+	return u.Testnet
+}
 
 // WalletAuthService orchestrates SEP-10-style wallet sign-in: issue a single-use
 // nonce, then verify the wallet's signature over it and mint wallet-scope tokens.
 // Ed25519 wallets verify against the G-address directly; passkey wallets verify a
-// WebAuthn assertion against the account's on-chain webauthn signer key(s).
+// WebAuthn assertion against the account's on-chain webauthn signer key(s), read
+// from the network the caller declared.
 type WalletAuthService struct {
 	auth           *AuthService
 	nonce          *WalletNonceService
 	signerReader   WebAuthnSignerReader
+	sorobanURLs    SorobanURLs
 	allowedOrigins []string
 }
 
-func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, allowedOrigins []string) *WalletAuthService {
-	return &WalletAuthService{auth: auth, nonce: nonce, signerReader: signerReader, allowedOrigins: allowedOrigins}
+func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, sorobanURLs SorobanURLs, allowedOrigins []string) *WalletAuthService {
+	return &WalletAuthService{
+		auth:           auth,
+		nonce:          nonce,
+		signerReader:   signerReader,
+		sorobanURLs:    sorobanURLs,
+		allowedOrigins: allowedOrigins,
+	}
 }
 
-// Challenge issues a single-use nonce for (wallet, keyType), returned as
-// base64url (directly usable as a WebAuthn challenge) plus its TTL in seconds.
-func (s *WalletAuthService) Challenge(ctx context.Context, wallet, keyType string) (nonceB64URL string, expiresIn int, err error) {
+// Challenge issues a single-use nonce for (wallet, keyType, network), returned as
+// base64url (directly usable as a WebAuthn challenge) plus its TTL in seconds and
+// the resolved network. The nonce is bound to the network, so sign-in must
+// declare the same one.
+func (s *WalletAuthService) Challenge(ctx context.Context, wallet, keyType, network string) (nonceB64URL string, expiresIn int, resolvedNetwork string, err error) {
 	if !ValidWalletShape(wallet, keyType) {
-		return "", 0, ErrInvalidWallet
+		return "", 0, "", ErrInvalidWallet
 	}
-	nonceHex, ttl, err := s.nonce.Issue(ctx, wallet, keyType)
+	network, err = ParseWalletNetwork(network)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
+	}
+	nonceHex, ttl, err := s.nonce.Issue(ctx, wallet, keyType, network)
+	if err != nil {
+		return "", 0, "", err
 	}
 	nonceBytes, err := hex.DecodeString(nonceHex)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(nonceBytes), int(ttl.Seconds()), nil
+	return base64.RawURLEncoding.EncodeToString(nonceBytes), int(ttl.Seconds()), network, nil
 }
 
 // WalletSignInInput carries the verified-payload fields for sign-in.
@@ -57,6 +108,7 @@ func (s *WalletAuthService) Challenge(ctx context.Context, wallet, keyType strin
 type WalletSignInInput struct {
 	Wallet      string
 	KeyType     string
+	Network     string
 	NonceB64URL string
 	Signature   []byte
 
@@ -71,12 +123,16 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 	if !ValidWalletShape(in.Wallet, in.KeyType) {
 		return "", "", ErrInvalidWallet
 	}
+	network, err := ParseWalletNetwork(in.Network)
+	if err != nil {
+		return "", "", err
+	}
 	nonceBytes, err := base64.RawURLEncoding.DecodeString(in.NonceB64URL)
 	if err != nil || len(nonceBytes) == 0 {
 		return "", "", ErrNonceInvalid
 	}
 	// Single-use: consume before verifying so a replay can't retry verification.
-	if err := s.nonce.Consume(ctx, hex.EncodeToString(nonceBytes), in.Wallet, in.KeyType); err != nil {
+	if err := s.nonce.Consume(ctx, hex.EncodeToString(nonceBytes), in.Wallet, in.KeyType, network); err != nil {
 		return "", "", err
 	}
 
@@ -86,7 +142,7 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 			return "", "", err
 		}
 	case KeyTypePasskey:
-		if err := s.verifyPasskey(ctx, in, nonceBytes); err != nil {
+		if err := s.verifyPasskey(ctx, in, network, nonceBytes); err != nil {
 			return "", "", err
 		}
 	default:
@@ -96,11 +152,12 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 	return s.auth.IssueWalletTokenPair(ctx, in.Wallet, in.KeyType)
 }
 
-// verifyPasskey reads the account's on-chain webauthn signer key(s) and verifies
-// the WebAuthn assertion against them. The candidate keys come from chain (not the
-// request), so a caller can't sign in as a wallet whose key it doesn't control.
-func (s *WalletAuthService) verifyPasskey(ctx context.Context, in WalletSignInInput, nonceBytes []byte) error {
-	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet)
+// verifyPasskey reads the account's on-chain webauthn signer key(s) from the
+// declared network's Soroban RPC and verifies the WebAuthn assertion against
+// them. The candidate keys come from chain (not the request), so a caller can't
+// sign in as a wallet whose key it doesn't control.
+func (s *WalletAuthService) verifyPasskey(ctx context.Context, in WalletSignInInput, network string, nonceBytes []byte) error {
+	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet, s.sorobanURLs.forNetwork(network))
 	if err != nil {
 		if errors.Is(err, ErrNoWebAuthnSigner) {
 			return ErrBadSignature

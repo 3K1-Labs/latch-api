@@ -80,8 +80,11 @@ func main() {
 	otpSvc := service.NewOTPService(redisClient)
 	walletNonceSvc := service.NewWalletNonceService(redisClient)
 	sorobanSvc := service.NewSorobanService()
-	webAuthnSignerReader := service.NewSorobanWebAuthnSignerReader(sorobanSvc, cfg.WalletAuthSorobanURL)
-	walletAuthSvc := service.NewWalletAuthService(authSvc, walletNonceSvc, webAuthnSignerReader, cfg.WebAuthnAllowedOrigins)
+	webAuthnSignerReader := service.NewSorobanWebAuthnSignerReader(sorobanSvc)
+	walletAuthSvc := service.NewWalletAuthService(authSvc, walletNonceSvc, webAuthnSignerReader, service.SorobanURLs{
+		Testnet: cfg.WalletAuthSorobanURL,
+		Mainnet: cfg.WalletAuthSorobanURLMainnet,
+	}, cfg.WebAuthnAllowedOrigins)
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)

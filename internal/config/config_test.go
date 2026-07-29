@@ -61,6 +61,33 @@ func TestLoad_WithRequiredEnvVars(t *testing.T) {
 	assert.Equal(t, "9090", cfg.Port)
 }
 
+func TestLoad_WalletAuthSorobanURLs(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	t.Setenv("SOROBAN_RPC_URL_TESTNET", "http://testnet-rpc")
+	t.Setenv("SOROBAN_RPC_URL_MAINNET", "http://mainnet-rpc")
+	os.Unsetenv("WALLET_AUTH_SOROBAN_URL")
+	os.Unsetenv("WALLET_AUTH_SOROBAN_URL_MAINNET")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	// Both default to the general per-network Soroban endpoints.
+	assert.Equal(t, "http://testnet-rpc", cfg.WalletAuthSorobanURL)
+	assert.Equal(t, "http://mainnet-rpc", cfg.WalletAuthSorobanURLMainnet)
+
+	t.Setenv("WALLET_AUTH_SOROBAN_URL", "http://override-testnet")
+	t.Setenv("WALLET_AUTH_SOROBAN_URL_MAINNET", "http://override-mainnet")
+
+	cfg, err = Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "http://override-testnet", cfg.WalletAuthSorobanURL)
+	assert.Equal(t, "http://override-mainnet", cfg.WalletAuthSorobanURLMainnet)
+}
+
 func TestLoad_WebAppCORSAndExtensionIDs(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")

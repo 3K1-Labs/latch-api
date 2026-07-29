@@ -16,16 +16,23 @@ import (
 type stubWalletAuth struct {
 	nonce     string
 	expiresIn int
+	network   string
 	challErr  error
 	access    string
 	refresh   string
 	signInErr error
+	// gotSignIn records the input the handler assembled.
+	gotSignIn service.WalletSignInInput
 }
 
-func (s *stubWalletAuth) Challenge(_ context.Context, _, _ string) (string, int, error) {
-	return s.nonce, s.expiresIn, s.challErr
+func (s *stubWalletAuth) Challenge(_ context.Context, _, _, network string) (string, int, string, error) {
+	if s.network == "" {
+		s.network = network
+	}
+	return s.nonce, s.expiresIn, s.network, s.challErr
 }
-func (s *stubWalletAuth) SignIn(_ context.Context, _ service.WalletSignInInput) (string, string, error) {
+func (s *stubWalletAuth) SignIn(_ context.Context, in service.WalletSignInInput) (string, string, error) {
+	s.gotSignIn = in
 	return s.access, s.refresh, s.signInErr
 }
 func (s *stubWalletAuth) AccessTTL() int { return 900 }
@@ -72,6 +79,35 @@ func TestWalletChallenge_Success(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	data := resp["data"].(map[string]any)
 	assert.Equal(t, "abc", data["nonce"])
+}
+
+func TestWalletChallenge_EchoesResolvedNetwork(t *testing.T) {
+	stub := &stubWalletAuth{nonce: "abc", expiresIn: 60}
+	r := gin.New()
+	r.POST("/auth/challenge", newWalletAuthHandler(stub).Challenge)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, jsonReq(http.MethodPost, "/auth/challenge", map[string]any{
+		"wallet": "CABC", "key_type": "passkey", "network": "mainnet",
+	}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "mainnet", stub.network) // forwarded to the service
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "mainnet", resp["data"].(map[string]any)["network"])
+}
+
+func TestWalletChallenge_BadNetwork(t *testing.T) {
+	r := gin.New()
+	r.POST("/auth/challenge", newWalletAuthHandler(&stubWalletAuth{challErr: service.ErrInvalidNetwork}).Challenge)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, jsonReq(http.MethodPost, "/auth/challenge", map[string]any{
+		"wallet": "CABC", "key_type": "passkey", "network": "futurenet",
+	}))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "testnet or mainnet")
 }
 
 // ── SignIn ────────────────────────────────────────────────────────────────────
@@ -142,16 +178,31 @@ func TestWalletSignIn_PasskeyBadAssertionEncoding(t *testing.T) {
 }
 
 func TestWalletSignIn_PasskeySuccess(t *testing.T) {
+	stub := &stubWalletAuth{access: "atok", refresh: "rtok"}
 	r := gin.New()
-	r.POST("/auth/sign-in", newWalletAuthHandler(&stubWalletAuth{access: "atok", refresh: "rtok"}).SignIn)
+	r.POST("/auth/sign-in", newWalletAuthHandler(stub).SignIn)
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, jsonReq(http.MethodPost, "/auth/sign-in", map[string]any{
-		"wallet": "CABC", "key_type": "passkey", "nonce": "abc",
+		"wallet": "CABC", "key_type": "passkey", "nonce": "abc", "network": "mainnet",
 		"authenticator_data": "BQ==", "client_data_json": "e30=", "passkey_signature": "QQ==",
 	}))
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "atok")
+	assert.Equal(t, "mainnet", stub.gotSignIn.Network)
+}
+
+func TestWalletSignIn_BadNetwork(t *testing.T) {
+	r := gin.New()
+	r.POST("/auth/sign-in", newWalletAuthHandler(&stubWalletAuth{signInErr: service.ErrInvalidNetwork}).SignIn)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, jsonReq(http.MethodPost, "/auth/sign-in", map[string]any{
+		"wallet": "CABC", "key_type": "passkey", "nonce": "abc", "network": "futurenet",
+		"authenticator_data": "BQ==", "client_data_json": "e30=", "passkey_signature": "QQ==",
+	}))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "testnet or mainnet")
 }
 
 func TestWalletSignIn_Success(t *testing.T) {

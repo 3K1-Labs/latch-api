@@ -28,14 +28,16 @@ func NewWalletAuthHandler(walletAuthSvc walletAuthService, auditSvc auditService
 type walletChallengeRequest struct {
 	Wallet  string `json:"wallet" binding:"required"`
 	KeyType string `json:"key_type" binding:"required"`
+	Network string `json:"network"` // "testnet" (default) or "mainnet"
 }
 
 // Challenge godoc
 // @Summary      Request a wallet sign-in challenge
+// @Description  The nonce is bound to the network, so the sign-in call must declare the same one.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
-// @Param        body body walletChallengeRequest true "Wallet address + key_type"
+// @Param        body body walletChallengeRequest true "Wallet address + key_type (+ optional network)"
 // @Success      200 {object} map[string]any
 // @Failure      400 {object} apiErrorResponse
 // @Failure      500 {object} apiErrorResponse
@@ -47,23 +49,27 @@ func (h *WalletAuthHandler) Challenge(c *gin.Context) {
 		return
 	}
 
-	nonce, expiresIn, err := h.walletAuthSvc.Challenge(c.Request.Context(), req.Wallet, req.KeyType)
+	nonce, expiresIn, network, err := h.walletAuthSvc.Challenge(c.Request.Context(), req.Wallet, req.KeyType, req.Network)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidWallet) {
+		switch {
+		case errors.Is(err, service.ErrInvalidWallet):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "wallet does not match key_type")
-			return
+		case errors.Is(err, service.ErrInvalidNetwork):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+		default:
+			slog.Error("wallet challenge", "err", err)
+			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		}
-		slog.Error("wallet challenge", "err", err)
-		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
 	}
 
-	httpx.Success(c, http.StatusOK, gin.H{"nonce": nonce, "expires_in": expiresIn})
+	httpx.Success(c, http.StatusOK, gin.H{"nonce": nonce, "expires_in": expiresIn, "network": network})
 }
 
 type walletSignInRequest struct {
 	Wallet    string `json:"wallet" binding:"required"`
 	KeyType   string `json:"key_type" binding:"required"`
+	Network   string `json:"network"` // must match the network the nonce was issued for
 	Nonce     string `json:"nonce" binding:"required"`
 	Signature string `json:"signature"` // base64 ed25519 signature over the raw nonce bytes
 	// Passkey (WebAuthn) assertion fields — all standard base64.
@@ -74,6 +80,7 @@ type walletSignInRequest struct {
 
 // SignIn godoc
 // @Summary      Complete wallet sign-in
+// @Description  network must match the one the challenge was issued for; it selects which chain a passkey wallet's on-chain signers are read from.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
@@ -106,6 +113,7 @@ func (h *WalletAuthHandler) SignIn(c *gin.Context) {
 	accessToken, refreshToken, err := h.walletAuthSvc.SignIn(c.Request.Context(), service.WalletSignInInput{
 		Wallet:            req.Wallet,
 		KeyType:           req.KeyType,
+		Network:           req.Network,
 		NonceB64URL:       req.Nonce,
 		Signature:         sig,
 		AuthenticatorData: authData,
@@ -130,6 +138,8 @@ func (h *WalletAuthHandler) writeSignInErr(c *gin.Context, wallet string, err er
 	switch {
 	case errors.Is(err, service.ErrInvalidWallet), errors.Is(err, service.ErrUnsupportedKeyType):
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "wallet does not match key_type")
+	case errors.Is(err, service.ErrInvalidNetwork):
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
 	case errors.Is(err, service.ErrPasskeyNotEnabled):
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "passkey wallet sign-in is not enabled yet")
 	case errors.Is(err, service.ErrNonceInvalid):
