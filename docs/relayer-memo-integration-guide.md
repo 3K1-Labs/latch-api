@@ -84,11 +84,20 @@ Create the intent when the user opens or explicitly refreshes the funding
 screen. Keep `memo_id` as a decimal string end to end; converting it to a
 JavaScript number can lose precision above `Number.MAX_SAFE_INTEGER`.
 
-If the relayer is unavailable, intent creation fails with `503 BAD_GATEWAY`
-("funding is temporarily unavailable, please retry"). This is transient — the
-relayer sleeps when idle and takes tens of seconds to wake — so clients should
-retry once before surfacing an error. There is no background memo-registration
-sweep and clients must not poll `GET /v1/accounts` waiting for memo fields.
+The relayer sleeps when idle and takes ~14s to boot, and it rejects requests
+outright while booting rather than holding them. The backend rides that window
+out for you — it keeps retrying inside a single request — so the **first
+funding call after an idle period can legitimately take 15s or more**. Give this
+endpoint a client timeout of at least 30s; a shorter one turns a call that was
+about to succeed into a failure, and retrying from the client only restarts the
+same wait.
+
+If the boot outlasts the backend's own budget, the call fails with
+`503 BAD_GATEWAY` ("funding is temporarily unavailable, please retry"). That is
+still transient, so one retry is reasonable before surfacing an error — but wait
+a few seconds first, since back-to-back retries just land in the same window.
+There is no background memo-registration sweep and clients must not poll
+`GET /v1/accounts` waiting for memo fields.
 
 ## Check deposit status
 

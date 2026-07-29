@@ -142,10 +142,13 @@ type Config struct {
 	// the fund-account flow entirely — logged, not fatal, since mobile
 	// traffic must keep flowing regardless of relayer availability.
 	RelayerURL string
-	// RelayerTimeout must clear latch-relayer's cold start: it sleeps when
-	// idle and its first response after waking has been measured at ~14s, so
-	// a short timeout turns every post-idle funding request into a failure.
-	// Keep it comfortably under the global 30s request timeout.
+	// RelayerTimeout is the total budget for one relayer call, retries
+	// included, and must clear latch-relayer's cold start: it sleeps when
+	// idle and takes ~14s to boot, during which its host's router rejects
+	// each attempt outright (see RelayerService.send), so a budget that
+	// cannot absorb several retries turns every post-idle funding request
+	// into a failure. Keep it comfortably under the global 30s request
+	// timeout.
 	RelayerTimeout time.Duration
 }
 
