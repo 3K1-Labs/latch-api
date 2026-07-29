@@ -62,6 +62,70 @@ func TestRelayerService_CreateIntent_NonOKStatus(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// A 4xx means the relayer answered and rejected us — our bug, not a transient
+// outage, so it must NOT be classified as retryable.
+func TestRelayerService_CreateIntent_NonOKStatus_NotUnavailable(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, time.Second)
+	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrRelayerUnavailable)
+}
+
+// The relayer sleeps when idle; the first call after a wake can outlast the
+// client timeout. That is transient, so it must surface as ErrRelayerUnavailable
+// (retryable 503) rather than an opaque internal error.
+func TestRelayerService_CreateIntent_Unavailable(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer slow.Close()
+
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer failing.Close()
+
+	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	unreachableURL := unreachable.URL
+	unreachable.Close()
+
+	tests := []struct {
+		name    string
+		baseURL string
+		timeout time.Duration
+	}{
+		{"cold start exceeds timeout", slow.URL, 20 * time.Millisecond},
+		{"relayer 5xx", failing.URL, time.Second},
+		{"relayer unreachable", unreachableURL, time.Second},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewRelayerService(tc.baseURL, tc.timeout)
+			_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrRelayerUnavailable)
+		})
+	}
+}
+
+func TestRelayerService_DepositStatus_Unavailable(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, time.Second)
+	_, err := svc.DepositStatus(context.Background(), "12345")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRelayerUnavailable)
+}
+
 func TestRelayerService_CreateIntent_MalformedResponse(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

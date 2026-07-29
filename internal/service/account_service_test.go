@@ -121,9 +121,32 @@ func TestAccountList_MultipleRows(t *testing.T) {
 
 // ── CreateFundingIntent ─────────────────────────────────────────────────────
 
+// The deployed relayer serves testnet only; a mainnet intent would return a
+// pool address nothing is watching, so it is rejected before any relayer call.
+func TestCreateFundingIntent_Network(t *testing.T) {
+	tests := []struct {
+		name    string
+		network string
+		wantErr error
+	}{
+		{"empty defaults to testnet", "", ErrRelayerNotConfigured},
+		{"explicit testnet", NetworkTestnet, ErrRelayerNotConfigured},
+		{"uppercase testnet", "TESTNET", ErrRelayerNotConfigured},
+		{"mainnet rejected", NetworkMainnet, ErrNetworkUnsupported},
+		{"unknown network", "futurenet", ErrInvalidNetwork},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
+			_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, tc.network)
+			assert.ErrorIs(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestCreateFundingIntent_InvalidUUID(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
-	_, err := svc.CreateFundingIntent(context.Background(), "not-a-uuid", "", validWalletRef)
+	_, err := svc.CreateFundingIntent(context.Background(), "not-a-uuid", "", validWalletRef, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
 }
@@ -137,7 +160,7 @@ func TestCreateFundingIntent_NotRegistered(t *testing.T) {
 
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").WillReturnError(sql.ErrNoRows)
 
-	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef)
+	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef, "")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -152,7 +175,7 @@ func TestCreateFundingIntent_NotOwner(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(otherUser))
 
-	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef)
+	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef, "")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -167,19 +190,19 @@ func TestCreateFundingIntent_RelayerNotConfigured(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	_, err = svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef)
+	_, err = svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef, "")
 	require.ErrorIs(t, err, ErrRelayerNotConfigured)
 }
 
 func TestCreateFundingIntent_WalletScope_AddressMismatch(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
-	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, "CSOMEOTHERADDRESS")
+	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, "CSOMEOTHERADDRESS", "")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestCreateFundingIntent_WalletScope_RelayerNotConfigured(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", time.Second))
-	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef)
+	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, "")
 	require.ErrorIs(t, err, ErrRelayerNotConfigured)
 }
 
@@ -200,7 +223,7 @@ func TestCreateFundingIntent_WalletScope_Success(t *testing.T) {
 	// must not be hit.
 	svc := NewAccountService(errorQueries(), NewRelayerService(ts.URL, time.Second))
 
-	intent, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef)
+	intent, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, "")
 	require.NoError(t, err)
 	assert.Equal(t, "intent-1", intent.IntentID)
 }
@@ -227,7 +250,7 @@ func TestCreateFundingIntent_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	intent, err := svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef)
+	intent, err := svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef, "")
 	require.NoError(t, err)
 	assert.Equal(t, "intent-1", intent.IntentID)
 	assert.Equal(t, "12345", intent.MemoID)

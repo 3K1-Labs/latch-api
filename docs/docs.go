@@ -3064,7 +3064,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register.",
+                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register. network is optional and defaults to testnet;\nmainnet is rejected with 400 until a mainnet relayer is deployed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3171,6 +3171,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.apiErrorResponse"
                         }
@@ -4812,6 +4818,10 @@ const docTemplate = `{
                 "smart_account_address"
             ],
             "properties": {
+                "network": {
+                    "description": "Network is optional; empty means testnet. Only testnet is served today —\nsee AccountService.CreateFundingIntent.",
+                    "type": "string"
+                },
                 "smart_account_address": {
                     "type": "string"
                 }

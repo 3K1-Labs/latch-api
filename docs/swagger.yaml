@@ -127,6 +127,11 @@ definitions:
     type: object
   internal_handler.createDepositIntentRequest:
     properties:
+      network:
+        description: |-
+          Network is optional; empty means testnet. Only testnet is served today —
+          see AccountService.CreateFundingIntent.
+        type: string
       smart_account_address:
         type: string
     required:
@@ -3253,7 +3258,8 @@ paths:
         for a smart account already associated with the caller. Not idempotent — every call
         mints a new intent, matching latch-relayer's "one intent per funding session"
         model. The caller must have already registered the address via
-        POST /v1/accounts/register.
+        POST /v1/accounts/register. network is optional and defaults to testnet;
+        mainnet is rejected with 400 until a mainnet relayer is deployed.
       parameters:
       - description: Smart account C-address
         in: body
@@ -3322,6 +3328,10 @@ paths:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       security:

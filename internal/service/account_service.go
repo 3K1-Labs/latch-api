@@ -83,13 +83,29 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // RELAYER_URL is unset — the fund flow has nothing to fall back to without a
 // memo, so callers should surface this as a hard error, not a silent no-op.
 //
+// network is testnet-only for now (empty means testnet). latch-relayer is
+// single-network per deployment — its NETWORK env picks the passphrase and it
+// mints memos against one pool account — and only a testnet instance is
+// deployed, so a mainnet intent would hand back a pool address no watcher is
+// monitoring and the deposit would never be forwarded. Rejecting is the safe
+// failure. Lift this once a mainnet relayer exists and the URL is routed
+// per-network.
+//
 // Wallet-scoped callers (scope == ScopeWallet, e.g. the browser extension's
 // SEP-10-style sign-in) have no users row and so can never appear in
 // smart_account_registrations. For them, ownership is self-evident from the
 // token: userID is the wallet's own address, so it's compared directly
 // against smartAccountAddress instead of going through the registration
 // table.
-func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress string) (Intent, error) {
+func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string) (Intent, error) {
+	network, err := ParseWalletNetwork(network)
+	if err != nil {
+		return Intent{}, err
+	}
+	if network != NetworkTestnet {
+		return Intent{}, ErrNetworkUnsupported
+	}
+
 	if scope == ScopeWallet {
 		if userID != smartAccountAddress {
 			return Intent{}, ErrValidation

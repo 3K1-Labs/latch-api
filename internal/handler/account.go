@@ -101,6 +101,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 type createDepositIntentRequest struct {
 	SmartAccountAddress string `json:"smart_account_address" binding:"required"`
+	// Network is optional; empty means testnet. Only testnet is served today —
+	// see AccountService.CreateFundingIntent.
+	Network string `json:"network"`
 }
 
 // CreateDepositIntent godoc
@@ -109,7 +112,8 @@ type createDepositIntentRequest struct {
 // @Description  for a smart account already associated with the caller. Not idempotent — every call
 // @Description  mints a new intent, matching latch-relayer's "one intent per funding session"
 // @Description  model. The caller must have already registered the address via
-// @Description  POST /v1/accounts/register.
+// @Description  POST /v1/accounts/register. network is optional and defaults to testnet;
+// @Description  mainnet is rejected with 400 until a mainnet relayer is deployed.
 // @Tags         accounts
 // @Accept       json
 // @Produce      json
@@ -131,13 +135,20 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 		return
 	}
 
-	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress)
+	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress, req.Network)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrValidation):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "smart_account_address is not registered to the caller")
+		case errors.Is(err, service.ErrInvalidNetwork):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+		case errors.Is(err, service.ErrNetworkUnsupported):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is only available on testnet")
 		case errors.Is(err, service.ErrRelayerNotConfigured):
 			httpx.Fail(c, http.StatusServiceUnavailable, httpx.ErrInternal, "funding is temporarily unavailable")
+		case errors.Is(err, service.ErrRelayerUnavailable):
+			slog.Error("create deposit intent: relayer unavailable", "userID", userID, "err", err)
+			httpx.Fail(c, http.StatusServiceUnavailable, httpx.ErrBadGateway, "funding is temporarily unavailable, please retry")
 		default:
 			slog.Error("create deposit intent", "userID", userID, "err", err)
 			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
@@ -170,6 +181,7 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 // @Failure      400 {object} apiErrorResponse
 // @Failure      401 {object} apiErrorResponse
 // @Failure      404 {object} apiErrorResponse
+// @Failure      503 {object} apiErrorResponse
 // @Failure      500 {object} apiErrorResponse
 // @Security     BearerAuth
 // @Router       /v1/accounts/deposit/status/{memo_id} [get]
@@ -185,6 +197,9 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "memo_id not found")
 		case errors.Is(err, service.ErrIntentNotFound):
 			httpx.Fail(c, http.StatusNotFound, httpx.ErrValidation, "memo_id not found")
+		case errors.Is(err, service.ErrRelayerUnavailable):
+			slog.Error("get funding status: relayer unavailable", "userID", userID, "err", err)
+			httpx.Fail(c, http.StatusServiceUnavailable, httpx.ErrBadGateway, "funding status is temporarily unavailable, please retry")
 		default:
 			slog.Error("get funding status", "userID", userID, "err", err)
 			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")

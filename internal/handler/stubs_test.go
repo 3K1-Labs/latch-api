@@ -245,6 +245,7 @@ type stubAccount struct {
 
 	createIntentResult  service.Intent
 	createIntentErr     error
+	intentNetwork       string // network the handler forwarded
 	fundingStatusResult service.DepositStatus
 	fundingStatusErr    error
 }
@@ -264,7 +265,8 @@ func (s *stubAccount) List(_ context.Context, _ string) ([]service.AccountRegist
 	return s.listResult, nil
 }
 
-func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _, _ string) (service.Intent, error) {
+func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _, _, network string) (service.Intent, error) {
+	s.intentNetwork = network
 	if s.createIntentErr != nil {
 		return service.Intent{}, s.createIntentErr
 	}
