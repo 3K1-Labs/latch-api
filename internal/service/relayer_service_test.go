@@ -114,6 +114,121 @@ func TestRelayerService_CreateIntent_Unavailable(t *testing.T) {
 	}
 }
 
+// The observed production failure: latch-relayer was asleep and its host's
+// router answered each attempt with an instant 502 while the app booted, so a
+// single-shot call failed in ~60ms no matter how long the timeout was. Calls
+// must ride out the boot window and land the intent.
+func TestRelayerService_CreateIntent_RetriesWhileBooting(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Body must survive the rewind between attempts.
+		var req createIntentRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Equal(t, "CABC123", req.CAddress)
+
+		if attempts.Add(1) <= 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(createIntentResponse{
+			IntentID:    "intent-1",
+			MemoID:      "17540123456789",
+			PoolAddress: "GB3POOLADDRESS",
+			ExpiresAt:   expiresAt,
+		})
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc.retryInterval = 10 * time.Millisecond
+
+	intent, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.NoError(t, err)
+	assert.Equal(t, "intent-1", intent.IntentID)
+	assert.Equal(t, int32(3), attempts.Load())
+}
+
+// A relayer-generated 500 is a real answer — the app is up and broken, so
+// retrying cannot help and must not burn the budget.
+func TestRelayerService_CreateIntent_DoesNotRetryRelayerError(t *testing.T) {
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc.retryInterval = 10 * time.Millisecond
+
+	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.ErrorIs(t, err, ErrRelayerUnavailable)
+	assert.Equal(t, int32(1), attempts.Load())
+}
+
+// Once the budget is spent the caller still gets the retryable classification,
+// not a bare timeout.
+func TestRelayerService_CreateIntent_BootingPastBudget(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, 100*time.Millisecond)
+	svc.retryInterval = 10 * time.Millisecond
+
+	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRelayerUnavailable)
+}
+
+// Status polling hits the same boot window, and being a plain read it is always
+// safe to retry.
+func TestRelayerService_DepositStatus_RetriesWhileBooting(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(depositStatusResponse{
+			IntentID: "intent-1", MemoID: "12345", CAddress: "CABC123",
+			PoolAddress: "GB3POOL", Status: "pending", ExpiresAt: expiresAt,
+		})
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc.retryInterval = 10 * time.Millisecond
+
+	status, err := svc.DepositStatus(context.Background(), "12345")
+	require.NoError(t, err)
+	assert.Equal(t, "pending", status.Status)
+	assert.Equal(t, int32(2), attempts.Load())
+}
+
+// Cancellation must cut a retry loop short rather than run out the budget.
+func TestRelayerService_CreateIntent_RetryHonoursCancellation(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc.retryInterval = time.Second
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := svc.CreateIntent(ctx, CreateIntentInput{CAddress: "CABC123"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRelayerUnavailable)
+}
+
 func TestRelayerService_DepositStatus_Unavailable(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
