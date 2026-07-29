@@ -141,7 +141,11 @@ type Config struct {
 	// (GET {RelayerURL}/deposit/status/{memo_id}). Empty RelayerURL disables
 	// the fund-account flow entirely — logged, not fatal, since mobile
 	// traffic must keep flowing regardless of relayer availability.
-	RelayerURL     string
+	RelayerURL string
+	// RelayerTimeout must clear latch-relayer's cold start: it sleeps when
+	// idle and its first response after waking has been measured at ~14s, so
+	// a short timeout turns every post-idle funding request into a failure.
+	// Keep it comfortably under the global 30s request timeout.
 	RelayerTimeout time.Duration
 }
 
@@ -217,7 +221,7 @@ func Load() (*Config, error) {
 		WalletMembershipRetention: time.Duration(getEnvInt("WALLET_MEMBERSHIP_RETENTION_DAYS", 180)) * 24 * time.Hour,
 
 		RelayerURL:     getEnv("RELAYER_URL", ""),
-		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 10)) * time.Second,
+		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
 	}
 
 	var err error

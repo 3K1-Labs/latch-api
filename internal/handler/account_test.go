@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -168,6 +169,66 @@ func TestCreateDepositIntent_RelayerNotConfigured(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
+func TestCreateDepositIntent_NetworkForwarded(t *testing.T) {
+	stub := &stubAccount{}
+	h := newAccountHandler(stub, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{"smart_account_address": testContractAddr, "network": "mainnet"})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, "mainnet", stub.intentNetwork)
+}
+
+func TestCreateDepositIntent_NetworkRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantMsg string
+	}{
+		{"unsupported network", service.ErrNetworkUnsupported, "funding is only available on testnet"},
+		{"invalid network", service.ErrInvalidNetwork, "network must be testnet or mainnet"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newAccountHandler(&stubAccount{createIntentErr: tc.err}, nil)
+			r := gin.New()
+			r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+			w := httptest.NewRecorder()
+			body := postJSONBody(map[string]any{"smart_account_address": testContractAddr, "network": "mainnet"})
+			req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+
+			var resp map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(t, tc.wantMsg, resp["error"].(map[string]any)["message"])
+		})
+	}
+}
+
+func TestCreateDepositIntent_RelayerUnavailable(t *testing.T) {
+	h := newAccountHandler(&stubAccount{createIntentErr: fmt.Errorf("call relayer create intent: %w", service.ErrRelayerUnavailable)}, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	body := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "BAD_GATEWAY", resp["error"].(map[string]any)["code"])
+}
+
 func TestCreateDepositIntent_ServiceError(t *testing.T) {
 	h := newAccountHandler(&stubAccount{createIntentErr: errGeneric}, nil)
 	r := gin.New()
@@ -230,6 +291,21 @@ func TestDepositStatus_IntentNotFound(t *testing.T) {
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestDepositStatus_RelayerUnavailable(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: fmt.Errorf("call relayer deposit status: %w", service.ErrRelayerUnavailable)}, nil)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "BAD_GATEWAY", resp["error"].(map[string]any)["code"])
 }
 
 func TestDepositStatus_ServiceError(t *testing.T) {

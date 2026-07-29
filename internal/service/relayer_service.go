@@ -20,6 +20,20 @@ var ErrRelayerNotConfigured = errors.New("relayer url not configured")
 // memo_id (404 from GET /deposit/status/{memo_id}).
 var ErrIntentNotFound = errors.New("funding intent not found")
 
+// ErrNetworkUnsupported is returned for a funding request on a network this
+// deployment's latch-relayer doesn't serve — see CreateFundingIntent. The
+// request is valid, the capability just isn't there, so it's a hard 400 rather
+// than something a retry can fix.
+var ErrNetworkUnsupported = errors.New("network not supported for funding")
+
+// ErrRelayerUnavailable is returned when latch-relayer is configured and the
+// request is well-formed, but the call didn't reach a healthy relayer —
+// transport error, timeout (it sleeps when idle and takes tens of seconds to
+// wake), or a 5xx on its side. Distinct from ErrRelayerNotConfigured: this one
+// is transient, so callers should surface it as a retryable 503 rather than an
+// internal error.
+var ErrRelayerUnavailable = errors.New("relayer unavailable")
+
 // Intent is a TTL-bound funding session minted by latch-relayer for a single
 // pooled deposit — one per call, not a permanent per-account registration.
 type Intent struct {
@@ -109,10 +123,13 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return Intent{}, fmt.Errorf("call relayer create intent: %w", err)
+		return Intent{}, fmt.Errorf("%w: call relayer create intent: %w", ErrRelayerUnavailable, err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return Intent{}, fmt.Errorf("%w: relayer create intent: status %d", ErrRelayerUnavailable, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return Intent{}, fmt.Errorf("relayer create intent: unexpected status %d", resp.StatusCode)
 	}
@@ -171,12 +188,15 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return DepositStatus{}, fmt.Errorf("call relayer deposit status: %w", err)
+		return DepositStatus{}, fmt.Errorf("%w: call relayer deposit status: %w", ErrRelayerUnavailable, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return DepositStatus{}, ErrIntentNotFound
+	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return DepositStatus{}, fmt.Errorf("%w: relayer deposit status: status %d", ErrRelayerUnavailable, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return DepositStatus{}, fmt.Errorf("relayer deposit status: unexpected status %d", resp.StatusCode)

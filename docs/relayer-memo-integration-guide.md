@@ -60,9 +60,14 @@ Creates a fresh, TTL-bound funding intent for an associated account. This
 operation is intentionally not idempotent: every successful call creates a new
 funding session.
 
+`network` is optional and defaults to `"testnet"`. Only testnet is served
+today — the relayer is single-network per deployment and no mainnet instance
+exists, so `"network": "mainnet"` returns `400 VALIDATION_ERROR` ("funding is
+only available on testnet") rather than a pool address nothing is watching.
+
 ```jsonc
 // Request
-{ "smart_account_address": "CABC..." }
+{ "smart_account_address": "CABC...", "network": "testnet" }
 
 // Response: 201 Created
 {
@@ -79,9 +84,11 @@ Create the intent when the user opens or explicitly refreshes the funding
 screen. Keep `memo_id` as a decimal string end to end; converting it to a
 JavaScript number can lose precision above `Number.MAX_SAFE_INTEGER`.
 
-If the relayer is unavailable, intent creation fails. There is no background
-memo-registration sweep and clients must not poll `GET /v1/accounts` waiting
-for memo fields.
+If the relayer is unavailable, intent creation fails with `503 BAD_GATEWAY`
+("funding is temporarily unavailable, please retry"). This is transient — the
+relayer sleeps when idle and takes tens of seconds to wake — so clients should
+retry once before surfacing an error. There is no background memo-registration
+sweep and clients must not poll `GET /v1/accounts` waiting for memo fields.
 
 ## Check deposit status
 
