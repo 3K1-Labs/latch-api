@@ -33,10 +33,10 @@ const maxContextRuleScan = 64
 var ErrNoWebAuthnSigner = errors.New("no webauthn signer registered for wallet")
 
 // WebAuthnSignerReader returns the registered webauthn (P-256) signer keys for a
-// smart-account C-address. Behind an interface so sign-in can be unit-tested
-// without a live Soroban RPC.
+// smart-account C-address, read from the given Soroban RPC. Behind an interface
+// so sign-in can be unit-tested without a live Soroban RPC.
 type WebAuthnSignerReader interface {
-	WebAuthnSignerKeys(ctx context.Context, wallet string) ([][]byte, error)
+	WebAuthnSignerKeys(ctx context.Context, wallet, rpcURL string) ([][]byte, error)
 }
 
 // sorobanSimulator is the read-only simulation dependency the signer reader needs
@@ -47,21 +47,22 @@ type sorobanSimulator interface {
 
 // SorobanWebAuthnSignerReader reads an account's context-rule signers via
 // read-only Soroban simulation (get_context_rules_count + get_context_rule),
-// mirroring the mobile client's fetchDefaultContextRule.
+// mirroring the mobile client's fetchDefaultContextRule. The RPC endpoint is a
+// per-call argument because a smart account exists on exactly one network, and
+// the caller's network selection decides which chain to read.
 type SorobanWebAuthnSignerReader struct {
 	soroban sorobanSimulator
-	rpcURL  string
 }
 
-func NewSorobanWebAuthnSignerReader(soroban sorobanSimulator, rpcURL string) *SorobanWebAuthnSignerReader {
-	return &SorobanWebAuthnSignerReader{soroban: soroban, rpcURL: rpcURL}
+func NewSorobanWebAuthnSignerReader(soroban sorobanSimulator) *SorobanWebAuthnSignerReader {
+	return &SorobanWebAuthnSignerReader{soroban: soroban}
 }
 
 // WebAuthnSignerKeys collects the uncompressed P-256 public keys (65-byte
 // 0x04||X||Y, with any credential-id suffix stripped) registered as External
 // webauthn signers across the account's context rules.
-func (r *SorobanWebAuthnSignerReader) WebAuthnSignerKeys(ctx context.Context, wallet string) ([][]byte, error) {
-	countVal, ok, err := r.simulateRead(ctx, wallet, "get_context_rules_count", xdr.ScVec{})
+func (r *SorobanWebAuthnSignerReader) WebAuthnSignerKeys(ctx context.Context, wallet, rpcURL string) ([][]byte, error) {
+	countVal, ok, err := r.simulateRead(ctx, rpcURL, wallet, "get_context_rules_count", xdr.ScVec{})
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +83,7 @@ func (r *SorobanWebAuthnSignerReader) WebAuthnSignerKeys(ctx context.Context, wa
 	}
 	for id := 0; id < limit && found < count; id++ {
 		idVal := xdr.Uint32(id)
-		ruleVal, ok, err := r.simulateRead(ctx, wallet, "get_context_rule", xdr.ScVec{
+		ruleVal, ok, err := r.simulateRead(ctx, rpcURL, wallet, "get_context_rule", xdr.ScVec{
 			{Type: xdr.ScValTypeScvU32, U32: &idVal},
 		})
 		if err != nil {
@@ -110,7 +111,7 @@ func (r *SorobanWebAuthnSignerReader) WebAuthnSignerKeys(ctx context.Context, wa
 // simulateRead invokes a read-only contract function and returns its decoded
 // return ScVal. ok=false means the call itself errored on-chain (e.g. a missing
 // context rule), which the caller treats as "skip", not a hard failure.
-func (r *SorobanWebAuthnSignerReader) simulateRead(ctx context.Context, contract, fn string, args xdr.ScVec) (xdr.ScVal, bool, error) {
+func (r *SorobanWebAuthnSignerReader) simulateRead(ctx context.Context, rpcURL, contract, fn string, args xdr.ScVec) (xdr.ScVal, bool, error) {
 	raw, err := strkey.Decode(strkey.VersionByteContract, contract)
 	if err != nil {
 		return xdr.ScVal{}, false, fmt.Errorf("decode contract address: %w", err)
@@ -147,7 +148,7 @@ func (r *SorobanWebAuthnSignerReader) simulateRead(ctx context.Context, contract
 		return xdr.ScVal{}, false, fmt.Errorf("encode read tx: %w", err)
 	}
 
-	sim, err := r.soroban.SimulateTransaction(ctx, r.rpcURL, txB64, RPCResourceConfig{})
+	sim, err := r.soroban.SimulateTransaction(ctx, rpcURL, txB64, RPCResourceConfig{})
 	if err != nil {
 		return xdr.ScVal{}, false, fmt.Errorf("simulate %s: %w", fn, err)
 	}

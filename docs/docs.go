@@ -1924,12 +1924,27 @@ const docTemplate = `{
                     "smart-account"
                 ],
                 "summary": "Get the counter-demo contract addresses",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "testnet",
+                        "description": "Network",
+                        "name": "network",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
                     }
                 }
@@ -2002,6 +2017,13 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Include zero balances when set to 1",
                         "name": "all",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "testnet",
+                        "description": "Network",
+                        "name": "network",
                         "in": "query"
                     }
                 ],
@@ -2094,6 +2116,13 @@ const docTemplate = `{
                         "name": "gAddress",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "testnet",
+                        "description": "Network",
+                        "name": "network",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2119,7 +2148,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Funds gAddress via testnet friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer.",
+                "description": "Funds gAddress via testnet friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer. Testnet only — friendbot funding doesn't exist on mainnet.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2270,6 +2299,13 @@ const docTemplate = `{
                         "name": "keyDataHex",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "testnet",
+                        "description": "Network",
+                        "name": "network",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3201,6 +3237,7 @@ const docTemplate = `{
         },
         "/v1/auth/challenge": {
             "post": {
+                "description": "The nonce is bound to the network, so the sign-in call must declare the same one.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3213,7 +3250,7 @@ const docTemplate = `{
                 "summary": "Request a wallet sign-in challenge",
                 "parameters": [
                     {
-                        "description": "Wallet address + key_type",
+                        "description": "Wallet address + key_type (+ optional network)",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -3396,6 +3433,7 @@ const docTemplate = `{
         },
         "/v1/auth/sign-in": {
             "post": {
+                "description": "network must match the one the challenge was issued for; it selects which chain a passkey wallet's on-chain signers are read from.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5221,6 +5259,10 @@ const docTemplate = `{
                 "key_type": {
                     "type": "string"
                 },
+                "network": {
+                    "description": "\"testnet\" (default) or \"mainnet\"",
+                    "type": "string"
+                },
                 "wallet": {
                     "type": "string"
                 }
@@ -5242,6 +5284,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "key_type": {
+                    "type": "string"
+                },
+                "network": {
+                    "description": "must match the network the nonce was issued for",
                     "type": "string"
                 },
                 "nonce": {
@@ -5458,6 +5504,9 @@ const docTemplate = `{
                 "publicKeyHex"
             ],
             "properties": {
+                "network": {
+                    "type": "string"
+                },
                 "publicKeyHex": {
                     "type": "string"
                 }
@@ -5612,6 +5661,9 @@ const docTemplate = `{
             "properties": {
                 "gAddress": {
                     "type": "string"
+                },
+                "network": {
+                    "type": "string"
                 }
             }
         },
@@ -5626,6 +5678,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "keyDataHex": {
+                    "type": "string"
+                },
+                "network": {
                     "type": "string"
                 }
             }
