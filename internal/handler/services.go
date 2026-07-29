@@ -25,7 +25,7 @@ type otpService interface {
 }
 
 type walletAuthService interface {
-	Challenge(ctx context.Context, wallet, keyType string) (string, int, error)
+	Challenge(ctx context.Context, wallet, keyType, network string) (nonce string, expiresIn int, resolvedNetwork string, err error)
 	SignIn(ctx context.Context, in service.WalletSignInInput) (string, string, error)
 	AccessTTL() int
 }

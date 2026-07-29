@@ -120,14 +120,19 @@ func TestParseP256PubKey(t *testing.T) {
 type stubSignerReader struct {
 	keys [][]byte
 	err  error
+	// gotRPCURL records the endpoint the service selected for the network.
+	gotRPCURL string
 }
 
-func (s *stubSignerReader) WebAuthnSignerKeys(_ context.Context, _ string) ([][]byte, error) {
+func (s *stubSignerReader) WebAuthnSignerKeys(_ context.Context, _, rpcURL string) ([][]byte, error) {
+	s.gotRPCURL = rpcURL
 	return s.keys, s.err
 }
 
+var testSorobanURLs = SorobanURLs{Testnet: "http://testnet-rpc", Mainnet: "http://mainnet-rpc"}
+
 func newPasskeyAuthService(reader WebAuthnSignerReader) *WalletAuthService {
-	return NewWalletAuthService(nil, nil, reader, []string{testOrigin})
+	return NewWalletAuthService(nil, nil, reader, testSorobanURLs, []string{testOrigin})
 }
 
 func TestVerifyPasskey_Success(t *testing.T) {
@@ -135,23 +140,41 @@ func TestVerifyPasskey_Success(t *testing.T) {
 	nonce := []byte("0123456789abcdef0123456789abcdef")
 	pub65, authData, cdj, sig := makeAssertion(t, priv, nonce, testOrigin)
 
-	svc := newPasskeyAuthService(&stubSignerReader{keys: [][]byte{pub65}})
+	reader := &stubSignerReader{keys: [][]byte{pub65}}
+	svc := newPasskeyAuthService(reader)
 	err := svc.verifyPasskey(context.Background(), WalletSignInInput{
 		AuthenticatorData: authData, ClientDataJSON: cdj, PasskeySignature: sig,
-	}, nonce)
+	}, NetworkTestnet, nonce)
 	require.NoError(t, err)
+	assert.Equal(t, testSorobanURLs.Testnet, reader.gotRPCURL)
+}
+
+// A mainnet-only smart account is invisible on testnet, so the network must
+// pick the RPC the signers are actually read from.
+func TestVerifyPasskey_MainnetReadsMainnetRPC(t *testing.T) {
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	nonce := []byte("0123456789abcdef0123456789abcdef")
+	pub65, authData, cdj, sig := makeAssertion(t, priv, nonce, testOrigin)
+
+	reader := &stubSignerReader{keys: [][]byte{pub65}}
+	svc := newPasskeyAuthService(reader)
+	err := svc.verifyPasskey(context.Background(), WalletSignInInput{
+		AuthenticatorData: authData, ClientDataJSON: cdj, PasskeySignature: sig,
+	}, NetworkMainnet, nonce)
+	require.NoError(t, err)
+	assert.Equal(t, testSorobanURLs.Mainnet, reader.gotRPCURL)
 }
 
 func TestVerifyPasskey_NoSignerMapsToBadSignature(t *testing.T) {
 	svc := newPasskeyAuthService(&stubSignerReader{err: ErrNoWebAuthnSigner})
-	err := svc.verifyPasskey(context.Background(), WalletSignInInput{}, []byte("n"))
+	err := svc.verifyPasskey(context.Background(), WalletSignInInput{}, NetworkTestnet, []byte("n"))
 	require.ErrorIs(t, err, ErrBadSignature)
 }
 
 func TestVerifyPasskey_ReaderErrorPropagates(t *testing.T) {
 	sentinel := errors.New("rpc down")
 	svc := newPasskeyAuthService(&stubSignerReader{err: sentinel})
-	err := svc.verifyPasskey(context.Background(), WalletSignInInput{}, []byte("n"))
+	err := svc.verifyPasskey(context.Background(), WalletSignInInput{}, NetworkTestnet, []byte("n"))
 	require.ErrorIs(t, err, sentinel)
 }
 
@@ -199,8 +222,8 @@ func TestWebAuthnSignerKeys_Success(t *testing.T) {
 		u32Result(t, 1),
 		{Results: []SimResultEntry{{XDR: fixtureContextRuleXDR}}},
 	}}
-	r := NewSorobanWebAuthnSignerReader(sim, "http://rpc")
-	keys, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet)
+	r := NewSorobanWebAuthnSignerReader(sim)
+	keys, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet, "http://rpc")
 	require.NoError(t, err)
 	require.Len(t, keys, 1)
 	assert.Equal(t, byte(0x04), keys[0][0])
@@ -208,15 +231,15 @@ func TestWebAuthnSignerKeys_Success(t *testing.T) {
 
 func TestWebAuthnSignerKeys_NoRules(t *testing.T) {
 	sim := &fakeSimulator{results: []*SimulateResult{u32Result(t, 0)}}
-	r := NewSorobanWebAuthnSignerReader(sim, "http://rpc")
-	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet)
+	r := NewSorobanWebAuthnSignerReader(sim)
+	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet, "http://rpc")
 	require.ErrorIs(t, err, ErrNoWebAuthnSigner)
 }
 
 func TestWebAuthnSignerKeys_CountCallErrored(t *testing.T) {
 	sim := &fakeSimulator{results: []*SimulateResult{{Error: "boom"}}}
-	r := NewSorobanWebAuthnSignerReader(sim, "http://rpc")
-	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet)
+	r := NewSorobanWebAuthnSignerReader(sim)
+	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet, "http://rpc")
 	require.ErrorIs(t, err, ErrNoWebAuthnSigner)
 }
 
@@ -227,20 +250,20 @@ func TestWebAuthnSignerKeys_AllRulesMissing(t *testing.T) {
 		{Error: "#3000"}, {Error: "#3000"}, {Error: "#3000"},
 		{Error: "#3000"}, {Error: "#3000"}, {Error: "#3000"}, {Error: "#3000"},
 	}}
-	r := NewSorobanWebAuthnSignerReader(sim, "http://rpc")
-	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet)
+	r := NewSorobanWebAuthnSignerReader(sim)
+	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet, "http://rpc")
 	require.ErrorIs(t, err, ErrNoWebAuthnSigner)
 }
 
 func TestWebAuthnSignerKeys_BadContractAddress(t *testing.T) {
-	r := NewSorobanWebAuthnSignerReader(&fakeSimulator{}, "http://rpc")
-	_, err := r.WebAuthnSignerKeys(context.Background(), "not-a-contract")
+	r := NewSorobanWebAuthnSignerReader(&fakeSimulator{})
+	_, err := r.WebAuthnSignerKeys(context.Background(), "not-a-contract", "http://rpc")
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNoWebAuthnSigner)
 }
 
 func TestWebAuthnSignerKeys_SimulatorError(t *testing.T) {
-	r := NewSorobanWebAuthnSignerReader(&fakeSimulator{err: errors.New("rpc down")}, "http://rpc")
-	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet)
+	r := NewSorobanWebAuthnSignerReader(&fakeSimulator{err: errors.New("rpc down")})
+	_, err := r.WebAuthnSignerKeys(context.Background(), testContractWallet, "http://rpc")
 	require.Error(t, err)
 }
