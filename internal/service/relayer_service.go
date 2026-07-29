@@ -68,14 +68,79 @@ type DepositStatus struct {
 
 // RelayerService calls latch-relayer's funding-intent API.
 type RelayerService struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL string
+	budget  time.Duration
+	// retryInterval is the pause between attempts while latch-relayer boots;
+	// a field only so tests can shrink it.
+	retryInterval time.Duration
+	httpClient    *http.Client
 }
 
 func NewRelayerService(baseURL string, timeout time.Duration) *RelayerService {
 	return &RelayerService{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: timeout},
+		baseURL:       baseURL,
+		budget:        timeout,
+		retryInterval: 2 * time.Second,
+		httpClient:    &http.Client{Timeout: timeout},
+	}
+}
+
+// isRelayerBooting reports whether status is one its host's router emits when it
+// has no live upstream to hand the request to.
+func isRelayerBooting(status int) bool {
+	return status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
+}
+
+// send issues req, retrying while latch-relayer is still waking up, and returns
+// the first response it actually produced (or the last failure once the budget
+// is spent — callers classify that themselves, exactly as they would a
+// single-shot call).
+//
+// latch-relayer sleeps when idle. While it boots, its host's router does not
+// hold the request until the app is ready — it answers immediately with a
+// gateway status, so an attempt fails in milliseconds and a generous client
+// timeout on its own can never cover the ~14s boot. Retrying inside that same
+// timeout budget is what turns the boot window into a slow success.
+//
+// Retries are confined to gateway statuses and transport errors; a 4xx or a
+// relayer-generated 500 is a real answer and returns on the first attempt.
+// CreateIntent is not idempotent, so a retry can in principle mint a second
+// intent — harmless, because intents are TTL-bound and the caller only ever
+// uses the one handed back to it.
+func (s *RelayerService) send(ctx context.Context, req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.budget)
+	defer cancel()
+
+	deadline, _ := ctx.Deadline()
+
+	for {
+		attempt := req.Clone(ctx)
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("rewind request body: %w", err)
+			}
+			attempt.Body = body
+		}
+
+		resp, err := s.httpClient.Do(attempt)
+		if err == nil && !isRelayerBooting(resp.StatusCode) {
+			return resp, nil
+		}
+		if time.Until(deadline) <= s.retryInterval {
+			return resp, err
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(s.retryInterval):
+		}
 	}
 }
 
@@ -121,7 +186,7 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.send(ctx, req)
 	if err != nil {
 		return Intent{}, fmt.Errorf("%w: call relayer create intent: %w", ErrRelayerUnavailable, err)
 	}
@@ -186,7 +251,7 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 		return DepositStatus{}, fmt.Errorf("build deposit status request: %w", err)
 	}
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.send(ctx, req)
 	if err != nil {
 		return DepositStatus{}, fmt.Errorf("%w: call relayer deposit status: %w", ErrRelayerUnavailable, err)
 	}
