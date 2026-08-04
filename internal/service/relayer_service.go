@@ -69,6 +69,7 @@ type DepositStatus struct {
 // RelayerService calls latch-relayer's funding-intent API.
 type RelayerService struct {
 	baseURL string
+	apiKey  string
 	budget  time.Duration
 	// retryInterval is the pause between attempts while latch-relayer boots;
 	// a field only so tests can shrink it.
@@ -76,13 +77,32 @@ type RelayerService struct {
 	httpClient    *http.Client
 }
 
-func NewRelayerService(baseURL string, timeout time.Duration) *RelayerService {
+func NewRelayerService(baseURL, apiKey string, timeout time.Duration) *RelayerService {
 	return &RelayerService{
 		baseURL:       baseURL,
+		apiKey:        apiKey,
 		budget:        timeout,
 		retryInterval: 2 * time.Second,
 		httpClient:    &http.Client{Timeout: timeout},
 	}
+}
+
+// authorize attaches latch-relayer's shared secret. Every route but /health
+// requires it; an empty key is left off entirely so the relayer's rejection
+// reads as a missing header rather than a wrong secret.
+func (s *RelayerService) authorize(req *http.Request) {
+	if s.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	}
+}
+
+// isRelayerAuthFailure reports whether latch-relayer rejected our shared
+// secret. Nothing the caller sent is at fault — the key is missing, stale, or
+// out of sync with the relayer deployment — so callers fold this into
+// ErrRelayerUnavailable (503) rather than letting it fall through to an opaque
+// 500. The status is kept in the wrapped error so the log says which it was.
+func isRelayerAuthFailure(status int) bool {
+	return status == http.StatusUnauthorized || status == http.StatusForbidden
 }
 
 // isRelayerBooting reports whether status is one its host's router emits when it
@@ -185,6 +205,7 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 		return Intent{}, fmt.Errorf("build create intent request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	s.authorize(req)
 
 	resp, err := s.send(ctx, req)
 	if err != nil {
@@ -192,6 +213,9 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 	}
 	defer resp.Body.Close()
 
+	if isRelayerAuthFailure(resp.StatusCode) {
+		return Intent{}, fmt.Errorf("%w: relayer rejected api key on create intent: status %d", ErrRelayerUnavailable, resp.StatusCode)
+	}
 	if resp.StatusCode >= http.StatusInternalServerError {
 		return Intent{}, fmt.Errorf("%w: relayer create intent: status %d", ErrRelayerUnavailable, resp.StatusCode)
 	}
@@ -250,6 +274,7 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 	if err != nil {
 		return DepositStatus{}, fmt.Errorf("build deposit status request: %w", err)
 	}
+	s.authorize(req)
 
 	resp, err := s.send(ctx, req)
 	if err != nil {
@@ -257,6 +282,9 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 	}
 	defer resp.Body.Close()
 
+	if isRelayerAuthFailure(resp.StatusCode) {
+		return DepositStatus{}, fmt.Errorf("%w: relayer rejected api key on deposit status: status %d", ErrRelayerUnavailable, resp.StatusCode)
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return DepositStatus{}, ErrIntentNotFound
 	}

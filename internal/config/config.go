@@ -48,7 +48,10 @@ type Config struct {
 	// Passkey wallet sign-in: which Soroban RPC to read smart-account signers
 	// from (per network — a smart account exists on exactly one network, so the
 	// sign-in request's network selects the RPC), and which WebAuthn origins
-	// (clientDataJSON.origin) are accepted.
+	// (clientDataJSON.origin) are accepted. Origins are matched by exact string
+	// equality, so each entry must be a full origin including the scheme —
+	// "https://latch.finance", "chrome-extension://<id>". A bare host never
+	// matches anything a browser produces.
 	WalletAuthSorobanURL        string
 	WalletAuthSorobanURLMainnet string
 	WebAuthnAllowedOrigins      []string
@@ -142,6 +145,12 @@ type Config struct {
 	// the fund-account flow entirely — logged, not fatal, since mobile
 	// traffic must keep flowing regardless of relayer availability.
 	RelayerURL string
+	// RelayerAPIKey is latch-relayer's shared secret, sent as
+	// `Authorization: Bearer <key>` on every call. latch-relayer rejects an
+	// unauthenticated request to anything but /health with a 401, so an unset
+	// key breaks the fund flow as surely as an unset URL. Must match the
+	// relayer deployment's own RELAYER_API_KEY.
+	RelayerAPIKey string
 	// RelayerTimeout is the total budget for one relayer call, retries
 	// included, and must clear latch-relayer's cold start: it sleeps when
 	// idle and takes ~14s to boot, during which its host's router rejects
@@ -176,7 +185,7 @@ func Load() (*Config, error) {
 		CoinGeckoAPIKey:             getEnv("COINGECKO_API_KEY", ""),
 		WalletAuthSorobanURL:        getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
 		WalletAuthSorobanURLMainnet: getEnv("WALLET_AUTH_SOROBAN_URL_MAINNET", getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com")),
-		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "latch.finance")),
+		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance")),
 
 		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
 		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),
@@ -224,6 +233,7 @@ func Load() (*Config, error) {
 		WalletMembershipRetention: time.Duration(getEnvInt("WALLET_MEMBERSHIP_RETENTION_DAYS", 180)) * 24 * time.Hour,
 
 		RelayerURL:     getEnv("RELAYER_URL", ""),
+		RelayerAPIKey:  getEnv("RELAYER_API_KEY", ""),
 		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
 	}
 
