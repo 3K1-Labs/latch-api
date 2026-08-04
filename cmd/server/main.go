@@ -88,7 +88,7 @@ func main() {
 	emailSvc := service.NewEmailService(cfg.ResendAPIKey, cfg.EmailFromName, cfg.EmailFromAddr)
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
-	relayerSvc := service.NewRelayerService(cfg.RelayerURL, cfg.RelayerTimeout)
+	relayerSvc := service.NewRelayerService(cfg.RelayerURL, cfg.RelayerAPIKey, cfg.RelayerTimeout)
 	backupSvc := service.NewBackupService(queries, encSvc)
 	accountSvc := service.NewAccountService(queries, relayerSvc)
 	cosignSvc := service.NewCosignService(queries)

@@ -33,7 +33,7 @@ func TestRelayerService_CreateIntent_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	intent, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
 	require.NoError(t, err)
 	assert.Equal(t, "intent-1", intent.IntentID)
@@ -45,7 +45,7 @@ func TestRelayerService_CreateIntent_Success(t *testing.T) {
 }
 
 func TestRelayerService_CreateIntent_NotConfigured(t *testing.T) {
-	svc := NewRelayerService("", time.Second)
+	svc := NewRelayerService("", "", time.Second)
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
 	assert.ErrorIs(t, err, ErrRelayerNotConfigured)
 }
@@ -57,7 +57,7 @@ func TestRelayerService_CreateIntent_NonOKStatus(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "not-a-real-address"})
 	assert.Error(t, err)
 }
@@ -70,7 +70,7 @@ func TestRelayerService_CreateIntent_NonOKStatus_NotUnavailable(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrRelayerUnavailable)
@@ -106,7 +106,7 @@ func TestRelayerService_CreateIntent_Unavailable(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := NewRelayerService(tc.baseURL, tc.timeout)
+			svc := NewRelayerService(tc.baseURL, "", tc.timeout)
 			_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
 			require.Error(t, err)
 			assert.ErrorIs(t, err, ErrRelayerUnavailable)
@@ -141,7 +141,7 @@ func TestRelayerService_CreateIntent_RetriesWhileBooting(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc := NewRelayerService(ts.URL, "", 25*time.Second)
 	svc.retryInterval = 10 * time.Millisecond
 
 	intent, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
@@ -160,7 +160,7 @@ func TestRelayerService_CreateIntent_DoesNotRetryRelayerError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc := NewRelayerService(ts.URL, "", 25*time.Second)
 	svc.retryInterval = 10 * time.Millisecond
 
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
@@ -176,7 +176,7 @@ func TestRelayerService_CreateIntent_BootingPastBudget(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, 100*time.Millisecond)
+	svc := NewRelayerService(ts.URL, "", 100*time.Millisecond)
 	svc.retryInterval = 10 * time.Millisecond
 
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
@@ -202,7 +202,7 @@ func TestRelayerService_DepositStatus_RetriesWhileBooting(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc := NewRelayerService(ts.URL, "", 25*time.Second)
 	svc.retryInterval = 10 * time.Millisecond
 
 	status, err := svc.DepositStatus(context.Background(), "12345")
@@ -218,7 +218,7 @@ func TestRelayerService_CreateIntent_RetryHonoursCancellation(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, 25*time.Second)
+	svc := NewRelayerService(ts.URL, "", 25*time.Second)
 	svc.retryInterval = time.Second
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -235,7 +235,7 @@ func TestRelayerService_DepositStatus_Unavailable(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.DepositStatus(context.Background(), "12345")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrRelayerUnavailable)
@@ -248,7 +248,7 @@ func TestRelayerService_CreateIntent_MalformedResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
 	assert.Error(t, err)
 }
@@ -265,7 +265,7 @@ func TestRelayerService_CreateIntent_BadExpiresAt(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
 	assert.Error(t, err)
 }
@@ -292,7 +292,7 @@ func TestRelayerService_DepositStatus_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	status, err := svc.DepositStatus(context.Background(), "12345")
 	require.NoError(t, err)
 	assert.Equal(t, "completed", status.Status)
@@ -301,7 +301,7 @@ func TestRelayerService_DepositStatus_Success(t *testing.T) {
 }
 
 func TestRelayerService_DepositStatus_NotConfigured(t *testing.T) {
-	svc := NewRelayerService("", time.Second)
+	svc := NewRelayerService("", "", time.Second)
 	_, err := svc.DepositStatus(context.Background(), "12345")
 	assert.ErrorIs(t, err, ErrRelayerNotConfigured)
 }
@@ -314,7 +314,7 @@ func TestRelayerService_DepositStatus_InvalidMemoID(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	for _, memoID := range []string{"abc", "123?admin=true", "-1", "18446744073709551616"} {
 		t.Run(memoID, func(t *testing.T) {
 			_, err := svc.DepositStatus(context.Background(), memoID)
@@ -330,7 +330,7 @@ func TestRelayerService_DepositStatus_NotFound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.DepositStatus(context.Background(), "12345")
 	assert.ErrorIs(t, err, ErrIntentNotFound)
 }
@@ -341,7 +341,7 @@ func TestRelayerService_DepositStatus_NonOKStatus(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.DepositStatus(context.Background(), "12345")
 	assert.Error(t, err)
 }
@@ -353,7 +353,76 @@ func TestRelayerService_DepositStatus_MalformedResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewRelayerService(ts.URL, time.Second)
+	svc := NewRelayerService(ts.URL, "", time.Second)
 	_, err := svc.DepositStatus(context.Background(), "12345")
 	assert.Error(t, err)
+}
+
+// latch-relayer rejects every route but /health without its shared secret, so
+// both calls must carry it. Omitting it was the production failure: the relayer
+// answered 401 and the handler surfaced an opaque 500.
+func TestRelayerService_SendsAPIKey(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(depositStatusResponse{
+			IntentID: "intent-1", MemoID: "12345", CAddress: "CABC123",
+			PoolAddress: "GB3POOL", Status: "pending", ExpiresAt: expiresAt,
+		})
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, "s3cret", time.Second)
+
+	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer s3cret", gotAuth)
+
+	gotAuth = ""
+	_, err = svc.DepositStatus(context.Background(), "12345")
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer s3cret", gotAuth)
+}
+
+// An unset key sends no header at all, so the relayer's rejection reads as a
+// missing credential rather than a wrong one.
+func TestRelayerService_OmitsAPIKeyWhenUnset(t *testing.T) {
+	var hasAuth bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasAuth = r.Header["Authorization"]
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	svc := NewRelayerService(ts.URL, "", time.Second)
+	_, _ = svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+	assert.False(t, hasAuth)
+}
+
+// A rejected key is a deployment fault, not a caller error: it must surface as
+// a retryable 503 (ErrRelayerUnavailable), never as the opaque 500 an
+// unclassified status falls through to.
+func TestRelayerService_AuthFailureIsUnavailable(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			}))
+			defer ts.Close()
+
+			svc := NewRelayerService(ts.URL, "wrong-key", time.Second)
+
+			_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC123"})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrRelayerUnavailable)
+
+			_, err = svc.DepositStatus(context.Background(), "12345")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrRelayerUnavailable)
+			assert.NotErrorIs(t, err, ErrIntentNotFound)
+		})
+	}
 }
