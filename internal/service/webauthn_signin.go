@@ -215,6 +215,13 @@ type clientData struct {
 // (type/challenge/origin), reconstructs the signed digest, and ECDSA-verifies the
 // DER signature. Returns nil on the first key that verifies, ErrBadSignature
 // otherwise.
+//
+// Every rejection wraps ErrBadSignature so callers keep mapping them to one
+// opaque "signature verification failed" response, but each carries a distinct
+// reason for the server-side log — the checks fail for very different operational
+// causes (a missing allowed origin, a stale challenge, a genuinely bad signature)
+// and a single undifferentiated error makes them indistinguishable in production.
+// The reason is for logs only; never surface it to the client.
 func VerifyWebAuthnAssertion(
 	candidatePubKeys [][]byte,
 	nonce, authenticatorData, clientDataJSON, derSignature []byte,
@@ -224,23 +231,25 @@ func VerifyWebAuthnAssertion(
 		return ErrNoWebAuthnSigner
 	}
 	if len(authenticatorData) < 37 {
-		return ErrBadSignature
+		return fmt.Errorf("%w: authenticator data too short (%d bytes)", ErrBadSignature, len(authenticatorData))
 	}
 
 	var cd clientData
 	if err := json.Unmarshal(clientDataJSON, &cd); err != nil {
-		return ErrBadSignature
+		return fmt.Errorf("%w: malformed clientDataJSON", ErrBadSignature)
 	}
 	if cd.Type != "webauthn.get" {
-		return ErrBadSignature
+		return fmt.Errorf("%w: clientData type is %q, want webauthn.get", ErrBadSignature, cd.Type)
 	}
 	// Constant-time challenge check; the challenge is base64url(nonce).
 	wantChallenge := base64.RawURLEncoding.EncodeToString(nonce)
 	if subtle.ConstantTimeCompare([]byte(cd.Challenge), []byte(wantChallenge)) != 1 {
-		return ErrBadSignature
+		return fmt.Errorf("%w: challenge does not match the issued nonce", ErrBadSignature)
 	}
 	if !originAllowed(cd.Origin, allowedOrigins) {
-		return ErrBadSignature
+		// The origin is attacker-controlled but not a secret, and it is the one
+		// field that identifies a misconfigured WEBAUTHN_ALLOWED_ORIGINS.
+		return fmt.Errorf("%w: origin %q is not in WEBAUTHN_ALLOWED_ORIGINS", ErrBadSignature, cd.Origin)
 	}
 
 	// digest = SHA256(authenticatorData || SHA256(clientDataJSON))
@@ -259,7 +268,7 @@ func VerifyWebAuthnAssertion(
 			return nil
 		}
 	}
-	return ErrBadSignature
+	return fmt.Errorf("%w: no on-chain signer key verified the assertion (%d candidates)", ErrBadSignature, len(candidatePubKeys))
 }
 
 func originAllowed(origin string, allowed []string) bool {

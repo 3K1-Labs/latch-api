@@ -145,7 +145,9 @@ func (h *WalletAuthHandler) writeSignInErr(c *gin.Context, wallet string, err er
 	case errors.Is(err, service.ErrNonceInvalid):
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "invalid or expired nonce")
 	case errors.Is(err, service.ErrBadSignature), errors.Is(err, service.ErrBadWalletAddress):
-		// Don't reveal which check failed; both are "signature rejected".
+		// The client only ever sees "signature verification failed"; err carries
+		// the specific reason (rejected origin, stale challenge, no on-chain
+		// signer, bad signature) and stays server-side.
 		slog.Info("wallet sign-in rejected", "wallet", wallet, "err", err)
 		httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "signature verification failed")
 	default:

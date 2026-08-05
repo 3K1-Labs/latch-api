@@ -23,7 +23,7 @@ import (
 // whose key_data is a 65-byte P-256 point (0x04 prefix) + credential-id suffix.
 const fixtureContextRuleXDR = "AAAAEQAAAAEAAAAIAAAADwAAAAxjb250ZXh0X3R5cGUAAAAQAAAAAQAAAAEAAAAPAAAAB0RlZmF1bHQAAAAADwAAAAJpZAAAAAAAAwAAAAAAAAAPAAAABG5hbWUAAAAOAAAAB2RlZmF1bHQAAAAADwAAAAhwb2xpY2llcwAAABAAAAABAAAAAAAAAA8AAAAKcG9saWN5X2lkcwAAAAAAEAAAAAEAAAAAAAAADwAAAApzaWduZXJfaWRzAAAAAAAQAAAAAQAAAAEAAAADAAAAAAAAAA8AAAAHc2lnbmVycwAAAAAQAAAAAQAAAAEAAAAQAAAAAQAAAAMAAAAPAAAACEV4dGVybmFsAAAAEgAAAAHCEy5Wseyu6iTHzK6ewIGAlPDP67/VuZsvENb63FT8NwAAAA0AAABRBEFq82Z4ZM20kR2vSfN5/yHidECI1puKOecLlzLfeFakP3hVAq//ht2q3whic5SmlxlditGn9G0Z0vuaaYhQtgDDRj07g2+6/0LXCG88brT9AAAAAAAADwAAAAt2YWxpZF91bnRpbAAAAAAB"
 
-const testOrigin = "latch.finance"
+const testOrigin = "https://latch.finance"
 
 // makeAssertion builds a valid WebAuthn "get" assertion over nonce signed by priv.
 func makeAssertion(t *testing.T, priv *ecdsa.PrivateKey, nonce []byte, origin string) (pub65, authData, clientDataJSON, derSig []byte) {
@@ -89,6 +89,56 @@ func TestVerifyWebAuthnAssertion(t *testing.T) {
 		bad, _ := json.Marshal(clientData{Type: "webauthn.create", Challenge: base64.RawURLEncoding.EncodeToString(nonce), Origin: testOrigin})
 		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, bad, sig, []string{testOrigin}), ErrBadSignature)
 	})
+}
+
+// Every rejection must stay errors.Is(ErrBadSignature) so the handler keeps
+// returning one opaque 401, while carrying a distinct reason for the log —
+// otherwise a misconfigured allowed-origin list is indistinguishable in
+// production from a genuinely forged assertion.
+func TestVerifyWebAuthnAssertion_RejectionReasonsAreDistinct(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	nonce := []byte("0123456789abcdef0123456789abcdef")
+	pub65, authData, cdj, sig := makeAssertion(t, priv, nonce, testOrigin)
+	otherEcdh, _ := other.ECDH()
+	otherPub := otherEcdh.PublicKey().Bytes()
+
+	wrongType, err := json.Marshal(clientData{
+		Type:      "webauthn.create",
+		Challenge: base64.RawURLEncoding.EncodeToString(nonce),
+		Origin:    testOrigin,
+	})
+	require.NoError(t, err)
+
+	const extensionOrigin = "chrome-extension://cgmboajonamcelkfpikbmmpohccmkmog"
+	_, _, extensionCDJ, _ := makeAssertion(t, priv, nonce, extensionOrigin)
+
+	tests := []struct {
+		name       string
+		keys       [][]byte
+		nonce      []byte
+		authData   []byte
+		clientData []byte
+		origins    []string
+		wantReason string
+	}{
+		{"disallowed origin names the origin", [][]byte{pub65}, nonce, authData, extensionCDJ, []string{testOrigin}, extensionOrigin},
+		{"challenge mismatch", [][]byte{pub65}, []byte("different-nonce-value-padding-32b"), authData, cdj, []string{testOrigin}, "challenge does not match"},
+		{"short authenticator data", [][]byte{pub65}, nonce, authData[:20], cdj, []string{testOrigin}, "authenticator data too short"},
+		{"malformed clientDataJSON", [][]byte{pub65}, nonce, authData, []byte("{not json"), []string{testOrigin}, "malformed clientDataJSON"},
+		{"wrong ceremony type", [][]byte{pub65}, nonce, authData, wrongType, []string{testOrigin}, "want webauthn.get"},
+		{"no key verifies", [][]byte{otherPub}, nonce, authData, cdj, []string{testOrigin}, "no on-chain signer key verified"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := VerifyWebAuthnAssertion(tc.keys, tc.nonce, tc.authData, tc.clientData, sig, tc.origins)
+			require.ErrorIs(t, err, ErrBadSignature, "must still map to the opaque 401")
+			assert.Contains(t, err.Error(), tc.wantReason)
+		})
+	}
 }
 
 func TestWebAuthnKeysFromRule_Fixture(t *testing.T) {
@@ -169,6 +219,19 @@ func TestVerifyPasskey_NoSignerMapsToBadSignature(t *testing.T) {
 	svc := newPasskeyAuthService(&stubSignerReader{err: ErrNoWebAuthnSigner})
 	err := svc.verifyPasskey(context.Background(), WalletSignInInput{}, NetworkTestnet, []byte("n"))
 	require.ErrorIs(t, err, ErrBadSignature)
+}
+
+// "No signer on chain" is usually a wallet signed in against the network it
+// does not live on, so the network has to reach the log.
+func TestVerifyPasskey_NoSignerNamesNetwork(t *testing.T) {
+	for _, network := range []string{NetworkTestnet, NetworkMainnet} {
+		t.Run(network, func(t *testing.T) {
+			svc := newPasskeyAuthService(&stubSignerReader{err: ErrNoWebAuthnSigner})
+			err := svc.verifyPasskey(context.Background(), WalletSignInInput{}, network, []byte("n"))
+			require.ErrorIs(t, err, ErrBadSignature)
+			assert.Contains(t, err.Error(), network)
+		})
+	}
 }
 
 func TestVerifyPasskey_ReaderErrorPropagates(t *testing.T) {
