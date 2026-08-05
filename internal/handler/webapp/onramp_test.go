@@ -100,6 +100,114 @@ func TestOnRampSession_ServiceErrors(t *testing.T) {
 	}
 }
 
+// ── Session: provider selection ──────────────────────────────────────────────
+
+func TestOnRampSession_TransakProvider(t *testing.T) {
+	t.Run("routes to the transak path and echoes provider", func(t *testing.T) {
+		stub := &stubOnRamp{transakResult: webapp.OnRampSession{
+			IntentID: "intent-1", MemoID: "12345678", DestinationCAddress: "CADDR",
+			PoolAddress: "GPOOL", FiatAmount: "25", FiatCode: "USD",
+			IntegrationMode: "widget", Provider: "transak", CryptoCurrency: "XLM",
+			WidgetURL: "https://global-stg.transak.com?sessionId=abc",
+		}}
+		h := NewOnRampHandler(stub, testCfg())
+		r := gin.New()
+		r.POST("/on-ramp/session", h.Session)
+
+		req := httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{
+			"destinationCAddress": "CADDR", "provider": "transak", "cryptoCurrency": "XLM",
+		}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), `"provider":"transak"`)
+		assert.Contains(t, w.Body.String(), `"cryptoCurrency":"XLM"`)
+		assert.Contains(t, w.Body.String(), `"widgetUrl":"https://global-stg.transak.com?sessionId=abc"`)
+		// The end-user IP must reach the service for Transak's x-user-ip.
+		assert.NotEmpty(t, stub.transakInput.DeviceIP)
+		assert.Equal(t, "XLM", stub.transakInput.CryptoCurrency)
+	})
+
+	t.Run("default provider stays moonpay and omits provider fields", func(t *testing.T) {
+		stub := &stubOnRamp{createResult: webapp.OnRampSession{
+			IntentID: "intent-1", IntegrationMode: "widget", WidgetURL: "https://buy.moonpay.com?x=1",
+		}}
+		h := NewOnRampHandler(stub, testCfg())
+		r := gin.New()
+		r.POST("/on-ramp/session", h.Session)
+
+		req := httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{"destinationCAddress": "CADDR"}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), `"provider"`)
+		assert.NotContains(t, w.Body.String(), `"cryptoCurrency"`)
+		assert.Empty(t, stub.transakInput.DestinationCAddress, "moonpay requests must not hit the transak path")
+	})
+
+	t.Run("rejects unknown provider", func(t *testing.T) {
+		h := NewOnRampHandler(&stubOnRamp{}, testCfg())
+		r := gin.New()
+		r.POST("/on-ramp/session", h.Session)
+
+		req := httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{
+			"destinationCAddress": "CADDR", "provider": "ramp",
+		}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("requires cryptoCurrency for transak", func(t *testing.T) {
+		h := NewOnRampHandler(&stubOnRamp{}, testCfg())
+		r := gin.New()
+		r.POST("/on-ramp/session", h.Session)
+
+		req := httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{
+			"destinationCAddress": "CADDR", "provider": "transak",
+		}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "cryptoCurrency")
+	})
+}
+
+func TestOnRampSession_TransakServiceErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		// Deployment state, not caller input: the client should stop offering
+		// Transak rather than retry.
+		{"testnet pool", webapp.ErrTransakRequiresMainnet, http.StatusServiceUnavailable},
+		{"provider not configured", webapp.ErrTransakNotConfigured, http.StatusServiceUnavailable},
+		{"unsupported crypto currency", webapp.ErrTransakCryptoInvalid, http.StatusBadRequest},
+		{"invalid c-address", webapp.ErrOnRampInvalidCAddress, http.StatusBadRequest},
+		{"upstream transak failure", &webapp.TransakAPIError{StatusCode: http.StatusServiceUnavailable, Message: "down"}, http.StatusBadGateway},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewOnRampHandler(&stubOnRamp{transakErr: tc.err}, testCfg())
+			r := gin.New()
+			r.POST("/on-ramp/session", h.Session)
+
+			req := httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{
+				"destinationCAddress": "CADDR", "provider": "transak", "cryptoCurrency": "XLM",
+			}))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
 // ── GetIntent ────────────────────────────────────────────────────────────────
 
 func TestOnRampGetIntent(t *testing.T) {

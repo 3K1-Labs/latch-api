@@ -328,19 +328,26 @@ func (s *stubSignPayload) Consume(_ context.Context, _ string) (webapp.SignPaylo
 }
 
 type stubOnRamp struct {
-	createResult webapp.OnRampSession
-	createErr    error
-	getIntent    webapp.OnRampIntent
-	getMoonpay   string
-	getErr       error
-	updateIntent webapp.OnRampIntent
-	updateErr    error
-	poolSnapshot webapp.PoolAccountSnapshot
-	poolErr      error
+	createResult  webapp.OnRampSession
+	createErr     error
+	transakResult webapp.OnRampSession
+	transakErr    error
+	transakInput  webapp.TransakIntentInput
+	getIntent     webapp.OnRampIntent
+	getMoonpay    string
+	getErr        error
+	updateIntent  webapp.OnRampIntent
+	updateErr     error
+	poolSnapshot  webapp.PoolAccountSnapshot
+	poolErr       error
 }
 
 func (s *stubOnRamp) CreateIntent(_ context.Context, _, _, _, _, _ string) (webapp.OnRampSession, error) {
 	return s.createResult, s.createErr
+}
+func (s *stubOnRamp) CreateTransakIntent(_ context.Context, in webapp.TransakIntentInput) (webapp.OnRampSession, error) {
+	s.transakInput = in
+	return s.transakResult, s.transakErr
 }
 func (s *stubOnRamp) GetIntent(_ context.Context, _ string) (webapp.OnRampIntent, string, error) {
 	return s.getIntent, s.getMoonpay, s.getErr
