@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,6 +17,12 @@ import (
 // newTestTransakOnRampService builds an on-ramp service whose Transak client
 // talks to stubURL. poolNetwork is explicit because it is the gate under test.
 func newTestTransakOnRampService(t *testing.T, stubURL, poolNetwork string) (*OnRampService, sqlmock.Sqlmock) {
+	t.Helper()
+	relayer, _ := newStubRelayer(t)
+	return newTestTransakOnRampServiceWithRelayer(t, stubURL, poolNetwork, relayer)
+}
+
+func newTestTransakOnRampServiceWithRelayer(t *testing.T, stubURL, poolNetwork string, relayer *service.RelayerService) (*OnRampService, sqlmock.Sqlmock) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -28,7 +36,7 @@ func newTestTransakOnRampService(t *testing.T, stubURL, poolNetwork string) (*On
 			ReferrerDomain: "latch.finance",
 			APIBase:        stubURL,
 			PoolNetwork:    poolNetwork,
-		})
+		}, relayer)
 	svc.transak.httpClient = http.DefaultClient
 	return svc, mock
 }
@@ -77,7 +85,6 @@ func TestOnRampService_CreateTransakIntent_RequiresMainnetPool(t *testing.T) {
 	t.Run("allowed on mainnet", func(t *testing.T) {
 		stub := newTransakStub(t, 0)
 		svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-		expectMemoDoesNotExist(mock)
 		expectInsertOnRampIntent(mock)
 
 		sess, err := svc.CreateTransakIntent(context.Background(), testTransakIntentInput(t))
@@ -90,7 +97,6 @@ func TestOnRampService_CreateTransakIntent_RequiresMainnetPool(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_Success(t *testing.T) {
 	stub := newTransakStub(t, 0)
 	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	in := testTransakIntentInput(t)
@@ -100,10 +106,13 @@ func TestOnRampService_CreateTransakIntent_Success(t *testing.T) {
 	assert.Equal(t, OnRampProviderTransak, sess.Provider)
 	assert.Equal(t, onRampIntegrationModeWidget, sess.IntegrationMode)
 	assert.Equal(t, "https://global-stg.transak.com?sessionId=abc", sess.WidgetURL)
-	assert.Equal(t, "GPOOL", sess.PoolAddress)
+	// Both come from the relayer that minted the memo, never from the "GPOOL"
+	// config value this service was built with — a memo is only creditable at
+	// the pool its own relayer watches.
+	assert.Equal(t, stubRelayerPoolAddress, sess.PoolAddress)
+	assert.Equal(t, stubRelayerMemoID, sess.MemoID)
 	assert.Equal(t, "XLM", sess.CryptoCurrency)
 	assert.Equal(t, in.DestinationCAddress, sess.DestinationCAddress)
-	assert.NotEmpty(t, sess.MemoID)
 	assert.NotEmpty(t, sess.IntentID)
 	assert.Empty(t, sess.SessionToken, "transak sessions never carry a MoonPay platform token")
 
@@ -120,7 +129,6 @@ func TestOnRampService_CreateTransakIntent_Success(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_AppliesFiatDefaults(t *testing.T) {
 	stub := newTransakStub(t, 0)
 	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	in := testTransakIntentInput(t)
@@ -135,7 +143,6 @@ func TestOnRampService_CreateTransakIntent_AppliesFiatDefaults(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_NormalizesCryptoCurrency(t *testing.T) {
 	stub := newTransakStub(t, 0)
 	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	in := testTransakIntentInput(t)
@@ -178,8 +185,9 @@ func TestOnRampService_CreateTransakIntent_Validation(t *testing.T) {
 		sqlDB, _, err := sqlmock.New()
 		require.NoError(t, err)
 		t.Cleanup(func() { sqlDB.Close() })
+		relayer, _ := newStubRelayer(t)
 		svc := NewOnRampService(db.New(sqlDB), "", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
-			"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{PoolNetwork: "mainnet"})
+			"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{PoolNetwork: "mainnet"}, relayer)
 
 		_, err = svc.CreateTransakIntent(context.Background(), testTransakIntentInput(t))
 		assert.ErrorIs(t, err, ErrTransakNotConfigured)
@@ -191,7 +199,6 @@ func TestOnRampService_CreateTransakIntent_Validation(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_NoIntentRowOnProviderFailure(t *testing.T) {
 	ts := httptestServerReturning(t, http.StatusServiceUnavailable, `{"error":{"message":"transak down"}}`)
 	svc, mock := newTestTransakOnRampService(t, ts, "mainnet")
-	expectMemoDoesNotExist(mock)
 	// Deliberately no expectInsertOnRampIntent: sqlmock fails the test if the
 	// service inserts anyway.
 
@@ -200,5 +207,43 @@ func TestOnRampService_CreateTransakIntent_NoIntentRowOnProviderFailure(t *testi
 	var apiErr *TransakAPIError
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// The memo must be minted by the relayer, with the fields it needs to credit
+// the deposit. A memo drawn anywhere else is unknown to the relayer's watcher,
+// which sweeps the deposit to RECOVERY_ADDRESS instead of forwarding it.
+func TestOnRampService_CreateTransakIntent_MintsMemoThroughRelayer(t *testing.T) {
+	stub := newTransakStub(t, 0)
+	relayer, call := newStubRelayer(t)
+	svc, mock := newTestTransakOnRampServiceWithRelayer(t, stub.server.URL, "mainnet", relayer)
+	expectInsertOnRampIntent(mock)
+
+	in := testTransakIntentInput(t)
+	sess, err := svc.CreateTransakIntent(context.Background(), in)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/intents", call.path)
+	assert.Equal(t, in.DestinationCAddress, call.body["c_address"],
+		"the relayer forwards the deposit to this address once the memo matches")
+	assert.Equal(t, sess.IntentID, call.body["external_id"],
+		"links the relayer's intent back to our on_ramp_intents row")
+	assert.Equal(t, float64(onRampIntentTTL), call.body["expires_in"],
+		"the relayer sweeps deposits against an expired intent; a bank transfer can take days")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// If the relayer cannot mint a memo there is no creditable session to hand
+// back, so nothing else may happen: no Transak session the user could pay into,
+// and no intent row.
+func TestOnRampService_CreateTransakIntent_RelayerDownIsFatal(t *testing.T) {
+	stub := newTransakStub(t, 0)
+	down := service.NewRelayerService("", "", time.Second) // unconfigured relayer
+	svc, mock := newTestTransakOnRampServiceWithRelayer(t, stub.server.URL, "mainnet", down)
+
+	_, err := svc.CreateTransakIntent(context.Background(), testTransakIntentInput(t))
+
+	require.ErrorIs(t, err, service.ErrRelayerNotConfigured)
+	assert.Zero(t, stub.refreshes, "no widget URL may exist for a memo nobody can credit")
 	assert.NoError(t, mock.ExpectationsWereMet())
 }

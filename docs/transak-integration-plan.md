@@ -10,7 +10,8 @@ Transak is wired into `/v1/webapp/on-ramp/session` as a second provider and is
 still dev-only — `devOnlyGuard` 403s it in production — so lifting that guard is
 part of Phase 2, not something the current code does.
 
-The memo-namespace collision in §2 is **knowingly deferred**, not fixed.
+The memo-namespace problem in §2 is **fixed**: latch-relayer is now the sole
+allocator for both providers.
 
 The spec is sound in its core claim — `TRANSAK_API_SECRET` must never reach the
 extension, so partner calls belong here. This plan keeps that and fixes what the
@@ -51,7 +52,7 @@ We already have **two** on-ramp systems sharing **one** pool address:
 
 | | `/v1/accounts/deposit-intent` | `/v1/webapp/on-ramp/session` |
 |---|---|---|
-| memo + pool owner | latch-relayer | this service (`on_ramp_intents`) |
+| memo + pool owner | latch-relayer | latch-relayer (was `on_ramp_intents` — see below) |
 | providers | none (relayer-native) | MoonPay widget + Platform |
 | end-user IP | not plumbed | `deviceIP` already a param |
 | intent lifecycle | relayer status | `created/pending/completed/failed` |
@@ -73,15 +74,29 @@ reconciliation story.
 `provider=transak`, then make that handler *delegate* to `OnRampService` rather
 than growing a parallel Transak client. Do not implement Transak twice.
 
-### Prerequisite bug: colliding memo namespaces
+### Prerequisite bug: memos the relayer never minted — fixed
 
-`generateUniqueOnRampMemoID` checks uniqueness against `on_ramp_intents` only,
-while latch-relayer allocates memos from its own table — and both fund the same
-pool `GDQ3PXTP…`. Two systems can mint the same 8-digit memo, and the deposit
-credits the wrong wallet. Low probability today, severe when it lands, and a
-third writer makes it worse. Fix before adding Transak: either partition the
-ranges (relayer `1000_0000–4999_9999`, webapp `5000_0000–9999_9999`) or make one
-system the sole allocator.
+Originally filed as a *collision*: `generateUniqueOnRampMemoID` checked
+uniqueness against `on_ramp_intents` only, while latch-relayer allocated from
+its own table, and both funded the same pool `GDQ3PXTP…`.
+
+Auditing the relayer showed the collision was the lesser half. `forwarder.Forward`
+credits a deposit only when `GetIntentByMemoID` finds the memo in the *relayer's*
+table; a miss takes the `unknown memo_id, sweeping to recovery` branch. A
+webapp-minted memo was never in that table, so **every** deposit through the
+webapp on-ramp was swept to `RECOVERY_ADDRESS` rather than credited — not just
+the rare colliding one. This applied to the live MoonPay path too.
+
+That also rules out one of the two proposed fixes: partitioning the ranges
+prevents collisions but leaves every webapp memo unknown to the relayer, so
+nothing gets credited either way. Only the sole-allocator option works.
+
+**Fixed:** `OnRampService.mintPooledIntent` calls the relayer's `POST /intents`
+for both providers, and takes the pool address from the same response — a memo
+is only creditable at the pool its own relayer watches. `external_id` carries the
+`on_ramp_intents` row's UUID, which also closes half of item 14. If the relayer
+is unreachable the session fails with 503 instead of handing back a widget the
+user could pay into and never be credited for.
 
 ---
 
@@ -106,10 +121,10 @@ before production, and grab the region's static outbound IPs from the dashboard
 
 ## 4. Phases
 
-### Phase 0 — provider-neutral groundwork ✅ done (except step 1)
+### Phase 0 — provider-neutral groundwork ✅ done
 
-1. ~~Fix the memo-namespace collision (§2).~~ **Deferred by decision.** Still
-   open; a third writer to the shared pool makes it likelier, not less.
+1. ~~Fix the memo-namespace collision (§2).~~ **Done** — latch-relayer is the
+   sole memo allocator for both providers; see §2.
 2. Config: `TRANSAK_API_KEY`, `TRANSAK_API_SECRET`, `TRANSAK_ENV`,
    `TRANSAK_REFERRER_DOMAIN` in `internal/config/config.go`. Empty
    `TRANSAK_API_KEY` disables the provider entirely — same pattern as
@@ -178,7 +193,7 @@ actual (testnet) deployment, and nothing changes for MoonPay callers.
 
 ## 6. Definition of done
 
-- [ ] Memo namespaces cannot collide across relayer and webapp on-ramp *(deferred)*
+- [x] Every memo the on-ramp hands out is one the relayer minted and can credit
 - [x] Transak disabled by default; enabling requires `POOL_NETWORK=mainnet`
 - [x] One on-ramp code path, not two
 - [x] `webappx` envelope (this route's convention); typed error codes
