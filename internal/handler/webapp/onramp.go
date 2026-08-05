@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
 	"github.com/latch/backend/internal/middleware"
+	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
@@ -293,6 +294,14 @@ func onRampErrorResponse(c *gin.Context, err error) {
 		// offering Transak rather than to retry with different input.
 		slog.Error("transak provider unavailable", "err", err)
 		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrInternal, err.Error())
+	case errors.Is(err, service.ErrRelayerUnavailable),
+		errors.Is(err, service.ErrRelayerNotConfigured):
+		// The relayer mints the deposit memo, so without it there is no
+		// creditable session to hand back. Failing here is the point: a
+		// locally minted memo would produce a widget the user could pay into
+		// and never be credited for.
+		slog.Error("on-ramp memo allocation failed", "err", err)
+		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrInternal, "deposit service is temporarily unavailable, please try again")
 	case errors.Is(err, webapp.ErrMoonPaySecretKeyMissing),
 		errors.Is(err, webapp.ErrMoonPaySecretKeyIsPublishable),
 		errors.Is(err, webapp.ErrMoonPaySecretKeyFormat),

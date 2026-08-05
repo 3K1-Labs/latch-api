@@ -12,11 +12,53 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// The stub relayer's memo and pool are deliberately unlike the "GPOOL" config
+// value the service is built with: a session carrying the config pool instead of
+// these has taken the address from somewhere the memo is not valid for.
+const (
+	stubRelayerMemoID      = "778899001"
+	stubRelayerPoolAddress = "GRELAYERPOOLADDRESS"
+)
+
+// stubRelayerCall records what the on-ramp service asked latch-relayer for.
+type stubRelayerCall struct {
+	path string
+	body map[string]any
+}
+
+// newStubRelayer stands in for latch-relayer's POST /intents — the sole memo
+// allocator for pooled deposits.
+func newStubRelayer(t *testing.T) (*service.RelayerService, *stubRelayerCall) {
+	t.Helper()
+	call := &stubRelayerCall{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call.path = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&call.body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"intent_id":    uuid.NewString(),
+			"memo_id":      stubRelayerMemoID,
+			"pool_address": stubRelayerPoolAddress,
+			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		})
+	}))
+	t.Cleanup(ts.Close)
+	return service.NewRelayerService(ts.URL, "", 5*time.Second), call
+}
+
 func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuyURLOverride string) (*OnRampService, sqlmock.Sqlmock) {
+	t.Helper()
+	relayer, _ := newStubRelayer(t)
+	return newTestOnRampServiceWithRelayer(t, moonPayServerURL, mode, widgetBuyURLOverride, relayer)
+}
+
+func newTestOnRampServiceWithRelayer(t *testing.T, moonPayServerURL, mode, widgetBuyURLOverride string, relayer *service.RelayerService) (*OnRampService, sqlmock.Sqlmock) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -24,7 +66,7 @@ func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuy
 	q := db.New(sqlDB)
 
 	svc := NewOnRampService(q, moonPayServerURL, "sk_test_secret", "pk_test_pub", mode, widgetBuyURLOverride,
-		"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
+		"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{}, relayer)
 	if moonPayServerURL != "" {
 		svc.moonPay.httpClient = http.DefaultClient
 	}
@@ -36,13 +78,8 @@ func expectInsertOnRampIntent(mock sqlmock.Sqlmock) {
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 }
 
-func expectMemoDoesNotExist(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-}
-
 func TestOnRampService_CreateIntent_WidgetMode(t *testing.T) {
 	svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "", "")
@@ -63,7 +100,6 @@ func TestOnRampService_CreateIntent_PlatformMode(t *testing.T) {
 	defer ts.Close()
 
 	svc, mock := newTestOnRampService(t, ts.URL, onRampIntegrationModePlatform, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "10", "eur")
@@ -82,7 +118,6 @@ func TestOnRampService_CreateIntent_AutoFallsBackToWidgetOn404(t *testing.T) {
 	defer ts.Close()
 
 	svc, mock := newTestOnRampService(t, ts.URL, onRampIntegrationModeAuto, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
@@ -101,7 +136,6 @@ func TestOnRampService_CreateIntent_AutoPropagatesNon404Error(t *testing.T) {
 	defer ts.Close()
 
 	svc, mock := newTestOnRampService(t, ts.URL, onRampIntegrationModeAuto, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	_, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
@@ -287,9 +321,9 @@ func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
 		sqlDB, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer sqlDB.Close()
+		relayer, _ := newStubRelayer(t)
 		q := db.New(sqlDB)
-		svc := NewOnRampService(q, "", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
-		expectMemoDoesNotExist(mock)
+		svc := NewOnRampService(q, "", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{}, relayer)
 		expectInsertOnRampIntent(mock)
 
 		_, err = svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
@@ -300,9 +334,9 @@ func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
 		sqlDB, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer sqlDB.Close()
+		relayer, _ := newStubRelayer(t)
 		q := db.New(sqlDB)
-		svc := NewOnRampService(q, "", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
-		expectMemoDoesNotExist(mock)
+		svc := NewOnRampService(q, "", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{}, relayer)
 		expectInsertOnRampIntent(mock)
 
 		_, err = svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
@@ -329,4 +363,38 @@ func TestOnRampService_PoolSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "42", snap.XLMBalance)
 	assert.Equal(t, "GPOOL", snap.PoolAddress)
+}
+
+// MoonPay carried the same defect as Transak: a locally drawn memo the relayer
+// had never heard of, so any deposit against it was swept to recovery rather
+// than credited. Both providers now mint through the relayer.
+func TestOnRampService_CreateIntent_MintsMemoThroughRelayer(t *testing.T) {
+	relayer, call := newStubRelayer(t)
+	svc, mock := newTestOnRampServiceWithRelayer(t, "", onRampIntegrationModeWidget, "", relayer)
+	expectInsertOnRampIntent(mock)
+
+	cAddress := testContractAddress(t)
+	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", cAddress, "25", "USD")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/intents", call.path)
+	assert.Equal(t, cAddress, call.body["c_address"])
+	assert.Equal(t, sess.IntentID, call.body["external_id"])
+	assert.Equal(t, stubRelayerMemoID, sess.MemoID)
+	// The signed widget URL must point at the relayer's pool, not "GPOOL".
+	assert.Equal(t, stubRelayerPoolAddress, sess.PoolAddress)
+	assert.Contains(t, sess.WidgetURL, stubRelayerPoolAddress)
+	assert.Contains(t, sess.WidgetURL, stubRelayerMemoID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestOnRampService_CreateIntent_RelayerDownIsFatal(t *testing.T) {
+	down := service.NewRelayerService("", "", time.Second)
+	svc, mock := newTestOnRampServiceWithRelayer(t, "", onRampIntegrationModeWidget, "", down)
+	// No expectInsertOnRampIntent: an uncreditable intent must not be persisted.
+
+	_, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
+
+	require.ErrorIs(t, err, service.ErrRelayerNotConfigured)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

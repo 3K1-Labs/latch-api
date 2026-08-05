@@ -143,9 +143,15 @@ pool exists, opening it takes:
 - Transak's own dashboard work: referrer domain allowlisted, egress IPs
   registered, partner security checklist
 
-## Still open, unrelated to deployment
+## Memo allocation, since a second relayer changes it
 
-Memo namespaces collide between latch-relayer and the webapp on-ramp — both
-mint 8-digit memos from independent allocators into one pool. Documented in
-`transak-integration-plan.md` §2 and deliberately unfixed. Two relayers make it
-three allocators.
+The webapp on-ramp no longer mints its own memos: it calls the relayer's
+`POST /intents` and uses the memo *and* pool address that come back
+(`transak-integration-plan.md` §2). Two relayers therefore stay two allocators,
+not three, and each one's memos are only ever handed out with its own pool
+address.
+
+This makes `POOL_NETWORK` load-bearing beyond Transak: it selects which relayer
+the on-ramp mints through, so setting it to `mainnet` before
+`RELAYER_URL_MAINNET` points somewhere real fails on-ramp sessions with a 503.
+Set the relayer URL first.

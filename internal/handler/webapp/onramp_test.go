@@ -1,6 +1,7 @@
 package webapp
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -190,6 +192,10 @@ func TestOnRampSession_TransakServiceErrors(t *testing.T) {
 		{"unsupported crypto currency", webapp.ErrTransakCryptoInvalid, http.StatusBadRequest},
 		{"invalid c-address", webapp.ErrOnRampInvalidCAddress, http.StatusBadRequest},
 		{"upstream transak failure", &webapp.TransakAPIError{StatusCode: http.StatusServiceUnavailable, Message: "down"}, http.StatusBadGateway},
+		// The relayer mints the deposit memo. Without it there is nothing
+		// creditable to hand back, so this is retryable infrastructure state.
+		{"relayer unavailable", fmt.Errorf("mint pooled deposit intent: %w", service.ErrRelayerUnavailable), http.StatusServiceUnavailable},
+		{"relayer not configured", fmt.Errorf("mint pooled deposit intent: %w", service.ErrRelayerNotConfigured), http.StatusServiceUnavailable},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
