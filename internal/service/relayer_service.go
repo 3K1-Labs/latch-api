@@ -87,6 +87,13 @@ func NewRelayerService(baseURL, apiKey string, timeout time.Duration) *RelayerSe
 	}
 }
 
+// configured reports whether this relayer has somewhere to call. Callers use it
+// to decide whether a network is served at all, rather than discovering the
+// empty base URL one request later.
+func (s *RelayerService) configured() bool {
+	return s != nil && s.baseURL != ""
+}
+
 // authorize attaches latch-relayer's shared secret. Every route but /health
 // requires it; an empty key is left off entirely so the relayer's rejection
 // reads as a missing header rather than a wrong secret.
