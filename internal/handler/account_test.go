@@ -271,6 +271,48 @@ func TestCreateDepositIntent_Success(t *testing.T) {
 
 // ── DepositStatus ────────────────────────────────────────────────────────────
 
+// Memo IDs are allocated per relayer deployment, so the network decides which
+// relayer is asked. Older clients send no network at all and must keep landing
+// on testnet, where every memo minted so far lives.
+func TestDepositStatus_ForwardsNetwork(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{"absent", "", ""},
+		{"testnet", "?network=testnet", "testnet"},
+		{"mainnet", "?network=mainnet", "mainnet"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubAccount{}
+			h := newAccountHandler(stub, nil)
+			r := gin.New()
+			r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+			w := httptest.NewRecorder()
+			req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345"+tc.query, nil), "uid")
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tc.want, stub.statusNetwork)
+		})
+	}
+}
+
+func TestDepositStatus_NetworkUnsupported(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: service.ErrNetworkUnsupported}, nil)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345?network=mainnet", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "not available on this network")
+}
+
 func TestDepositStatus_NotOwner(t *testing.T) {
 	h := newAccountHandler(&stubAccount{fundingStatusErr: service.ErrValidation}, nil)
 	r := gin.New()

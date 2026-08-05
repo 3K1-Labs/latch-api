@@ -21,12 +21,36 @@ type AccountRegistration struct {
 // accounts, shared/multisig wallets), so registration is modeled per-account,
 // not per-user.
 type AccountService struct {
-	q          db.Querier
-	relayerSvc *RelayerService
+	q db.Querier
+	// One relayer per Stellar network. Each latch-relayer deployment is bound
+	// to a single network and watches one pool address on it, so they are
+	// separate clients rather than one client taking a network argument. A nil
+	// entry means that network has no relayer configured and funding on it is
+	// unsupported — which is mainnet's state until one is deployed.
+	relayerTestnet *RelayerService
+	relayerMainnet *RelayerService
 }
 
-func NewAccountService(q db.Querier, relayerSvc *RelayerService) *AccountService {
-	return &AccountService{q: q, relayerSvc: relayerSvc}
+func NewAccountService(q db.Querier, relayerTestnet, relayerMainnet *RelayerService) *AccountService {
+	return &AccountService{q: q, relayerTestnet: relayerTestnet, relayerMainnet: relayerMainnet}
+}
+
+// relayerFor returns the relayer serving network. network must already have
+// passed ParseWalletNetwork.
+//
+// The two networks fail differently on purpose. Testnet is the service's
+// baseline: a missing RELAYER_URL there is a misconfigured deployment, and the
+// relayer call itself reports ErrRelayerNotConfigured. Mainnet is opt-in — an
+// unset RELAYER_URL_MAINNET means nobody has deployed a mainnet relayer yet, so
+// funding on it is genuinely unsupported rather than broken.
+func (s *AccountService) relayerFor(network string) (*RelayerService, error) {
+	if network == NetworkMainnet {
+		if !s.relayerMainnet.configured() {
+			return nil, ErrNetworkUnsupported
+		}
+		return s.relayerMainnet, nil
+	}
+	return s.relayerTestnet, nil
 }
 
 // Register records that smartAccountAddress belongs to userID. Idempotent:
@@ -102,15 +126,16 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 	if err != nil {
 		return Intent{}, err
 	}
-	if network != NetworkTestnet {
-		return Intent{}, ErrNetworkUnsupported
+	relayer, err := s.relayerFor(network)
+	if err != nil {
+		return Intent{}, err
 	}
 
 	if scope == ScopeWallet {
 		if userID != smartAccountAddress {
 			return Intent{}, ErrValidation
 		}
-		return s.relayerSvc.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
+		return relayer.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
 	}
 
 	uid, err := uuid.Parse(userID)
@@ -129,7 +154,7 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 		return Intent{}, ErrValidation
 	}
 
-	return s.relayerSvc.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
+	return relayer.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
 }
 
 // GetFundingStatus fetches a funding intent's status from latch-relayer by
@@ -140,9 +165,21 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 // Wallet-scoped callers (see CreateFundingIntent) have no registration row;
 // ownership is verified by comparing userID (the wallet's own address)
 // directly against the intent's c_address instead.
-func (s *AccountService) GetFundingStatus(ctx context.Context, userID, scope, memoID string) (DepositStatus, error) {
+// The network selects which relayer holds the intent: memo IDs are allocated
+// per relayer deployment, so the same memo_id can exist on both and a lookup
+// against the wrong one returns another user's intent or nothing at all.
+func (s *AccountService) GetFundingStatus(ctx context.Context, userID, scope, memoID, network string) (DepositStatus, error) {
+	network, err := ParseWalletNetwork(network)
+	if err != nil {
+		return DepositStatus{}, err
+	}
+	relayer, err := s.relayerFor(network)
+	if err != nil {
+		return DepositStatus{}, err
+	}
+
 	if scope == ScopeWallet {
-		status, err := s.relayerSvc.DepositStatus(ctx, memoID)
+		status, err := relayer.DepositStatus(ctx, memoID)
 		if err != nil {
 			return DepositStatus{}, err
 		}
@@ -157,7 +194,7 @@ func (s *AccountService) GetFundingStatus(ctx context.Context, userID, scope, me
 		return DepositStatus{}, fmt.Errorf("parse user id: %w", err)
 	}
 
-	status, err := s.relayerSvc.DepositStatus(ctx, memoID)
+	status, err := relayer.DepositStatus(ctx, memoID)
 	if err != nil {
 		return DepositStatus{}, err
 	}

@@ -248,6 +248,7 @@ type stubAccount struct {
 	intentNetwork       string // network the handler forwarded
 	fundingStatusResult service.DepositStatus
 	fundingStatusErr    error
+	statusNetwork       string // network the handler forwarded on status lookups
 }
 
 func (s *stubAccount) Register(_ context.Context, _, smartAccountAddress string) error {
@@ -273,7 +274,8 @@ func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _, _, network st
 	return s.createIntentResult, nil
 }
 
-func (s *stubAccount) GetFundingStatus(_ context.Context, _, _, _ string) (service.DepositStatus, error) {
+func (s *stubAccount) GetFundingStatus(_ context.Context, _, _, _, network string) (service.DepositStatus, error) {
+	s.statusNetwork = network
 	if s.fundingStatusErr != nil {
 		return service.DepositStatus{}, s.fundingStatusErr
 	}

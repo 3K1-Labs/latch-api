@@ -89,8 +89,11 @@ func main() {
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
 	relayerSvc := service.NewRelayerService(cfg.RelayerURL, cfg.RelayerAPIKey, cfg.RelayerTimeout)
+	// A second deployment bound to mainnet; nil-safe when RELAYER_URL_MAINNET is
+	// unset, in which case mainnet funding stays unsupported.
+	relayerMainnetSvc := service.NewRelayerService(cfg.RelayerURLMainnet, cfg.RelayerAPIKeyMainnet, cfg.RelayerTimeout)
 	backupSvc := service.NewBackupService(queries, encSvc)
-	accountSvc := service.NewAccountService(queries, relayerSvc)
+	accountSvc := service.NewAccountService(queries, relayerSvc, relayerMainnetSvc)
 	cosignSvc := service.NewCosignService(queries)
 	wckBundleSvc := service.NewWCKBundleService(queries)
 	pushTokenSvc := service.NewPushTokenService(queries)
