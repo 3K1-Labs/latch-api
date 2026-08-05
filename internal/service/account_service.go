@@ -107,13 +107,13 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // RELAYER_URL is unset — the fund flow has nothing to fall back to without a
 // memo, so callers should surface this as a hard error, not a silent no-op.
 //
-// network is testnet-only for now (empty means testnet). latch-relayer is
-// single-network per deployment — its NETWORK env picks the passphrase and it
-// mints memos against one pool account — and only a testnet instance is
-// deployed, so a mainnet intent would hand back a pool address no watcher is
-// monitoring and the deposit would never be forwarded. Rejecting is the safe
-// failure. Lift this once a mainnet relayer exists and the URL is routed
-// per-network.
+// network selects which relayer deployment mints the intent; empty means
+// testnet. Mainnet returns ErrNetworkUnsupported until RELAYER_URL_MAINNET
+// points at a mainnet relayer — see relayerFor for why the two networks fail
+// differently. There is deliberately no fallback to the testnet relayer: it
+// mints memos against one pool account whose keypair exists on mainnet too, so
+// a mainnet intent served from it would hand back a pool address nothing is
+// watching, and a real deposit sent there would never be forwarded.
 //
 // Wallet-scoped callers (scope == ScopeWallet, e.g. the browser extension's
 // SEP-10-style sign-in) have no users row and so can never appear in
