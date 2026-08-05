@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -159,8 +160,11 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 func (s *WalletAuthService) verifyPasskey(ctx context.Context, in WalletSignInInput, network string, nonceBytes []byte) error {
 	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet, s.sorobanURLs.forNetwork(network))
 	if err != nil {
+		// Name the network in the wrapped error: "no signer on chain" is most
+		// often a wallet signed in against the network it does not live on, and
+		// the log is the only place that distinction is visible.
 		if errors.Is(err, ErrNoWebAuthnSigner) {
-			return ErrBadSignature
+			return fmt.Errorf("%w: no webauthn signer registered for wallet on %s", ErrBadSignature, network)
 		}
 		return err
 	}

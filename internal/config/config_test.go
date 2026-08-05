@@ -88,6 +88,30 @@ func TestLoad_WalletAuthSorobanURLs(t *testing.T) {
 	assert.Equal(t, "http://override-mainnet", cfg.WalletAuthSorobanURLMainnet)
 }
 
+// clientDataJSON.origin always carries a scheme, and origins are matched by
+// exact string equality, so a bare-host default would reject every real
+// assertion. Extension origins must survive splitCSV alongside https ones.
+func TestLoad_WebAuthnAllowedOrigins(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+	os.Unsetenv("WEBAUTHN_ALLOWED_ORIGINS")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://latch.finance"}, cfg.WebAuthnAllowedOrigins)
+
+	t.Setenv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance,chrome-extension://cgmboajonamcelkfpikbmmpohccmkmog")
+
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"https://latch.finance",
+		"chrome-extension://cgmboajonamcelkfpikbmmpohccmkmog",
+	}, cfg.WebAuthnAllowedOrigins)
+}
+
 func TestLoad_WebAppCORSAndExtensionIDs(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
