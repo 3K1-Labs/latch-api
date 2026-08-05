@@ -39,6 +39,8 @@ type createOnRampSessionRequest struct {
 	DestinationCAddress string `json:"destinationCAddress" binding:"required" example:"CABC...XYZ"`
 	FiatAmount          string `json:"fiatAmount,omitempty" example:"25"`
 	FiatCode            string `json:"fiatCode,omitempty" example:"USD"`
+	Provider            string `json:"provider,omitempty" example:"moonpay" enums:"moonpay,transak"`
+	CryptoCurrency      string `json:"cryptoCurrency,omitempty" example:"XLM" enums:"XLM,USDC"`
 }
 
 // Session godoc
@@ -65,8 +67,35 @@ func (h *OnRampHandler) Session(c *gin.Context) {
 		return
 	}
 
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if provider == "" {
+		provider = webapp.OnRampProviderMoonPay
+	}
+	if provider != webapp.OnRampProviderMoonPay && provider != webapp.OnRampProviderTransak {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, `provider must be "moonpay" or "transak".`)
+		return
+	}
+	if provider == webapp.OnRampProviderTransak && strings.TrimSpace(req.CryptoCurrency) == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "cryptoCurrency is required when provider is transak.")
+		return
+	}
+
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
-	sess, err := h.onRampSvc.CreateIntent(c.Request.Context(), userID, c.ClientIP(), req.DestinationCAddress, req.FiatAmount, req.FiatCode)
+
+	var sess webapp.OnRampSession
+	var err error
+	if provider == webapp.OnRampProviderTransak {
+		sess, err = h.onRampSvc.CreateTransakIntent(c.Request.Context(), webapp.TransakIntentInput{
+			ExternalCustomerID:  userID,
+			DeviceIP:            c.ClientIP(),
+			DestinationCAddress: req.DestinationCAddress,
+			CryptoCurrency:      req.CryptoCurrency,
+			FiatAmount:          req.FiatAmount,
+			FiatCode:            req.FiatCode,
+		})
+	} else {
+		sess, err = h.onRampSvc.CreateIntent(c.Request.Context(), userID, c.ClientIP(), req.DestinationCAddress, req.FiatAmount, req.FiatCode)
+	}
 	if err != nil {
 		onRampErrorResponse(c, err)
 		return
@@ -89,6 +118,12 @@ func (h *OnRampHandler) Session(c *gin.Context) {
 	}
 	if sess.PlatformFallback {
 		resp["platformFallback"] = true
+	}
+	if sess.Provider != "" {
+		resp["provider"] = sess.Provider
+	}
+	if sess.CryptoCurrency != "" {
+		resp["cryptoCurrency"] = sess.CryptoCurrency
 	}
 	webappx.Success(c, http.StatusOK, resp)
 }
@@ -248,8 +283,16 @@ func onRampErrorResponse(c *gin.Context, err error) {
 	case errors.Is(err, webapp.ErrOnRampInvalidCAddress),
 		errors.Is(err, webapp.ErrOnRampInvalidFiatAmount),
 		errors.Is(err, webapp.ErrOnRampInvalidStatus),
-		errors.Is(err, webapp.ErrOnRampNoUpdateFields):
+		errors.Is(err, webapp.ErrOnRampNoUpdateFields),
+		errors.Is(err, webapp.ErrTransakCryptoInvalid):
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, err.Error())
+	case errors.Is(err, webapp.ErrTransakRequiresMainnet),
+		errors.Is(err, webapp.ErrTransakNotConfigured):
+		// Deployment state, not caller error: the pool is on testnet or the
+		// partner credentials are absent. 503 tells the client to stop
+		// offering Transak rather than to retry with different input.
+		slog.Error("transak provider unavailable", "err", err)
+		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrInternal, err.Error())
 	case errors.Is(err, webapp.ErrMoonPaySecretKeyMissing),
 		errors.Is(err, webapp.ErrMoonPaySecretKeyIsPublishable),
 		errors.Is(err, webapp.ErrMoonPaySecretKeyFormat),
@@ -262,6 +305,12 @@ func onRampErrorResponse(c *gin.Context, err error) {
 		if errors.As(err, &mpErr) {
 			slog.Error("moonpay api error", "status", mpErr.StatusCode, "err", err)
 			webappx.Fail(c, mpErr.StatusCode, webappx.ErrInternal, mpErr.Message)
+			return
+		}
+		var tkErr *webapp.TransakAPIError
+		if errors.As(err, &tkErr) {
+			slog.Error("transak api error", "status", tkErr.StatusCode, "err", err)
+			webappx.Fail(c, http.StatusBadGateway, webappx.ErrInternal, tkErr.Message)
 			return
 		}
 		slog.Error("on-ramp operation failed", "err", err)

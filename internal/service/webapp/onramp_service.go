@@ -24,6 +24,10 @@ const (
 	onRampIntegrationModeWidget   = "widget"
 	onRampIntegrationModePlatform = "platform"
 	onRampIntegrationModeAuto     = "auto"
+
+	// OnRampProviderMoonPay is the default provider and needs no opt-in.
+	OnRampProviderMoonPay = "moonpay"
+	OnRampProviderTransak = "transak"
 )
 
 var (
@@ -66,11 +70,30 @@ type OnRampSession struct {
 	SessionToken        string
 	WidgetURL           string
 	PlatformFallback    bool
+
+	// Provider and CryptoCurrency are set only by the Transak path. The
+	// MoonPay responses stay byte-identical to what clients already parse.
+	Provider       string // "transak"
+	CryptoCurrency string // "XLM" | "USDC"
+}
+
+// TransakConfig configures the Transak provider. PoolNetwork is on-ramp-wide
+// rather than Transak-specific, but it lives here because gating this
+// mainnet-only provider is the only thing that currently reads it.
+type TransakConfig struct {
+	APIKey         string
+	APISecret      string
+	Env            string // "staging" | "production"
+	ReferrerDomain string
+	APIBase        string // host override, mainly for tests
+	PoolNetwork    string // "testnet" | "mainnet"
 }
 
 type OnRampService struct {
 	q                    *db.Queries
 	moonPay              *moonPayClient
+	transak              *transakClient
+	poolNetwork          string
 	pool                 *poolBalanceFetcher
 	integrationMode      string
 	widgetBuyURLOverride string
@@ -86,10 +109,13 @@ func NewOnRampService(
 	q *db.Queries,
 	apiBase, secretKey, publishableKey, integrationMode, widgetBuyURLOverride, poolAddress, horizonURL,
 	defaultFiatAmount, defaultFiatCode string,
+	transak TransakConfig,
 ) *OnRampService {
 	return &OnRampService{
 		q:                    q,
 		moonPay:              newMoonPayClient(apiBase, secretKey),
+		transak:              newTransakClient(transak.APIKey, transak.APISecret, transak.Env, transak.ReferrerDomain, transak.APIBase),
+		poolNetwork:          transak.PoolNetwork,
 		pool:                 newPoolBalanceFetcher(),
 		integrationMode:      integrationMode,
 		widgetBuyURLOverride: widgetBuyURLOverride,
@@ -112,19 +138,9 @@ func (s *OnRampService) CreateIntent(ctx context.Context, externalCustomerID, de
 		return OnRampSession{}, ErrOnRampInvalidCAddress
 	}
 
-	if fiatAmount = strings.TrimSpace(fiatAmount); fiatAmount == "" {
-		fiatAmount = s.defaultFiatAmount
-	}
-	if fiatCode = strings.TrimSpace(fiatCode); fiatCode == "" {
-		fiatCode = s.defaultFiatCode
-	}
-	fiatCode = strings.ToUpper(fiatCode)
-
-	if !onRampFiatAmountPattern.MatchString(fiatAmount) {
-		return OnRampSession{}, ErrOnRampInvalidFiatAmount
-	}
-	if amount, err := strconv.ParseFloat(fiatAmount, 64); err != nil || amount <= 0 {
-		return OnRampSession{}, ErrOnRampInvalidFiatAmount
+	fiatAmount, fiatCode, err := s.normalizeFiat(fiatAmount, fiatCode)
+	if err != nil {
+		return OnRampSession{}, err
 	}
 
 	memoID, err := generateUniqueOnRampMemoID(ctx, s.q.OnRampMemoIDExists)
@@ -168,6 +184,113 @@ func (s *OnRampService) CreateIntent(ctx context.Context, externalCustomerID, de
 		return s.buildWidgetSession(intentID.String(), memoID, destinationCAddress, externalCustomerID, fiatAmount, fiatCode, true)
 	}
 	return OnRampSession{}, fmt.Errorf("create moonpay session: %w", err)
+}
+
+// normalizeFiat applies the configured defaults and validates the result.
+// Shared by both provider entry points so they accept exactly the same inputs.
+func (s *OnRampService) normalizeFiat(fiatAmount, fiatCode string) (string, string, error) {
+	if fiatAmount = strings.TrimSpace(fiatAmount); fiatAmount == "" {
+		fiatAmount = s.defaultFiatAmount
+	}
+	if fiatCode = strings.TrimSpace(fiatCode); fiatCode == "" {
+		fiatCode = s.defaultFiatCode
+	}
+	fiatCode = strings.ToUpper(fiatCode)
+
+	if !onRampFiatAmountPattern.MatchString(fiatAmount) {
+		return "", "", ErrOnRampInvalidFiatAmount
+	}
+	if amount, err := strconv.ParseFloat(fiatAmount, 64); err != nil || amount <= 0 {
+		return "", "", ErrOnRampInvalidFiatAmount
+	}
+	return fiatAmount, fiatCode, nil
+}
+
+// TransakIntentInput is a request for a Transak-provider on-ramp session.
+type TransakIntentInput struct {
+	ExternalCustomerID  string
+	DeviceIP            string
+	DestinationCAddress string
+	CryptoCurrency      string // XLM | USDC
+	FiatAmount          string
+	FiatCode            string
+}
+
+// CreateTransakIntent mints an on-ramp intent and returns a Transak widget URL
+// locked to the pool address and this intent's memo.
+//
+// Two deliberate differences from the MoonPay path:
+//
+//   - It refuses to run unless the pool is on mainnet. Transak delivers to
+//     Stellar mainnet only, so a session built against the testnet pool would
+//     send a real purchase to an address no relayer watches.
+//   - The intent row is written *after* Transak accepts the session, so a
+//     provider failure leaves no orphaned intent behind.
+func (s *OnRampService) CreateTransakIntent(ctx context.Context, in TransakIntentInput) (OnRampSession, error) {
+	if !strings.EqualFold(s.poolNetwork, "mainnet") {
+		return OnRampSession{}, ErrTransakRequiresMainnet
+	}
+	if !s.transak.configured() {
+		return OnRampSession{}, ErrTransakNotConfigured
+	}
+
+	destinationCAddress := strings.TrimSpace(in.DestinationCAddress)
+	if _, err := strkey.Decode(strkey.VersionByteContract, destinationCAddress); err != nil {
+		return OnRampSession{}, ErrOnRampInvalidCAddress
+	}
+
+	cryptoCurrency := strings.ToUpper(strings.TrimSpace(in.CryptoCurrency))
+	if cryptoCurrency != "XLM" && cryptoCurrency != "USDC" {
+		return OnRampSession{}, ErrTransakCryptoInvalid
+	}
+
+	fiatAmount, fiatCode, err := s.normalizeFiat(in.FiatAmount, in.FiatCode)
+	if err != nil {
+		return OnRampSession{}, err
+	}
+
+	memoID, err := generateUniqueOnRampMemoID(ctx, s.q.OnRampMemoIDExists)
+	if err != nil {
+		return OnRampSession{}, fmt.Errorf("generate on-ramp memo id: %w", err)
+	}
+	intentID := uuid.New()
+
+	widgetURL, err := s.transak.CreateWidgetURL(ctx, transakSessionInput{
+		PoolAddress:    s.poolAddress,
+		MemoID:         memoID,
+		IntentID:       intentID.String(),
+		SmartAccount:   destinationCAddress,
+		CryptoCurrency: cryptoCurrency,
+		UserIP:         in.DeviceIP,
+	})
+	if err != nil {
+		return OnRampSession{}, fmt.Errorf("create transak session: %w", err)
+	}
+
+	if _, err := s.q.InsertOnRampIntent(ctx, db.InsertOnRampIntentParams{
+		ID:                  intentID,
+		MemoID:              memoID,
+		DestinationCAddress: destinationCAddress,
+		ExternalCustomerID:  in.ExternalCustomerID,
+		Status:              OnRampStatusCreated,
+		FiatAmount:          fiatAmount,
+		FiatCode:            fiatCode,
+	}); err != nil {
+		return OnRampSession{}, fmt.Errorf("insert on-ramp intent: %w", err)
+	}
+
+	return OnRampSession{
+		IntentID:            intentID.String(),
+		MemoID:              memoID,
+		DestinationCAddress: destinationCAddress,
+		PoolAddress:         s.poolAddress,
+		FiatAmount:          fiatAmount,
+		FiatCode:            fiatCode,
+		IntegrationMode:     onRampIntegrationModeWidget,
+		Provider:            OnRampProviderTransak,
+		CryptoCurrency:      cryptoCurrency,
+		WidgetURL:           widgetURL,
+	}, nil
 }
 
 func (s *OnRampService) buildWidgetSession(intentID, memoID, destinationCAddress, externalCustomerID, fiatAmount, fiatCode string, platformFallback bool) (OnRampSession, error) {

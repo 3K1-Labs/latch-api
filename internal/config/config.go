@@ -132,6 +132,21 @@ type Config struct {
 	WebAppMoonPayDefaultFiatAmount string
 	WebAppMoonPayDefaultFiatCode   string
 
+	// Transak on-ramp — a second provider on the same /api/on-ramp/session
+	// route, selected by "provider":"transak". Empty WebAppTransakAPIKey or
+	// WebAppTransakAPISecret disables it. Transak delivers to Stellar mainnet
+	// only, so the service additionally refuses to build a session unless
+	// WebAppOnRampPoolNetwork is "mainnet" — see OnRampService.CreateTransakIntent.
+	WebAppTransakAPIKey         string
+	WebAppTransakAPISecret      string
+	WebAppTransakEnv            string // "staging" | "production"
+	WebAppTransakReferrerDomain string
+	WebAppTransakAPIBase        string // override for the Transak hosts, mainly for tests
+
+	// Network the on-ramp pool account lives on. Gates providers that can only
+	// deliver to mainnet; defaults to testnet so the gate is closed by default.
+	WebAppOnRampPoolNetwork string // "testnet" | "mainnet"
+
 	// Retention / GC: a background sweep bounds growth of the multisig tables.
 	CleanupEnabled            bool
 	CleanupInterval           time.Duration // between sweeps
@@ -237,6 +252,13 @@ func Load() (*Config, error) {
 		WebAppMoonPayPoolGAddress:      getEnv("MOONPAY_POOL_G_ADDRESS", ""),
 		WebAppMoonPayDefaultFiatAmount: getEnv("MOONPAY_DEFAULT_FIAT_AMOUNT", "25"),
 		WebAppMoonPayDefaultFiatCode:   getEnv("MOONPAY_DEFAULT_FIAT_CODE", "USD"),
+
+		WebAppTransakAPIKey:         getEnv("TRANSAK_API_KEY", ""),
+		WebAppTransakAPISecret:      getEnv("TRANSAK_API_SECRET", ""),
+		WebAppTransakEnv:            getEnv("TRANSAK_ENV", "staging"),
+		WebAppTransakReferrerDomain: getEnv("TRANSAK_REFERRER_DOMAIN", "latch.finance"),
+		WebAppTransakAPIBase:        getEnv("TRANSAK_API_BASE", ""),
+		WebAppOnRampPoolNetwork:     getEnv("POOL_NETWORK", "testnet"),
 
 		CleanupEnabled:            getEnvBool("CLEANUP_ENABLED", true),
 		CleanupInterval:           time.Duration(getEnvInt("CLEANUP_INTERVAL_MIN", 60)) * time.Minute,

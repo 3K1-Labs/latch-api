@@ -24,7 +24,7 @@ func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuy
 	q := db.New(sqlDB)
 
 	svc := NewOnRampService(q, moonPayServerURL, "sk_test_secret", "pk_test_pub", mode, widgetBuyURLOverride,
-		"GPOOL", "https://horizon.example.invalid", "25", "USD")
+		"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
 	if moonPayServerURL != "" {
 		svc.moonPay.httpClient = http.DefaultClient
 	}
@@ -288,7 +288,7 @@ func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
 		require.NoError(t, err)
 		defer sqlDB.Close()
 		q := db.New(sqlDB)
-		svc := NewOnRampService(q, "", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD")
+		svc := NewOnRampService(q, "", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
 		expectMemoDoesNotExist(mock)
 		expectInsertOnRampIntent(mock)
 
@@ -301,7 +301,7 @@ func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
 		require.NoError(t, err)
 		defer sqlDB.Close()
 		q := db.New(sqlDB)
-		svc := NewOnRampService(q, "", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD")
+		svc := NewOnRampService(q, "", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
 		expectMemoDoesNotExist(mock)
 		expectInsertOnRampIntent(mock)
 
