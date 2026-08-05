@@ -93,6 +93,7 @@ type signPayloadService interface {
 
 type onRampService interface {
 	CreateIntent(ctx context.Context, externalCustomerID, deviceIP, destinationCAddress, fiatAmount, fiatCode string) (webapp.OnRampSession, error)
+	CreateTransakIntent(ctx context.Context, in webapp.TransakIntentInput) (webapp.OnRampSession, error)
 	GetIntent(ctx context.Context, id string) (webapp.OnRampIntent, string, error)
 	UpdateIntent(ctx context.Context, id string, status, moonpayTransactionID *string) (webapp.OnRampIntent, error)
 	PoolSnapshot(ctx context.Context, memoFilter string) (webapp.PoolAccountSnapshot, error)

@@ -122,6 +122,14 @@ func main() {
 		queries, cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
 		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
 		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
+		webapp.TransakConfig{
+			APIKey:         cfg.WebAppTransakAPIKey,
+			APISecret:      cfg.WebAppTransakAPISecret,
+			Env:            cfg.WebAppTransakEnv,
+			ReferrerDomain: cfg.WebAppTransakReferrerDomain,
+			APIBase:        cfg.WebAppTransakAPIBase,
+			PoolNetwork:    cfg.WebAppOnRampPoolNetwork,
+		},
 	)
 
 	// Smart-account and transaction build/submit operations need a valid
