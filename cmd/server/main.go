@@ -133,6 +133,10 @@ func main() {
 			APIBase:        cfg.WebAppTransakAPIBase,
 			PoolNetwork:    cfg.WebAppOnRampPoolNetwork,
 		},
+		// The relayer that mints on-ramp deposit memos must be the one bound to
+		// the network the pool lives on: memos are allocated per deployment, and
+		// the pool address handed to the provider comes back from this call.
+		onRampRelayer(cfg.WebAppOnRampPoolNetwork, relayerSvc, relayerMainnetSvc),
 	)
 
 	// Smart-account and transaction build/submit operations need a valid
@@ -558,6 +562,19 @@ func main() {
 // cancelled. Each pass gets its own bounded deadline so a slow sweep can't run
 // into the next tick or block shutdown; a failed pass is logged and retried on
 // the next tick.
+// onRampRelayer picks the relayer deployment serving the network the on-ramp
+// pool lives on. Unlike the mobile funding path, this is not a per-request
+// choice: POOL_NETWORK fixes it for the whole deployment.
+//
+// An unrecognized value falls back to testnet, matching config.Load's default
+// and keeping the mainnet path something you opt into explicitly.
+func onRampRelayer(poolNetwork string, testnet, mainnet *service.RelayerService) *service.RelayerService {
+	if strings.EqualFold(poolNetwork, "mainnet") {
+		return mainnet
+	}
+	return testnet
+}
+
 func runCleanupScheduler(ctx context.Context, svc *service.CleanupService, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
