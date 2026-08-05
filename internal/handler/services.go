@@ -49,7 +49,7 @@ type accountService interface {
 	Register(ctx context.Context, userID, smartAccountAddress string) error
 	List(ctx context.Context, userID string) ([]service.AccountRegistration, error)
 	CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string) (service.Intent, error)
-	GetFundingStatus(ctx context.Context, userID, scope, memoID string) (service.DepositStatus, error)
+	GetFundingStatus(ctx context.Context, userID, scope, memoID, network string) (service.DepositStatus, error)
 }
 
 type cosignService interface {

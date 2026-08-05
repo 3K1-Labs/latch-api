@@ -190,9 +190,15 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 	scope := middleware.ScopeFromContext(c.Request.Context())
 	memoID := c.Param("memo_id")
 
-	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, scope, memoID)
+	// Which relayer holds this memo. Absent means testnet: memo IDs minted
+	// before mainnet existed all live there, and older clients never send it.
+	network := c.Query("network")
+
+	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, scope, memoID, network)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrNetworkUnsupported):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is not available on this network")
 		case errors.Is(err, service.ErrValidation):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "memo_id not found")
 		case errors.Is(err, service.ErrIntentNotFound):

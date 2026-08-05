@@ -159,6 +159,18 @@ type Config struct {
 	// into a failure. Keep it comfortably under the global 30s request
 	// timeout.
 	RelayerTimeout time.Duration
+	// RelayerURLMainnet and RelayerAPIKeyMainnet address a *second*
+	// latch-relayer deployment. A relayer is bound to one Stellar network by
+	// its own NETWORK env var and watches one pool address on it, so serving
+	// mainnet deposits takes a second deployment with its own funded pool —
+	// never the testnet one, whose pool key exists on mainnet too and would
+	// silently accept real funds nothing is watching.
+	//
+	// Empty RelayerURLMainnet leaves mainnet funding unsupported, exactly as
+	// it is today. RelayerAPIKeyMainnet falls back to RelayerAPIKey when unset,
+	// for deployments that share one secret across both relayers.
+	RelayerURLMainnet    string
+	RelayerAPIKeyMainnet string
 }
 
 func Load() (*Config, error) {
@@ -232,9 +244,11 @@ func Load() (*Config, error) {
 		WCKBundleRetention:        time.Duration(getEnvInt("WCK_BUNDLE_RETENTION_DAYS", 180)) * 24 * time.Hour,
 		WalletMembershipRetention: time.Duration(getEnvInt("WALLET_MEMBERSHIP_RETENTION_DAYS", 180)) * 24 * time.Hour,
 
-		RelayerURL:     getEnv("RELAYER_URL", ""),
-		RelayerAPIKey:  getEnv("RELAYER_API_KEY", ""),
-		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
+		RelayerURL:           getEnv("RELAYER_URL", ""),
+		RelayerAPIKey:        getEnv("RELAYER_API_KEY", ""),
+		RelayerURLMainnet:    getEnv("RELAYER_URL_MAINNET", ""),
+		RelayerAPIKeyMainnet: getEnv("RELAYER_API_KEY_MAINNET", ""),
+		RelayerTimeout:       time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
 	}
 
 	var err error
@@ -259,6 +273,13 @@ func Load() (*Config, error) {
 	}
 	if cfg.EncryptionMasterKey != "" && len(cfg.EncryptionMasterKey) < 32 {
 		return nil, fmt.Errorf("ENCRYPTION_MASTER_KEY must be at least 32 bytes when set")
+	}
+
+	// A mainnet relayer sharing the testnet relayer's shared secret is the
+	// common deployment, so an unset mainnet key means "same secret", not
+	// "no auth" — the latter would 401 every mainnet call.
+	if cfg.RelayerAPIKeyMainnet == "" {
+		cfg.RelayerAPIKeyMainnet = cfg.RelayerAPIKey
 	}
 
 	return cfg, nil
