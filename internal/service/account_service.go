@@ -121,7 +121,7 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // token: userID is the wallet's own address, so it's compared directly
 // against smartAccountAddress instead of going through the registration
 // table.
-func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string) (Intent, error) {
+func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string, opts FundingIntentOptions) (Intent, error) {
 	network, err := ParseWalletNetwork(network)
 	if err != nil {
 		return Intent{}, err
@@ -135,7 +135,7 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 		if userID != smartAccountAddress {
 			return Intent{}, ErrValidation
 		}
-		return relayer.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
+		return relayer.CreateIntent(ctx, opts.toInput(smartAccountAddress))
 	}
 
 	uid, err := uuid.Parse(userID)
@@ -154,7 +154,65 @@ func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope,
 		return Intent{}, ErrValidation
 	}
 
-	return relayer.CreateIntent(ctx, CreateIntentInput{CAddress: smartAccountAddress})
+	return relayer.CreateIntent(ctx, opts.toInput(smartAccountAddress))
+}
+
+// FundingIntentOptions are the caller-supplied parts of a funding intent.
+// All optional: an empty value means "use the default".
+type FundingIntentOptions struct {
+	// ExpiresIn is how long the intent stays fundable, in seconds.
+	//
+	// This matters more than it looks. latch-relayer defaults to one hour, and
+	// its forwarder sweeps a deposit arriving against an expired intent to the
+	// recovery address — indistinguishable, from the depositor's side, from
+	// never having been credited. An hour suits someone paying from a wallet
+	// they already hold funds in, but a card purchase can take longer and an
+	// ACH or SEPA transfer takes one to three business days. Callers funding
+	// through an on-ramp must ask for a window that covers settlement.
+	ExpiresIn int
+
+	// ExpectedAmt is the deposit size in the asset's own units, for
+	// reconciliation. Advisory: the relayer logs a mismatch but still credits
+	// whatever arrives, because by the time we see it the money is on-chain.
+	ExpectedAmt string
+
+	// ExternalID is the provider's order ID, so a deposit can be traced from
+	// either side.
+	ExternalID string
+}
+
+// Funding intent TTL bounds.
+//
+// The ceiling exists because an intent holds a memo reserved against the pool;
+// an unbounded TTL from a caller would hold one forever. Thirty days comfortably
+// covers the slowest settlement anyone offers.
+const (
+	MinFundingIntentTTL = 5 * 60
+	MaxFundingIntentTTL = 30 * 24 * 60 * 60
+)
+
+// toInput clamps the caller's TTL into the supported range rather than
+// rejecting it. A client asking for longer than we allow wants its deposit to
+// survive settlement, and failing the request outright serves that worse than
+// giving it the longest window we do support. Zero means unset — the relayer
+// applies its own default.
+func (o FundingIntentOptions) toInput(cAddress string) CreateIntentInput {
+	in := CreateIntentInput{
+		CAddress:    cAddress,
+		ExpectedAmt: o.ExpectedAmt,
+		ExternalID:  o.ExternalID,
+	}
+	switch {
+	case o.ExpiresIn <= 0:
+		// leave unset
+	case o.ExpiresIn < MinFundingIntentTTL:
+		in.ExpiresIn = MinFundingIntentTTL
+	case o.ExpiresIn > MaxFundingIntentTTL:
+		in.ExpiresIn = MaxFundingIntentTTL
+	default:
+		in.ExpiresIn = o.ExpiresIn
+	}
+	return in
 }
 
 // GetFundingStatus fetches a funding intent's status from latch-relayer by

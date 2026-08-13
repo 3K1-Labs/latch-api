@@ -104,11 +104,30 @@ type createDepositIntentRequest struct {
 	// Network is optional; empty means testnet. Only testnet is served today —
 	// see AccountService.CreateFundingIntent.
 	Network string `json:"network"`
+
+	// ExpiresIn is how long the intent stays fundable, in seconds. Omit for
+	// latch-relayer's own default of one hour.
+	//
+	// Anything funded by bank transfer must set this. The relayer sweeps a
+	// deposit arriving against an expired intent to the recovery address, so an
+	// ACH or SEPA payment landing two days after a one-hour intent is not
+	// credited. Clamped to [MinFundingIntentTTL, MaxFundingIntentTTL].
+	ExpiresIn int `json:"expires_in"`
+
+	// ExpectedAmt is the deposit size in the asset's own units — XLM, not fiat.
+	// Advisory only: the relayer logs a mismatch and credits what arrives.
+	ExpectedAmt string `json:"expected_amt"`
+
+	// ExternalID is the on-ramp provider's order ID, so a deposit can be traced
+	// from either side during reconciliation.
+	ExternalID string `json:"external_id"`
 }
 
 // CreateDepositIntent godoc
 // @Summary      Mint a funding intent for the fund-account flow
-// @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)
+// @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry;
+// @Description  pass expires_in to cover slower settlement — bank transfers take days, and a
+// @Description  deposit arriving after expiry is swept to recovery, not credited)
 // @Description  for a smart account already associated with the caller. Not idempotent — every call
 // @Description  mints a new intent, matching latch-relayer's "one intent per funding session"
 // @Description  model. The caller must have already registered the address via
@@ -135,7 +154,12 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 		return
 	}
 
-	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress, req.Network)
+	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress, req.Network,
+		service.FundingIntentOptions{
+			ExpiresIn:   req.ExpiresIn,
+			ExpectedAmt: req.ExpectedAmt,
+			ExternalID:  req.ExternalID,
+		})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrValidation):

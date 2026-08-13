@@ -138,7 +138,7 @@ func TestCreateFundingIntent_Network(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewAccountService(errorQueries(), NewRelayerService("", "", time.Second), nil)
-			_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, tc.network)
+			_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, tc.network, FundingIntentOptions{})
 			assert.ErrorIs(t, err, tc.wantErr)
 		})
 	}
@@ -146,7 +146,7 @@ func TestCreateFundingIntent_Network(t *testing.T) {
 
 func TestCreateFundingIntent_InvalidUUID(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", "", time.Second), nil)
-	_, err := svc.CreateFundingIntent(context.Background(), "not-a-uuid", "", validWalletRef, "")
+	_, err := svc.CreateFundingIntent(context.Background(), "not-a-uuid", "", validWalletRef, "", FundingIntentOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse user id")
 }
@@ -160,7 +160,7 @@ func TestCreateFundingIntent_NotRegistered(t *testing.T) {
 
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").WillReturnError(sql.ErrNoRows)
 
-	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef, "")
+	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef, "", FundingIntentOptions{})
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -175,7 +175,7 @@ func TestCreateFundingIntent_NotOwner(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(otherUser))
 
-	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef, "")
+	_, err = svc.CreateFundingIntent(context.Background(), "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "", validWalletRef, "", FundingIntentOptions{})
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -190,19 +190,19 @@ func TestCreateFundingIntent_RelayerNotConfigured(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	_, err = svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef, "")
+	_, err = svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef, "", FundingIntentOptions{})
 	require.ErrorIs(t, err, ErrRelayerNotConfigured)
 }
 
 func TestCreateFundingIntent_WalletScope_AddressMismatch(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", "", time.Second), nil)
-	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, "CSOMEOTHERADDRESS", "")
+	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, "CSOMEOTHERADDRESS", "", FundingIntentOptions{})
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestCreateFundingIntent_WalletScope_RelayerNotConfigured(t *testing.T) {
 	svc := NewAccountService(errorQueries(), NewRelayerService("", "", time.Second), nil)
-	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, "")
+	_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, "", FundingIntentOptions{})
 	require.ErrorIs(t, err, ErrRelayerNotConfigured)
 }
 
@@ -223,7 +223,7 @@ func TestCreateFundingIntent_WalletScope_Success(t *testing.T) {
 	// must not be hit.
 	svc := NewAccountService(errorQueries(), NewRelayerService(ts.URL, "", time.Second), nil)
 
-	intent, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, "")
+	intent, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, "", FundingIntentOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, "intent-1", intent.IntentID)
 }
@@ -250,7 +250,7 @@ func TestCreateFundingIntent_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT user_id FROM smart_account_registrations").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(uid))
 
-	intent, err := svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef, "")
+	intent, err := svc.CreateFundingIntent(context.Background(), uid.String(), "", validWalletRef, "", FundingIntentOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, "intent-1", intent.IntentID)
 	assert.Equal(t, "12345", intent.MemoID)
@@ -283,11 +283,11 @@ func TestRelayerRouting_PerNetwork(t *testing.T) {
 		svc := NewAccountService(errorQueries(),
 			newRelayerStub(t, "GTESTNETPOOL"), newRelayerStub(t, "GMAINNETPOOL"))
 
-		testnet, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkTestnet)
+		testnet, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkTestnet, FundingIntentOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, "GTESTNETPOOL", testnet.PoolAddress)
 
-		mainnet, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkMainnet)
+		mainnet, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkMainnet, FundingIntentOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, "GMAINNETPOOL", mainnet.PoolAddress)
 	})
@@ -304,7 +304,7 @@ func TestRelayerRouting_PerNetwork(t *testing.T) {
 	t.Run("mainnet stays unsupported until a relayer is deployed", func(t *testing.T) {
 		svc := NewAccountService(errorQueries(), newRelayerStub(t, "GTESTNETPOOL"), NewRelayerService("", "", time.Second))
 
-		_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkMainnet)
+		_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkMainnet, FundingIntentOptions{})
 		assert.ErrorIs(t, err, ErrNetworkUnsupported)
 
 		_, err = svc.GetFundingStatus(context.Background(), validWalletRef, ScopeWallet, "12345", NetworkMainnet)
@@ -313,7 +313,7 @@ func TestRelayerRouting_PerNetwork(t *testing.T) {
 
 	t.Run("a nil mainnet relayer is not a panic", func(t *testing.T) {
 		svc := NewAccountService(errorQueries(), newRelayerStub(t, "GTESTNETPOOL"), nil)
-		_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkMainnet)
+		_, err := svc.CreateFundingIntent(context.Background(), validWalletRef, ScopeWallet, validWalletRef, NetworkMainnet, FundingIntentOptions{})
 		assert.ErrorIs(t, err, ErrNetworkUnsupported)
 	})
 
@@ -452,4 +452,46 @@ func TestGetFundingStatus_WalletScope_Success(t *testing.T) {
 	status, err := svc.GetFundingStatus(context.Background(), validWalletRef, ScopeWallet, "12345", "")
 	require.NoError(t, err)
 	assert.Equal(t, "completed", status.Status)
+}
+
+// The TTL is the whole reason these options exist. latch-relayer defaults to an
+// hour and sweeps deposits arriving after expiry to the recovery address, so a
+// bank transfer settling two days later is lost unless the caller asks for a
+// longer window and we actually forward it.
+func TestFundingIntentOptions_toInput(t *testing.T) {
+	const cAddr = "CABC"
+
+	tests := []struct {
+		name          string
+		opts          FundingIntentOptions
+		wantExpiresIn int
+	}{
+		{"unset leaves the relayer default", FundingIntentOptions{}, 0},
+		{"negative is treated as unset", FundingIntentOptions{ExpiresIn: -1}, 0},
+		{"a week passes through", FundingIntentOptions{ExpiresIn: 7 * 24 * 60 * 60}, 7 * 24 * 60 * 60},
+		{"below the floor is raised", FundingIntentOptions{ExpiresIn: 30}, MinFundingIntentTTL},
+		{"above the ceiling is capped", FundingIntentOptions{ExpiresIn: 365 * 24 * 60 * 60}, MaxFundingIntentTTL},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.opts.toInput(cAddr)
+			assert.Equal(t, cAddr, got.CAddress)
+			assert.Equal(t, tc.wantExpiresIn, got.ExpiresIn)
+		})
+	}
+}
+
+// Clamping rather than rejecting: a caller asking for longer than we allow wants
+// its deposit to survive settlement, and a 400 serves that worse than the
+// longest window we do support.
+func TestFundingIntentOptions_ForwardsReconciliationFields(t *testing.T) {
+	got := FundingIntentOptions{
+		ExpiresIn:   3600,
+		ExpectedAmt: "25.0000000",
+		ExternalID:  "order-1",
+	}.toInput("CABC")
+
+	assert.Equal(t, "25.0000000", got.ExpectedAmt)
+	assert.Equal(t, "order-1", got.ExternalID)
+	assert.Equal(t, 3600, got.ExpiresIn)
 }

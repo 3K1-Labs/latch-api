@@ -1563,7 +1563,7 @@ const docTemplate = `{
         },
         "/api/on-ramp/intent/{id}": {
             "get": {
-                "description": "Dev-only (403 in production). Fetches an on-ramp intent by id, including its live MoonPay transaction status if one is attached.",
+                "description": "Fetches an on-ramp intent by id, including its live MoonPay transaction status if one is attached.",
                 "produces": [
                     "application/json"
                 ],
@@ -1587,12 +1587,6 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler_webapp.onRampIntentResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -1608,7 +1602,7 @@ const docTemplate = `{
                 }
             },
             "patch": {
-                "description": "Dev-only (403 in production). Partial update: at least one of status or moonpayTransactionId is required. Returns the updated intent with its live MoonPay transaction status.",
+                "description": "Partial update: at least one of status or moonpayTransactionId is required. Returns the updated intent with its live MoonPay transaction status.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1650,12 +1644,6 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -1673,7 +1661,7 @@ const docTemplate = `{
         },
         "/api/on-ramp/pool": {
             "get": {
-                "description": "Dev-only (403 in production). Returns the on-ramp pool account's XLM balance and up to 20 recent transactions, optionally filtered to a single memo.",
+                "description": "Returns the on-ramp pool account's XLM balance and up to 20 recent transactions, optionally filtered to a single memo.",
                 "produces": [
                     "application/json"
                 ],
@@ -1696,12 +1684,6 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler_webapp.onRampPoolResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -1713,7 +1695,7 @@ const docTemplate = `{
         },
         "/api/on-ramp/session": {
             "post": {
-                "description": "Dev-only (403 in production). Creates a MoonPay on-ramp intent for destinationCAddress and returns either a Platform API session token or a signed widget URL depending on MOONPAY_INTEGRATION_MODE (\"auto\" falls back to a widget URL if the Platform API returns 404).",
+                "description": "Creates an on-ramp intent for destinationCAddress and returns either a Platform API session token or a signed widget URL depending on MOONPAY_INTEGRATION_MODE (\"auto\" falls back to a widget URL if the Platform API returns 404).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1744,12 +1726,6 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
@@ -3064,7 +3040,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register. network is optional and defaults to testnet;\nmainnet is rejected with 400 until a mainnet relayer is deployed.",
+                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry;\npass expires_in to cover slower settlement — bank transfers take days, and a\ndeposit arriving after expiry is swept to recovery, not credited)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register. network is optional and defaults to testnet;\nmainnet is rejected with 400 until a mainnet relayer is deployed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4818,6 +4794,18 @@ const docTemplate = `{
                 "smart_account_address"
             ],
             "properties": {
+                "expected_amt": {
+                    "description": "ExpectedAmt is the deposit size in the asset's own units — XLM, not fiat.\nAdvisory only: the relayer logs a mismatch and credits what arrives.",
+                    "type": "string"
+                },
+                "expires_in": {
+                    "description": "ExpiresIn is how long the intent stays fundable, in seconds. Omit for\nlatch-relayer's own default of one hour.\n\nAnything funded by bank transfer must set this. The relayer sweeps a\ndeposit arriving against an expired intent to the recovery address, so an\nACH or SEPA payment landing two days after a one-hour intent is not\ncredited. Clamped to [MinFundingIntentTTL, MaxFundingIntentTTL].",
+                    "type": "integer"
+                },
+                "external_id": {
+                    "description": "ExternalID is the on-ramp provider's order ID, so a deposit can be traced\nfrom either side during reconciliation.",
+                    "type": "string"
+                },
                 "network": {
                     "description": "Network is optional; empty means testnet. Only testnet is served today —\nsee AccountService.CreateFundingIntent.",
                     "type": "string"
@@ -5537,6 +5525,14 @@ const docTemplate = `{
                 "destinationCAddress"
             ],
             "properties": {
+                "cryptoCurrency": {
+                    "type": "string",
+                    "enum": [
+                        "XLM",
+                        "USDC"
+                    ],
+                    "example": "XLM"
+                },
                 "destinationCAddress": {
                     "type": "string",
                     "example": "CABC...XYZ"
@@ -5548,6 +5544,14 @@ const docTemplate = `{
                 "fiatCode": {
                     "type": "string",
                     "example": "USD"
+                },
+                "provider": {
+                    "type": "string",
+                    "enum": [
+                        "moonpay",
+                        "transak"
+                    ],
+                    "example": "moonpay"
                 }
             }
         },
