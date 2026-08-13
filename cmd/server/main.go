@@ -525,10 +525,14 @@ func main() {
 	webappGroup.POST("/sign-payload", webappSignPayloadHandler.Create)
 	webappGroup.GET("/sign-payload/:payloadRef", webappSignPayloadHandler.Get)
 
-	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, cfg)
+	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, webappAuditSvc, cfg)
+	// The on-ramp moves customer money, so session creation gets its own budget.
+	// The global 300/min per-IP limiter is a DoS backstop, not a control for a
+	// money path — and being per-IP it pools everyone behind one NAT together.
+	onRampSessionLimiter := middleware.NewSessionActionRateLimiter(redisClient, "onramp_session", 20, time.Hour)
 	onRampGroup := webappGroup.Group("/on-ramp")
 	{
-		onRampGroup.POST("/session", webappOnRampHandler.Session)
+		onRampGroup.POST("/session", onRampSessionLimiter, webappOnRampHandler.Session)
 		onRampGroup.GET("/intent/:id", webappOnRampHandler.GetIntent)
 		onRampGroup.PATCH("/intent/:id", webappOnRampHandler.UpdateIntent)
 		onRampGroup.GET("/pool", webappOnRampHandler.Pool)

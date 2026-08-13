@@ -78,8 +78,8 @@ func (q *Queries) InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntent
 
 const updateOnRampIntent = `-- name: UpdateOnRampIntent :one
 UPDATE webapp.on_ramp_intents
-SET status = $2,
-    moonpay_transaction_id = $3,
+SET status = COALESCE($2, status),
+    moonpay_transaction_id = COALESCE($3, moonpay_transaction_id),
     updated_at = NOW()
 WHERE id = $1
 RETURNING id, memo_id, destination_c_address, external_customer_id, moonpay_transaction_id, status, fiat_amount, fiat_code, created_at, updated_at, relayer_intent_id, pool_address, expires_at
@@ -87,10 +87,14 @@ RETURNING id, memo_id, destination_c_address, external_customer_id, moonpay_tran
 
 type UpdateOnRampIntentParams struct {
 	ID                   uuid.UUID      `json:"id"`
-	Status               string         `json:"status"`
+	Status               sql.NullString `json:"status"`
 	MoonpayTransactionID sql.NullString `json:"moonpay_transaction_id"`
 }
 
+// Partial update in a single statement. Reading the row first and merging in Go
+// lost concurrent updates: two callers could read the same row and each write
+// back its own field, discarding the other's. COALESCE keeps the existing value
+// whenever the caller passed NULL, so both fields survive either order.
 func (q *Queries) UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error) {
 	row := q.db.QueryRowContext(ctx, updateOnRampIntent, arg.ID, arg.Status, arg.MoonpayTransactionID)
 	var i WebappOnRampIntent

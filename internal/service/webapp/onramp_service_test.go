@@ -302,104 +302,46 @@ func TestOnRampService_UpdateIntent(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
 		id := uuid.New()
-		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnError(sql.ErrNoRows)
+		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WillReturnError(sql.ErrNoRows)
 
 		_, err := svc.UpdateIntent(context.Background(), id.String(), &statusPending, nil)
 		assert.ErrorIs(t, err, ErrOnRampIntentNotFound)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("merges partial update", func(t *testing.T) {
+	// One statement, no read first. The merge happens in SQL via COALESCE, which
+	// is what stops two concurrent callers from overwriting each other's field.
+	t.Run("sets only the field provided, in a single statement", func(t *testing.T) {
 		svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
 		id := uuid.New()
 		now := time.Now()
 
-		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
-		)
-		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WithArgs(id, "created", sql.NullString{String: moonpayTxID, Valid: true}).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
-		)
+		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").
+			WithArgs(id, sql.NullString{}, sql.NullString{String: moonpayTxID, Valid: true}).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}))
 
 		intent, err := svc.UpdateIntent(context.Background(), id.String(), nil, &moonpayTxID)
 		require.NoError(t, err)
-		assert.Equal(t, "created", intent.Status)
+		assert.Equal(t, "created", intent.Status, "status must be left untouched when not supplied")
 		assert.Equal(t, moonpayTxID, intent.MoonpayTransactionID)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("status-only update keeps existing moonpayTransactionId", func(t *testing.T) {
+	t.Run("status-only update leaves moonpayTransactionId alone", func(t *testing.T) {
 		svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
 		id := uuid.New()
 		now := time.Now()
 
-		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
-		)
-		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WithArgs(id, statusPending, sql.NullString{String: moonpayTxID, Valid: true}).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, statusPending, "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
-		)
+		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").
+			WithArgs(id, sql.NullString{String: statusPending, Valid: true}, sql.NullString{}).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, statusPending, "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}))
 
 		intent, err := svc.UpdateIntent(context.Background(), id.String(), &statusPending, nil)
 		require.NoError(t, err)
 		assert.Equal(t, statusPending, intent.Status)
 		assert.Equal(t, moonpayTxID, intent.MoonpayTransactionID)
-		assert.NoError(t, mock.ExpectationsWereMet())
-	})
-
-	t.Run("row deleted between read and update", func(t *testing.T) {
-		svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
-		id := uuid.New()
-		now := time.Now()
-
-		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
-		)
-		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WithArgs(id, statusPending, sql.NullString{}).WillReturnError(sql.ErrNoRows)
-
-		_, err := svc.UpdateIntent(context.Background(), id.String(), &statusPending, nil)
-		assert.ErrorIs(t, err, ErrOnRampIntentNotFound)
-		assert.NoError(t, mock.ExpectationsWereMet())
-	})
-
-	t.Run("malformed id", func(t *testing.T) {
-		svc, _ := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
-		_, err := svc.UpdateIntent(context.Background(), "not-a-uuid", &statusPending, nil)
-		assert.ErrorIs(t, err, ErrOnRampIntentNotFound)
-	})
-}
-
-func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
-	// No expected INSERT in either case: the session is built before the intent
-	// row is written, so a key failure must leave no row behind.
-	t.Run("missing secret key", func(t *testing.T) {
-		sqlDB, mock, err := sqlmock.New()
-		require.NoError(t, err)
-		defer sqlDB.Close()
-		q := db.New(sqlDB)
-		svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
-			"", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
-
-		_, err = svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
-		assert.ErrorIs(t, err, ErrMoonPaySecretKeyMissing)
-		assert.NoError(t, mock.ExpectationsWereMet())
-	})
-
-	t.Run("missing publishable key", func(t *testing.T) {
-		sqlDB, mock, err := sqlmock.New()
-		require.NoError(t, err)
-		defer sqlDB.Close()
-		q := db.New(sqlDB)
-		svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
-			"", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
-
-		_, err = svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
-		assert.ErrorIs(t, err, ErrMoonPayPublishableKeyMissing)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }

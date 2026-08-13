@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/metrics"
 	"github.com/latch/backend/internal/service"
 	"github.com/stellar/go-stellar-sdk/strkey"
 )
@@ -228,8 +229,10 @@ func (s *OnRampService) mintRelayerIntent(ctx context.Context, destinationCAddre
 		ExpiresIn:  int(s.intentTTL.Seconds()),
 	})
 	if err != nil {
+		metrics.OnRampRelayerRegistrationTotal.WithLabelValues("error").Inc()
 		return service.Intent{}, fmt.Errorf("mint relayer funding intent: %w", err)
 	}
+	metrics.OnRampRelayerRegistrationTotal.WithLabelValues("success").Inc()
 	return funding, nil
 }
 
@@ -422,9 +425,13 @@ func (s *OnRampService) GetIntent(ctx context.Context, id string) (OnRampIntent,
 }
 
 // UpdateIntent applies a partial update (status and/or moonpayTransactionId)
-// to an existing intent. Mirrors intent/[id]/route.ts's PATCH handler; the
-// underlying sqlc query always writes both columns, so this reads the
-// current row first and merges in only the fields the caller supplied.
+// to an existing intent. Mirrors intent/[id]/route.ts's PATCH handler.
+//
+// The merge happens in SQL rather than here. Reading the row and writing it
+// back left a window where two concurrent callers each read the same row and
+// each wrote its own field, silently discarding the other's — a provider
+// webhook setting the transaction ID could erase a status the client had just
+// set, or the reverse.
 func (s *OnRampService) UpdateIntent(ctx context.Context, id string, status, moonpayTransactionID *string) (OnRampIntent, error) {
 	if status == nil && moonpayTransactionID == nil {
 		return OnRampIntent{}, ErrOnRampNoUpdateFields
@@ -438,28 +445,15 @@ func (s *OnRampService) UpdateIntent(ctx context.Context, id string, status, moo
 		return OnRampIntent{}, ErrOnRampIntentNotFound
 	}
 
-	existing, err := s.q.GetOnRampIntentByID(ctx, uid)
-	if errors.Is(err, sql.ErrNoRows) {
-		return OnRampIntent{}, ErrOnRampIntentNotFound
-	}
-	if err != nil {
-		return OnRampIntent{}, fmt.Errorf("get on-ramp intent %s: %w", id, err)
-	}
-
-	newStatus := existing.Status
+	params := db.UpdateOnRampIntentParams{ID: uid}
 	if status != nil {
-		newStatus = *status
+		params.Status = sql.NullString{String: *status, Valid: true}
 	}
-	newMoonpayTxID := existing.MoonpayTransactionID
 	if moonpayTransactionID != nil {
-		newMoonpayTxID = sql.NullString{String: *moonpayTransactionID, Valid: true}
+		params.MoonpayTransactionID = sql.NullString{String: *moonpayTransactionID, Valid: true}
 	}
 
-	updated, err := s.q.UpdateOnRampIntent(ctx, db.UpdateOnRampIntentParams{
-		ID:                   uid,
-		Status:               newStatus,
-		MoonpayTransactionID: newMoonpayTxID,
-	})
+	updated, err := s.q.UpdateOnRampIntent(ctx, params)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OnRampIntent{}, ErrOnRampIntentNotFound
 	}
@@ -473,7 +467,14 @@ func (s *OnRampService) UpdateIntent(ctx context.Context, id string, status, moo
 // transactions, optionally filtered to a single memo. Mirrors
 // app/api/on-ramp/pool/route.ts.
 func (s *OnRampService) PoolSnapshot(ctx context.Context, memoFilter string) (PoolAccountSnapshot, error) {
-	return s.pool.FetchSnapshot(ctx, s.horizonURL, "testnet", s.poolAddress, memoFilter)
+	// Report the network the pool actually lives on. This was hardcoded to
+	// testnet, which mislabelled every mainnet snapshot — the one place an
+	// operator looks to confirm which network they are reconciling against.
+	network := "testnet"
+	if strings.EqualFold(s.poolNetwork, "mainnet") {
+		network = "mainnet"
+	}
+	return s.pool.FetchSnapshot(ctx, s.horizonURL, network, s.poolAddress, memoFilter)
 }
 
 func isValidOnRampStatus(status string) bool {
