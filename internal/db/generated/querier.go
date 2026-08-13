@@ -92,7 +92,6 @@ type Querier interface {
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
-	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error

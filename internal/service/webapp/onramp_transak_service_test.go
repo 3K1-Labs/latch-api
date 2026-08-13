@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	db "github.com/latch/backend/internal/db/generated"
@@ -20,7 +21,8 @@ func newTestTransakOnRampService(t *testing.T, stubURL, poolNetwork string) (*On
 	require.NoError(t, err)
 	t.Cleanup(func() { sqlDB.Close() })
 
-	svc := NewOnRampService(db.New(sqlDB), "", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
+	svc := NewOnRampService(db.New(sqlDB), &stubRelayer{}, 7*24*time.Hour,
+		"", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
 		"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{
 			APIKey:         "key_1",
 			APISecret:      "secret_1",
@@ -77,7 +79,6 @@ func TestOnRampService_CreateTransakIntent_RequiresMainnetPool(t *testing.T) {
 	t.Run("allowed on mainnet", func(t *testing.T) {
 		stub := newTransakStub(t, 0)
 		svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-		expectMemoDoesNotExist(mock)
 		expectInsertOnRampIntent(mock)
 
 		sess, err := svc.CreateTransakIntent(context.Background(), testTransakIntentInput(t))
@@ -90,7 +91,6 @@ func TestOnRampService_CreateTransakIntent_RequiresMainnetPool(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_Success(t *testing.T) {
 	stub := newTransakStub(t, 0)
 	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	in := testTransakIntentInput(t)
@@ -100,7 +100,10 @@ func TestOnRampService_CreateTransakIntent_Success(t *testing.T) {
 	assert.Equal(t, OnRampProviderTransak, sess.Provider)
 	assert.Equal(t, onRampIntegrationModeWidget, sess.IntegrationMode)
 	assert.Equal(t, "https://global-stg.transak.com?sessionId=abc", sess.WidgetURL)
-	assert.Equal(t, "GPOOL", sess.PoolAddress)
+	// The relayer's pool, not the locally configured "GPOOL": the deposit has to
+	// land where the relayer that minted the memo is actually watching.
+	assert.Equal(t, stubRelayerPoolAddress, sess.PoolAddress)
+	assert.Equal(t, stubRelayerMemoID, sess.MemoID)
 	assert.Equal(t, "XLM", sess.CryptoCurrency)
 	assert.Equal(t, in.DestinationCAddress, sess.DestinationCAddress)
 	assert.NotEmpty(t, sess.MemoID)
@@ -120,7 +123,6 @@ func TestOnRampService_CreateTransakIntent_Success(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_AppliesFiatDefaults(t *testing.T) {
 	stub := newTransakStub(t, 0)
 	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	in := testTransakIntentInput(t)
@@ -135,7 +137,6 @@ func TestOnRampService_CreateTransakIntent_AppliesFiatDefaults(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_NormalizesCryptoCurrency(t *testing.T) {
 	stub := newTransakStub(t, 0)
 	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	in := testTransakIntentInput(t)
@@ -178,7 +179,8 @@ func TestOnRampService_CreateTransakIntent_Validation(t *testing.T) {
 		sqlDB, _, err := sqlmock.New()
 		require.NoError(t, err)
 		t.Cleanup(func() { sqlDB.Close() })
-		svc := NewOnRampService(db.New(sqlDB), "", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
+		svc := NewOnRampService(db.New(sqlDB), &stubRelayer{}, 7*24*time.Hour,
+			"", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
 			"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{PoolNetwork: "mainnet"})
 
 		_, err = svc.CreateTransakIntent(context.Background(), testTransakIntentInput(t))
@@ -191,7 +193,6 @@ func TestOnRampService_CreateTransakIntent_Validation(t *testing.T) {
 func TestOnRampService_CreateTransakIntent_NoIntentRowOnProviderFailure(t *testing.T) {
 	ts := httptestServerReturning(t, http.StatusServiceUnavailable, `{"error":{"message":"transak down"}}`)
 	svc, mock := newTestTransakOnRampService(t, ts, "mainnet")
-	expectMemoDoesNotExist(mock)
 	// Deliberately no expectInsertOnRampIntent: sqlmock fails the test if the
 	// service inserts anyway.
 

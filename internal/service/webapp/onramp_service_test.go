@@ -12,9 +12,37 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const (
+	stubRelayerMemoID      = "8765432109876"
+	stubRelayerPoolAddress = "GRELAYERPOOL"
+	stubRelayerIntentID    = "relayer-intent-1"
+)
+
+// stubRelayer stands in for latch-relayer, the sole allocator of on-ramp
+// memos. Records what it was asked for so tests can assert the TTL and the
+// correlation ID actually reach it.
+type stubRelayer struct {
+	err   error
+	calls []service.CreateIntentInput
+}
+
+func (s *stubRelayer) CreateIntent(_ context.Context, in service.CreateIntentInput) (service.Intent, error) {
+	s.calls = append(s.calls, in)
+	if s.err != nil {
+		return service.Intent{}, s.err
+	}
+	return service.Intent{
+		IntentID:    stubRelayerIntentID,
+		MemoID:      stubRelayerMemoID,
+		PoolAddress: stubRelayerPoolAddress,
+		ExpiresAt:   time.Now().Add(7 * 24 * time.Hour),
+	}, nil
+}
 
 func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuyURLOverride string) (*OnRampService, sqlmock.Sqlmock) {
 	t.Helper()
@@ -23,7 +51,8 @@ func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuy
 	t.Cleanup(func() { sqlDB.Close() })
 	q := db.New(sqlDB)
 
-	svc := NewOnRampService(q, moonPayServerURL, "sk_test_secret", "pk_test_pub", mode, widgetBuyURLOverride,
+	svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
+		moonPayServerURL, "sk_test_secret", "pk_test_pub", mode, widgetBuyURLOverride,
 		"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
 	if moonPayServerURL != "" {
 		svc.moonPay.httpClient = http.DefaultClient
@@ -31,18 +60,22 @@ func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuy
 	return svc, mock
 }
 
+// relayerStub reaches the stub the service was built with, for tests that need
+// to make the relayer fail or inspect what it received.
+func relayerStub(t *testing.T, svc *OnRampService) *stubRelayer {
+	t.Helper()
+	stub, ok := svc.relayer.(*stubRelayer)
+	require.True(t, ok, "service was not built with a stubRelayer")
+	return stub
+}
+
 func expectInsertOnRampIntent(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("INSERT INTO webapp.on_ramp_intents").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 }
 
-func expectMemoDoesNotExist(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-}
-
 func TestOnRampService_CreateIntent_WidgetMode(t *testing.T) {
 	svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "", "")
@@ -63,7 +96,6 @@ func TestOnRampService_CreateIntent_PlatformMode(t *testing.T) {
 	defer ts.Close()
 
 	svc, mock := newTestOnRampService(t, ts.URL, onRampIntegrationModePlatform, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "10", "eur")
@@ -82,7 +114,6 @@ func TestOnRampService_CreateIntent_AutoFallsBackToWidgetOn404(t *testing.T) {
 	defer ts.Close()
 
 	svc, mock := newTestOnRampService(t, ts.URL, onRampIntegrationModeAuto, "")
-	expectMemoDoesNotExist(mock)
 	expectInsertOnRampIntent(mock)
 
 	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
@@ -100,13 +131,74 @@ func TestOnRampService_CreateIntent_AutoPropagatesNon404Error(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	// No expected INSERT: a provider failure must leave no intent row behind.
 	svc, mock := newTestOnRampService(t, ts.URL, onRampIntegrationModeAuto, "")
-	expectMemoDoesNotExist(mock)
-	expectInsertOnRampIntent(mock)
 
 	_, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
 	require.Error(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// latch-relayer is the sole memo allocator: the session must carry the memo
+// and pool address it minted, never a locally generated memo or the locally
+// configured pool. A session built on either would route a real deposit to a
+// memo no relayer can match, and the funds would be swept to recovery.
+func TestOnRampService_CreateIntent_UsesRelayerMemoAndPool(t *testing.T) {
+	svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
+	expectInsertOnRampIntent(mock)
+
+	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
+	require.NoError(t, err)
+
+	assert.Equal(t, stubRelayerMemoID, sess.MemoID)
+	assert.Equal(t, stubRelayerPoolAddress, sess.PoolAddress)
+	assert.Contains(t, sess.WidgetURL, stubRelayerMemoID, "widget URL must carry the relayer's memo")
+	assert.Contains(t, sess.WidgetURL, stubRelayerPoolAddress, "widget URL must deposit to the relayer's pool")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// The relayer needs the TTL and a correlation ID, or deposits expire in an hour
+// (sweeping every bank-funded purchase) and reconciliation cannot join the two
+// services.
+func TestOnRampService_CreateIntent_PassesTTLAndCorrelationID(t *testing.T) {
+	svc, mock := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
+	expectInsertOnRampIntent(mock)
+
+	sess, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
+	require.NoError(t, err)
+
+	stub := relayerStub(t, svc)
+	require.Len(t, stub.calls, 1)
+	assert.Equal(t, int((7 * 24 * time.Hour).Seconds()), stub.calls[0].ExpiresIn)
+	assert.Equal(t, sess.IntentID, stub.calls[0].ExternalID)
+	assert.Equal(t, sess.DestinationCAddress, stub.calls[0].CAddress)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// Fail closed. No expected INSERT: a caller who retries loses seconds, whereas
+// a session carrying an unregistered memo loses them their deposit.
+func TestOnRampService_CreateIntent_RelayerFailureWritesNoRow(t *testing.T) {
+	for _, mode := range []string{onRampIntegrationModeWidget, onRampIntegrationModePlatform, onRampIntegrationModeAuto} {
+		t.Run(mode, func(t *testing.T) {
+			svc, mock := newTestOnRampService(t, "", mode, "")
+			relayerStub(t, svc).err = service.ErrRelayerUnavailable
+
+			_, err := svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
+			assert.ErrorIs(t, err, service.ErrRelayerUnavailable)
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestOnRampService_CreateTransakIntent_RelayerFailureWritesNoRow(t *testing.T) {
+	stub := newTransakStub(t, 0)
+	svc, mock := newTestTransakOnRampService(t, stub.server.URL, "mainnet")
+	relayerStub(t, svc).err = service.ErrRelayerUnavailable
+
+	_, err := svc.CreateTransakIntent(context.Background(), testTransakIntentInput(t))
+	assert.ErrorIs(t, err, service.ErrRelayerUnavailable)
+	assert.NoError(t, mock.ExpectationsWereMet())
+	assert.Zero(t, stub.refreshes, "no provider session may be minted without a registered memo")
 }
 
 func TestOnRampService_CreateIntent_Validation(t *testing.T) {
@@ -141,8 +233,8 @@ func TestOnRampService_GetIntent(t *testing.T) {
 		id := uuid.New()
 		now := time.Now()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: "tx-1", Valid: true}, "pending", "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: "tx-1", Valid: true}, "pending", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 
 		intent, moonpayStatus, err := svc.GetIntent(context.Background(), id.String())
@@ -162,8 +254,8 @@ func TestOnRampService_GetIntent(t *testing.T) {
 		id := uuid.New()
 		now := time.Now()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: "tx-1", Valid: true}, "pending", "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: "tx-1", Valid: true}, "pending", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 
 		intent, moonpayStatus, err := svc.GetIntent(context.Background(), id.String())
@@ -223,12 +315,12 @@ func TestOnRampService_UpdateIntent(t *testing.T) {
 		now := time.Now()
 
 		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{}, "created", "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WithArgs(id, "created", sql.NullString{String: moonpayTxID, Valid: true}).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 
 		intent, err := svc.UpdateIntent(context.Background(), id.String(), nil, &moonpayTxID)
@@ -244,12 +336,12 @@ func TestOnRampService_UpdateIntent(t *testing.T) {
 		now := time.Now()
 
 		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WithArgs(id, statusPending, sql.NullString{String: moonpayTxID, Valid: true}).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, statusPending, "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{String: moonpayTxID, Valid: true}, statusPending, "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 
 		intent, err := svc.UpdateIntent(context.Background(), id.String(), &statusPending, nil)
@@ -265,8 +357,8 @@ func TestOnRampService_UpdateIntent(t *testing.T) {
 		now := time.Now()
 
 		mock.ExpectQuery("SELECT (.+) FROM webapp.on_ramp_intents").WithArgs(id).WillReturnRows(
-			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at"}).
-				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{}, "created", "25", "USD", now, now),
+			sqlmock.NewRows([]string{"id", "memo_id", "destination_c_address", "external_customer_id", "moonpay_transaction_id", "status", "fiat_amount", "fiat_code", "created_at", "updated_at", "relayer_intent_id", "pool_address", "expires_at"}).
+				AddRow(id, "1234567890", "CADDR", "user-1", sql.NullString{}, "created", "25", "USD", now, now, sql.NullString{}, sql.NullString{}, sql.NullTime{}),
 		)
 		mock.ExpectQuery("UPDATE webapp.on_ramp_intents").WithArgs(id, statusPending, sql.NullString{}).WillReturnError(sql.ErrNoRows)
 
@@ -283,17 +375,19 @@ func TestOnRampService_UpdateIntent(t *testing.T) {
 }
 
 func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
+	// No expected INSERT in either case: the session is built before the intent
+	// row is written, so a key failure must leave no row behind.
 	t.Run("missing secret key", func(t *testing.T) {
 		sqlDB, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		defer sqlDB.Close()
 		q := db.New(sqlDB)
-		svc := NewOnRampService(q, "", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
-		expectMemoDoesNotExist(mock)
-		expectInsertOnRampIntent(mock)
+		svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
+			"", "", "pk_test_pub", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
 
 		_, err = svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
 		assert.ErrorIs(t, err, ErrMoonPaySecretKeyMissing)
+		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
 	t.Run("missing publishable key", func(t *testing.T) {
@@ -301,12 +395,12 @@ func TestOnRampService_CreateIntent_WidgetMode_InvalidKeys(t *testing.T) {
 		require.NoError(t, err)
 		defer sqlDB.Close()
 		q := db.New(sqlDB)
-		svc := NewOnRampService(q, "", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
-		expectMemoDoesNotExist(mock)
-		expectInsertOnRampIntent(mock)
+		svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
+			"", "sk_test_secret", "", onRampIntegrationModeWidget, "", "GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
 
 		_, err = svc.CreateIntent(context.Background(), "user-1", "1.2.3.4", testContractAddress(t), "25", "USD")
 		assert.ErrorIs(t, err, ErrMoonPayPublishableKeyMissing)
+		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }
 

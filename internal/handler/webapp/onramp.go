@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
 	"github.com/latch/backend/internal/middleware"
+	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
@@ -293,6 +294,14 @@ func onRampErrorResponse(c *gin.Context, err error) {
 		// offering Transak rather than to retry with different input.
 		slog.Error("transak provider unavailable", "err", err)
 		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrInternal, err.Error())
+	case errors.Is(err, service.ErrRelayerUnavailable),
+		errors.Is(err, service.ErrRelayerNotConfigured):
+		// latch-relayer mints the memo a deposit routes on, so without it there
+		// is no session to hand out. Fail closed: a caller who retries loses a
+		// few seconds, whereas a session carrying an unregistered memo loses
+		// them their deposit to the recovery address.
+		slog.Error("on-ramp relayer unavailable", "err", err)
+		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrInternal, "on-ramp is temporarily unavailable, please try again")
 	case errors.Is(err, webapp.ErrMoonPaySecretKeyMissing),
 		errors.Is(err, webapp.ErrMoonPaySecretKeyIsPublishable),
 		errors.Is(err, webapp.ErrMoonPaySecretKeyFormat),

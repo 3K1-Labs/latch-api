@@ -121,8 +121,25 @@ func main() {
 	webappSignPayloadSvc := webapp.NewSignPayloadService(queries)
 	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.WebAppCounterContractAddress)
 	webappBackupPasskeySvc := webapp.NewBackupPasskeyService(queries)
+	// latch-relayer is the on-ramp's sole memo allocator, and a relayer is bound
+	// to one Stellar network watching one pool address on it. Pick the
+	// deployment that watches this pool, exactly as AccountService.relayerFor
+	// does: the pool keypair exists on both networks, so serving a mainnet pool
+	// from the testnet relayer would hand out a pool address nothing is
+	// watching and strand every deposit sent to it.
+	//
+	// Its own instance rather than relayerSvc/relayerMainnetSvc: the on-ramp
+	// calls a provider after the relayer and both have to fit inside the global
+	// 30s request timeout, so it runs on the tighter
+	// WebAppOnRampRelayerTimeout budget.
+	onRampRelayerURL, onRampRelayerAPIKey := cfg.RelayerURL, cfg.RelayerAPIKey
+	if strings.EqualFold(cfg.WebAppOnRampPoolNetwork, "mainnet") {
+		onRampRelayerURL, onRampRelayerAPIKey = cfg.RelayerURLMainnet, cfg.RelayerAPIKeyMainnet
+	}
+	onRampRelayerSvc := service.NewRelayerService(onRampRelayerURL, onRampRelayerAPIKey, cfg.WebAppOnRampRelayerTimeout)
 	webappOnRampSvc := webapp.NewOnRampService(
-		queries, cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
+		queries, onRampRelayerSvc, cfg.WebAppOnRampIntentTTL,
+		cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
 		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
 		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
 		webapp.TransakConfig{

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,6 +84,9 @@ func TestOnRampSession_ServiceErrors(t *testing.T) {
 		{"invalid fiat amount", webapp.ErrOnRampInvalidFiatAmount, http.StatusBadRequest},
 		{"moonpay config error", webapp.ErrMoonPaySecretKeyMissing, http.StatusInternalServerError},
 		{"moonpay api error", &webapp.MoonPayAPIError{StatusCode: http.StatusBadGateway, Message: "boom"}, http.StatusBadGateway},
+		// Fail closed rather than hand out a session whose memo no relayer knows.
+		{"relayer unavailable", service.ErrRelayerUnavailable, http.StatusServiceUnavailable},
+		{"relayer not configured", service.ErrRelayerNotConfigured, http.StatusServiceUnavailable},
 		{"unexpected error", assertErr, http.StatusInternalServerError},
 	}
 	for _, tc := range tests {
