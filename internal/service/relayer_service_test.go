@@ -79,6 +79,27 @@ func TestRelayerService_CreateIntent_NonOKStatus_NotUnavailable(t *testing.T) {
 // The relayer sleeps when idle; the first call after a wake can outlast the
 // client timeout. That is transient, so it must surface as ErrRelayerUnavailable
 // (retryable 503) rather than an opaque internal error.
+// A relayer that answers headers and then stalls mid-body. Found by a 50-way
+// concurrent load run, where two sessions surfaced as opaque 500s instead of
+// the retryable 503 the fail-closed path is supposed to give: the decode failed
+// with a context error that carried no ErrRelayerUnavailable.
+func TestRelayerService_CreateIntent_StallsMidBody(t *testing.T) {
+	stalling := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"intent_id":"abc","memo_id":"1`)) // truncated on purpose
+		w.(http.Flusher).Flush()
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer stalling.Close()
+
+	svc := NewRelayerService(stalling.URL, "key", 40*time.Millisecond)
+	_, err := svc.CreateIntent(context.Background(), CreateIntentInput{CAddress: "CABC"})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRelayerUnavailable,
+		"a stalled read is an availability failure the caller should retry, not an internal fault")
+}
+
 func TestRelayerService_CreateIntent_Unavailable(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)

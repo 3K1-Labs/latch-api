@@ -171,6 +171,22 @@ func (s *RelayerService) send(ctx context.Context, req *http.Request) (*http.Res
 	}
 }
 
+// relayerReadErr classifies a failure to read the relayer's response body.
+//
+// The relayer answering headers and then stalling mid-body is a real failure
+// mode under load: our own call budget expires part-way through the read and
+// the decode fails with a context error. That is an availability problem the
+// caller should retry, not an internal fault, so it has to carry
+// ErrRelayerUnavailable — otherwise callers surface it as a 500 and the
+// fail-closed path reads as a bug in this service. Anything else is a genuine
+// protocol error and stays as-is.
+func relayerReadErr(what string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %s: %w", ErrRelayerUnavailable, what, err)
+	}
+	return fmt.Errorf("%s: %w", what, err)
+}
+
 // CreateIntentInput are the parameters for a new funding intent. ExpectedAmt,
 // ExternalID, and ExpiresIn are optional passthroughs to latch-relayer.
 type CreateIntentInput struct {
@@ -232,7 +248,7 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 
 	var out createIntentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return Intent{}, fmt.Errorf("decode create intent response: %w", err)
+		return Intent{}, relayerReadErr("decode create intent response", err)
 	}
 
 	expiresAt, err := time.Parse(time.RFC3339, out.ExpiresAt)
@@ -304,7 +320,7 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 
 	var out depositStatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return DepositStatus{}, fmt.Errorf("decode deposit status response: %w", err)
+		return DepositStatus{}, relayerReadErr("decode deposit status response", err)
 	}
 
 	expiresAt, err := time.Parse(time.RFC3339, out.ExpiresAt)
