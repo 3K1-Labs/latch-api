@@ -56,6 +56,13 @@ type Config struct {
 	WalletAuthSorobanURLMainnet string
 	WebAuthnAllowedOrigins      []string
 
+	// BundlerAllowedContracts bounds which contracts the mobile relay will
+	// spend bundler fees invoking (see service.BundlerPolicy). Empty allows
+	// everything — enabling it blind would break sends for any asset whose SAC
+	// is not listed, so it is opt-in per deployment.
+	BundlerAllowedContracts        []string
+	BundlerAllowedContractsMainnet []string
+
 	// Web app + Chrome extension backend (ported from a separate Next.js
 	// service). WebAppWebAuthnExtensionIDs is distinct from
 	// WebAuthnAllowedOrigins above: that field verifies an already-created
@@ -237,6 +244,9 @@ func Load() (*Config, error) {
 		WalletAuthSorobanURL:        getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
 		WalletAuthSorobanURLMainnet: getEnv("WALLET_AUTH_SOROBAN_URL_MAINNET", getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com")),
 		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance")),
+
+		BundlerAllowedContracts:        splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS", "")),
+		BundlerAllowedContractsMainnet: splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS_MAINNET", "")),
 
 		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
 		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),

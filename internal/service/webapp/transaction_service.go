@@ -340,6 +340,11 @@ type SubmitWebAuthnInput struct {
 type SubmitResult struct {
 	Hash   string
 	Status string // "SUCCESS" | "PENDING"
+	// ResultMetaXdr is the settled transaction's meta, when polling saw it
+	// settle. Callers that need a contract's return value — device pairing
+	// reads back the new signer and context-rule ids — parse it from here
+	// rather than re-querying the ledger. Empty on a PENDING result.
+	ResultMetaXdr string
 }
 
 // SubmitWebAuthn attaches a passkey assertion to the smart-account auth
@@ -973,4 +978,12 @@ func buildEd25519AuthPayload(verifierAddress string, publicKey, rawSignature []b
 		scMapEntry("context_rule_ids", scVec(ruleIDVals...)),
 		scMapEntry("signers", signersMap),
 	), nil
+}
+
+// BundlerAddress is the G-address of the account that sources and pays for
+// bundler-signed transactions. Public by nature: clients need it to build and
+// simulate an invocation before the server re-sources the final envelope, and
+// exposing it means they no longer need the secret to derive it.
+func (s *TransactionService) BundlerAddress() string {
+	return s.bundler.PublicKey()
 }
