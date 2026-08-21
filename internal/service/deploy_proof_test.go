@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -194,4 +195,78 @@ func TestDeployProof_ChallengeValidatesKeyRef(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+// The three nonce failures are one message to a client on purpose, but must be
+// distinguishable in a log — otherwise a support question ("why was my deploy
+// rejected?") has no answer short of reconstructing the request by hand.
+func TestDeployProof_NonceFailuresAreDistinguishable(t *testing.T) {
+	s := newDeployProofService(t)
+	ctx := context.Background()
+	publicKeyHex, priv := newEd25519Key(t)
+
+	sign := func(nonce string) []byte {
+		b, err := hex.DecodeString(nonce)
+		require.NoError(t, err)
+		return ed25519.Sign(priv, b)
+	}
+
+	t.Run("never issued", func(t *testing.T) {
+		err := s.Verify(ctx, DeployProofInput{
+			KeyRef: publicKeyHex, KeyType: "ed25519", Network: "testnet",
+			NonceHex: strings.Repeat("ab", 32), Signature: []byte("x"),
+		})
+		require.ErrorIs(t, err, ErrNonceUnknown)
+		assert.ErrorIs(t, err, ErrNonceInvalid, "must still satisfy the sentinel callers check")
+	})
+
+	t.Run("already used", func(t *testing.T) {
+		nonce, _, err := s.Challenge(ctx, publicKeyHex, "ed25519", "testnet")
+		require.NoError(t, err)
+		in := DeployProofInput{
+			KeyRef: publicKeyHex, KeyType: "ed25519", Network: "testnet",
+			NonceHex: nonce, Signature: sign(nonce),
+		}
+		require.NoError(t, s.Verify(ctx, in))
+		require.ErrorIs(t, s.Verify(ctx, in), ErrNonceUnknown)
+	})
+
+	// The case that actually bit us: a challenge taken on one network and
+	// replayed against the other. The nonce is looked up by its hex alone and
+	// the binding is the stored value, so this is a mismatch rather than a
+	// missing key — which is the more useful thing to see in a log.
+	t.Run("wrong network", func(t *testing.T) {
+		nonce, _, err := s.Challenge(ctx, publicKeyHex, "ed25519", "mainnet")
+		require.NoError(t, err)
+		err = s.Verify(ctx, DeployProofInput{
+			KeyRef: publicKeyHex, KeyType: "ed25519", Network: "testnet",
+			NonceHex: nonce, Signature: sign(nonce),
+		})
+		require.ErrorIs(t, err, ErrNonceMismatch)
+		assert.ErrorIs(t, err, ErrNonceInvalid)
+		assert.NotErrorIs(t, err, ErrNonceUnknown, "must not look like an expired nonce")
+	})
+
+	t.Run("wrong key", func(t *testing.T) {
+		nonce, _, err := s.Challenge(ctx, publicKeyHex, "ed25519", "testnet")
+		require.NoError(t, err)
+		otherKeyHex, _ := newEd25519Key(t)
+		err = s.Verify(ctx, DeployProofInput{
+			KeyRef: otherKeyHex, KeyType: "ed25519", Network: "testnet",
+			NonceHex: nonce, Signature: sign(nonce),
+		})
+		require.ErrorIs(t, err, ErrNonceMismatch)
+	})
+}
+
+// A passkey deploy raises a biometric prompt between challenge and submit, so
+// its nonce must outlive a sign-in nonce.
+func TestDeployProof_ChallengeUsesTheLongerTTL(t *testing.T) {
+	s := newDeployProofService(t)
+	publicKeyHex, _ := newEd25519Key(t)
+
+	_, ttl, err := s.Challenge(context.Background(), publicKeyHex, "ed25519", "testnet")
+	require.NoError(t, err)
+	assert.Equal(t, DeployNonceTTL, ttl)
+	assert.Greater(t, DeployNonceTTL, 60*time.Second, "must exceed the sign-in lifetime")
 }

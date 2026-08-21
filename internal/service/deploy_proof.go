@@ -68,7 +68,9 @@ func (s *DeployProofService) Challenge(ctx context.Context, keyRef, keyType, net
 	if err := validateKeyRef(keyRef, keyType); err != nil {
 		return "", 0, err
 	}
-	return s.nonce.Issue(ctx, keyRef, keyType, deployNonceScope(network))
+	// DeployNonceTTL rather than the sign-in lifetime: a passkey deploy raises a
+	// biometric prompt between this call and the submit.
+	return s.nonce.IssueWithTTL(ctx, keyRef, keyType, deployNonceScope(network), DeployNonceTTL)
 }
 
 // Verify consumes the nonce and checks the signature against the caller's own
