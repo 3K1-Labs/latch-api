@@ -4,8 +4,10 @@ FROM golang:1.25-alpine
 
 RUN apk --no-cache add ca-certificates tzdata git curl
 
-# Install air (live-reload)
-RUN go install github.com/air-verse/air@latest
+# Install air (live-reload). Pinned: air >= v1.67.1 requires Go >= 1.26, which
+# this base image (and go.mod's `go 1.25.0`) predates. Bump alongside the base
+# image, not on its own.
+RUN go install github.com/air-verse/air@v1.67.0
 
 WORKDIR /app
 

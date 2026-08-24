@@ -195,12 +195,19 @@ A background sweep (`internal/service/cleanup_service.go`, scheduled in `cmd/ser
 
 ### latch-relayer integration
 
-`AccountService` registers a smart account with [`latch-relayer`](../latch-relayer) (`POST {RELAYER_URL}/register`) for pooled-deposit memo routing, storing the returned `memo_id`/`pool_address` on `smart_account_registrations` (one row per smart account address, many per user — a user can own multiple BIP-44 seed indices, passkey accounts, and shared/multisig wallets, each needing its own registration). Registration is triggered by `POST /v1/accounts/register` directly, and implicitly by `POST`/`PUT /v1/backup` for the address it's given. Best-effort: a failure just logs, and a background sweep (`internal/service/memo_registration_sweep.go`) retries later — relayer's `/register` is idempotent, so retrying is always safe. `GET /v1/accounts` lists every registered address and its `memo_id`/`pool_address` once registration lands; `GET /v1/backup` no longer carries memo/pool fields. See `docs/relayer-memo-integration-guide.md` for the full client-facing contract.
+latch-relayer exposes four endpoints: `POST /intents`, `PATCH /intents/{memo_id}`, `GET /deposit/status/{memo_id}`, and `GET /health` (plus `GET /metrics`). There is no `/register` endpoint.
+
+**Mobile funding path.** `AccountService` mints a funding intent via `RelayerService.CreateIntent` (`POST {RELAYER_URL}/intents`), which returns the `memo_id` and `pool_address` a deposit must carry. `smart_account_registrations` records which user owns which smart account address — ownership only; it does not store memo or pool values. `POST /intents` is deliberately **not** idempotent: every call mints a new, TTL-bound intent.
+
+Two relayer deployments exist, selected by network (`relayerFor` in `account_service.go`). Mainnet funding returns `ErrNetworkUnsupported` unless `RELAYER_URL_MAINNET` is set — never falling back to the testnet relayer, whose pool keypair also exists on mainnet and would hand back an address nothing is watching.
+
+**Web app on-ramp path.** `OnRampService` calls the same `POST /intents` and adopts the returned `memo_id` and `pool_address` rather than minting its own. The relayer is the sole allocator of deposit references: a reference it did not issue is one it cannot match, and the deposit is swept to the recovery address instead of credited. Registration is synchronous and fails closed with a 503 — there is no retry sweep.
 
 - `RELAYER_URL` — base URL of `latch-relayer`; empty disables registration entirely, logged not fatal (default unset)
 - `RELAYER_API_KEY` — shared secret sent as `Authorization: Bearer <key>` on every relayer call; must match the relayer deployment's own `RELAYER_API_KEY` (≥32 chars, which the relayer enforces at startup). Unset means every call comes back 401, surfaced as a 503 (default unset)
 - `RELAYER_TIMEOUT_SEC` — HTTP timeout for relayer calls (default `25`; must clear the relayer's ~14s cold start and stay under the global 30s request timeout)
-- `MEMO_SWEEP_ENABLED` — run the retry sweep (default `true`); the sweep only actually starts if `RELAYER_URL` is also set
-- `MEMO_SWEEP_INTERVAL_MIN` — minutes between sweeps (default `15`)
+- `RELAYER_URL_MAINNET` / `RELAYER_API_KEY_MAINNET` — a second relayer deployment bound to mainnet. Empty `RELAYER_URL_MAINNET` leaves mainnet funding unsupported; the API key falls back to `RELAYER_API_KEY` when unset
+- `ONRAMP_RELAYER_TIMEOUT_SEC` — tighter budget for the relayer call made while building an on-ramp session (default `8`). Shorter than `RELAYER_TIMEOUT_SEC` because the on-ramp calls a provider afterwards and both must fit the global 30s request timeout
+- `ONRAMP_INTENT_TTL_SEC` — how long the relayer keeps an on-ramp intent alive (default `604800`, 7 days). Must cover the slowest settlement path: the relayer's own default is one hour, and its forwarder sweeps late deposits to recovery, so an hour would strand every bank-funded purchase
 
 WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.

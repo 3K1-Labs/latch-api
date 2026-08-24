@@ -56,6 +56,13 @@ type Config struct {
 	WalletAuthSorobanURLMainnet string
 	WebAuthnAllowedOrigins      []string
 
+	// BundlerAllowedContracts bounds which contracts the mobile relay will
+	// spend bundler fees invoking (see service.BundlerPolicy). Empty allows
+	// everything — enabling it blind would break sends for any asset whose SAC
+	// is not listed, so it is opt-in per deployment.
+	BundlerAllowedContracts        []string
+	BundlerAllowedContractsMainnet []string
+
 	// Web app + Chrome extension backend (ported from a separate Next.js
 	// service). WebAppWebAuthnExtensionIDs is distinct from
 	// WebAuthnAllowedOrigins above: that field verifies an already-created
@@ -147,6 +154,30 @@ type Config struct {
 	// deliver to mainnet; defaults to testnet so the gate is closed by default.
 	WebAppOnRampPoolNetwork string // "testnet" | "mainnet"
 
+	// WebAppOnRampIntentTTL is how long the relayer keeps the on-ramp's funding
+	// intent alive, sent as `expires_in` on POST /intents. It must cover the
+	// slowest settlement path the providers offer, not the fastest: latch-relayer
+	// defaults to one hour, and its forwarder sweeps any deposit arriving after
+	// expiry to the recovery address instead of crediting it. Card purchases
+	// settle in minutes, but ACH and SEPA take one to three business days, so an
+	// hour would strand every bank-funded purchase. Defaults to 7 days.
+	WebAppOnRampIntentTTL time.Duration
+
+	// WebAppOnRampRelayerTimeout bounds the relayer call made while building an
+	// on-ramp session. It is deliberately shorter than RelayerTimeout: that
+	// budget (25s) is sized for /v1/accounts/deposit-intent, which calls the
+	// relayer and nothing else, whereas the on-ramp calls a provider afterwards
+	// and the global 30s request timeout has to cover both. The provider
+	// clients allow 10s (Transak) and 15s (MoonPay) per call, so 8s is the
+	// relayer's share of what is left.
+	//
+	// A relayer cold start (~14s on a sleeping free-tier instance) exceeds this
+	// and the session fails closed with a 503. That is the intended trade: a
+	// caller retries, rather than receiving a widget URL carrying a memo no
+	// relayer has registered. See docs/mainnet-onramp-runbook.md on moving off
+	// the free tier before real traffic.
+	WebAppOnRampRelayerTimeout time.Duration
+
 	// Retention / GC: a background sweep bounds growth of the multisig tables.
 	CleanupEnabled            bool
 	CleanupInterval           time.Duration // between sweeps
@@ -214,6 +245,9 @@ func Load() (*Config, error) {
 		WalletAuthSorobanURLMainnet: getEnv("WALLET_AUTH_SOROBAN_URL_MAINNET", getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com")),
 		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance")),
 
+		BundlerAllowedContracts:        splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS", "")),
+		BundlerAllowedContractsMainnet: splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS_MAINNET", "")),
+
 		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
 		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),
 
@@ -259,6 +293,8 @@ func Load() (*Config, error) {
 		WebAppTransakReferrerDomain: getEnv("TRANSAK_REFERRER_DOMAIN", "latch.finance"),
 		WebAppTransakAPIBase:        getEnv("TRANSAK_API_BASE", ""),
 		WebAppOnRampPoolNetwork:     getEnv("POOL_NETWORK", "testnet"),
+		WebAppOnRampIntentTTL:       time.Duration(getEnvInt("ONRAMP_INTENT_TTL_SEC", 7*24*60*60)) * time.Second,
+		WebAppOnRampRelayerTimeout:  time.Duration(getEnvInt("ONRAMP_RELAYER_TIMEOUT_SEC", 8)) * time.Second,
 
 		CleanupEnabled:            getEnvBool("CLEANUP_ENABLED", true),
 		CleanupInterval:           time.Duration(getEnvInt("CLEANUP_INTERVAL_MIN", 60)) * time.Minute,

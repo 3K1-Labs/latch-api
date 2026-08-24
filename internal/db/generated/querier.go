@@ -92,7 +92,6 @@ type Querier interface {
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
-	OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error)
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
@@ -103,6 +102,10 @@ type Querier interface {
 	UpdateMultisigDraftThreshold(ctx context.Context, arg UpdateMultisigDraftThresholdParams) error
 	UpdateMultisigProposalExecuted(ctx context.Context, arg UpdateMultisigProposalExecutedParams) error
 	UpdateMultisigProposalRebuild(ctx context.Context, arg UpdateMultisigProposalRebuildParams) error
+	// Partial update in a single statement. Reading the row first and merging in Go
+	// lost concurrent updates: two callers could read the same row and each write
+	// back its own field, discarding the other's. COALESCE keeps the existing value
+	// whenever the caller passed NULL, so both fields survive either order.
 	UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error)
 	UpdateSmartAccountUserIDByCredentialID(ctx context.Context, arg UpdateSmartAccountUserIDByCredentialIDParams) error
 	UpdateWebauthnCredentialSignCount(ctx context.Context, arg UpdateWebauthnCredentialSignCountParams) error

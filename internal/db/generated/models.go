@@ -221,6 +221,9 @@ type WebappOnRampIntent struct {
 	FiatCode             string         `json:"fiat_code"`
 	CreatedAt            time.Time      `json:"created_at"`
 	UpdatedAt            time.Time      `json:"updated_at"`
+	RelayerIntentID      sql.NullString `json:"relayer_intent_id"`
+	PoolAddress          sql.NullString `json:"pool_address"`
+	ExpiresAt            sql.NullTime   `json:"expires_at"`
 }
 
 type WebappSession struct {

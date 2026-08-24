@@ -121,8 +121,25 @@ func main() {
 	webappSignPayloadSvc := webapp.NewSignPayloadService(queries)
 	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.WebAppCounterContractAddress)
 	webappBackupPasskeySvc := webapp.NewBackupPasskeyService(queries)
+	// latch-relayer is the on-ramp's sole memo allocator, and a relayer is bound
+	// to one Stellar network watching one pool address on it. Pick the
+	// deployment that watches this pool, exactly as AccountService.relayerFor
+	// does: the pool keypair exists on both networks, so serving a mainnet pool
+	// from the testnet relayer would hand out a pool address nothing is
+	// watching and strand every deposit sent to it.
+	//
+	// Its own instance rather than relayerSvc/relayerMainnetSvc: the on-ramp
+	// calls a provider after the relayer and both have to fit inside the global
+	// 30s request timeout, so it runs on the tighter
+	// WebAppOnRampRelayerTimeout budget.
+	onRampRelayerURL, onRampRelayerAPIKey := cfg.RelayerURL, cfg.RelayerAPIKey
+	if strings.EqualFold(cfg.WebAppOnRampPoolNetwork, "mainnet") {
+		onRampRelayerURL, onRampRelayerAPIKey = cfg.RelayerURLMainnet, cfg.RelayerAPIKeyMainnet
+	}
+	onRampRelayerSvc := service.NewRelayerService(onRampRelayerURL, onRampRelayerAPIKey, cfg.WebAppOnRampRelayerTimeout)
 	webappOnRampSvc := webapp.NewOnRampService(
-		queries, cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
+		queries, onRampRelayerSvc, cfg.WebAppOnRampIntentTTL,
+		cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
 		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
 		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
 		webapp.TransakConfig{
@@ -215,6 +232,30 @@ func main() {
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
 	backupHandler := handler.NewBackupHandler(backupSvc, accountSvc, auditSvc)
 	accountHandler := handler.NewAccountHandler(accountSvc, auditSvc)
+	// Mobile's smart-account deploy routes. Shares the webapp smart-account
+	// services (which own the bundler keypair) but responds in the /v1
+	// envelope — internal/httpx and internal/webappx must stay independent.
+	// Mobile's bundler-paid transaction relay. Shares the webapp
+	// TransactionService submit pipeline, which rebuilds the caller's
+	// invocation with the bundler as source rather than signing what it sent.
+	bundlerPolicy := service.NewBundlerPolicy(cfg.BundlerAllowedContracts, cfg.BundlerAllowedContractsMainnet)
+	for _, n := range []string{"testnet", "mainnet"} {
+		if !bundlerPolicy.Configured(n) {
+			slog.Warn("BUNDLER_ALLOWED_CONTRACTS not set — the mobile relay will pay fees for any contract on this network", "network", n)
+		}
+	}
+	transactionRelayHandler := handler.NewTransactionRelayHandler(
+		handler.TransactionRelayServiceOrNil(webappTransactionSvc),
+		handler.TransactionRelayServiceOrNil(webappTransactionSvcMainnet),
+		bundlerPolicy,
+		auditSvc,
+	)
+	smartAccountHandler := handler.NewSmartAccountHandler(
+		handler.SmartAccountDeployServiceOrNil(webappSmartAccountSvc),
+		handler.SmartAccountDeployServiceOrNil(webappSmartAccountSvcMainnet),
+		service.NewDeployProofService(walletNonceSvc, cfg.WebAuthnAllowedOrigins),
+		auditSvc,
+	)
 	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
 	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
 	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
@@ -231,6 +272,17 @@ func main() {
 	generalLimiter := middleware.NewIPRateLimiter(redisClient, 300, time.Minute)
 	authedLimiter := middleware.NewSubjectRateLimiter(redisClient, 100, time.Minute)
 	fundingIntentLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "funding-intent", 5, time.Minute)
+	// Deploy carries no session, so these key by IP. Each deploy spends bundler
+	// XLM and is idempotent only per key — a caller with fresh keys can spend
+	// repeatedly — so the IP budget is the spend control and stays tight.
+	// Issuing a challenge spends nothing, so it gets its own looser budget;
+	// sharing one would let a NAT'd office exhaust deploys just by opening the
+	// onboarding screen.
+	smartAccountDeployLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "smart-account-deploy", 10, time.Minute)
+	smartAccountChallengeLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "smart-account-challenge", 60, time.Minute)
+	// Each relayed transaction spends bundler XLM on resource fees. Authenticated
+	// and per-subject, so this bounds how much one wallet can burn, not one IP.
+	transactionRelayLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "transaction-relay", 30, time.Minute)
 	otpLimiter := middleware.NewEmailRateLimiter(redisClient, 3, time.Hour)
 	recoveryLimiter := middleware.NewEmailRateLimiter(redisClient, 3, 24*time.Hour)
 
@@ -362,6 +414,43 @@ func main() {
 			accounts.GET("", accountHandler.List)
 			accounts.POST("/deposit-intent", fundingIntentLimiter, accountHandler.CreateDepositIntent)
 			accounts.GET("/deposit/status/:memo_id", accountHandler.DepositStatus)
+		}
+
+		// Bundler-paid transaction submission for mobile: sends, swaps,
+		// multisig sends and admin operations. Unlike deployment this runs
+		// under RequireAuth — by this point the caller has a deployed smart
+		// account, so a wallet-scope session exists.
+		if webappTransactionSvc != nil || webappTransactionSvcMainnet != nil {
+			transaction := v1.Group("/transaction")
+			transaction.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+			{
+				transaction.GET("/bundler", transactionRelayHandler.Bundler)
+				transaction.POST("/submit", transactionRelayLimiter, transactionRelayHandler.Submit)
+			}
+		} else {
+			slog.Warn("no bundler configured — mobile /v1/transaction/submit disabled")
+		}
+
+		// Bundler-paid smart account deployment for mobile. Registered when
+		// either network has a bundler configured; the handler returns a 400
+		// naming the unconfigured network rather than falling back to the other
+		// one. Without this, latch-mobile had to carry the bundler secret in
+		// its own bundle to deploy.
+		if webappSmartAccountSvc != nil || webappSmartAccountSvcMainnet != nil {
+			smartAccount := v1.Group("/smart-account")
+			// No RequireAuth: a passkey account has no on-chain signer to
+			// verify a session against until it is deployed. Each route below
+			// instead proves possession of the key being deployed, over a
+			// single-use nonce from /challenge.
+			{
+				smartAccount.POST("/challenge", smartAccountChallengeLimiter, smartAccountHandler.DeployChallenge)
+				smartAccount.POST("/ed25519", smartAccountDeployLimiter, smartAccountHandler.DeployEd25519)
+				smartAccount.POST("/webauthn", smartAccountDeployLimiter, smartAccountHandler.DeployWebauthn)
+				smartAccount.POST("/g-address", smartAccountDeployLimiter, smartAccountHandler.DeployGAddress)
+				smartAccount.POST("/multisig", smartAccountDeployLimiter, smartAccountHandler.DeployMultisig)
+			}
+		} else {
+			slog.Warn("no bundler configured — mobile /v1/smart-account deploy routes disabled")
 		}
 	}
 
@@ -508,10 +597,14 @@ func main() {
 	webappGroup.POST("/sign-payload", webappSignPayloadHandler.Create)
 	webappGroup.GET("/sign-payload/:payloadRef", webappSignPayloadHandler.Get)
 
-	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, cfg)
+	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, webappAuditSvc, cfg)
+	// The on-ramp moves customer money, so session creation gets its own budget.
+	// The global 300/min per-IP limiter is a DoS backstop, not a control for a
+	// money path — and being per-IP it pools everyone behind one NAT together.
+	onRampSessionLimiter := middleware.NewSessionActionRateLimiter(redisClient, "onramp_session", 20, time.Hour)
 	onRampGroup := webappGroup.Group("/on-ramp")
 	{
-		onRampGroup.POST("/session", webappOnRampHandler.Session)
+		onRampGroup.POST("/session", onRampSessionLimiter, webappOnRampHandler.Session)
 		onRampGroup.GET("/intent/:id", webappOnRampHandler.GetIntent)
 		onRampGroup.PATCH("/intent/:id", webappOnRampHandler.UpdateIntent)
 		onRampGroup.GET("/pool", webappOnRampHandler.Pool)

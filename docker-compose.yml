@@ -33,6 +33,25 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot: apply pending migrations, then exit. The app waits for this to
+  # succeed, so a fresh `make docker-up` comes up against a migrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["go", "run", "./cmd/migrate", "up"]
+    restart: "no"
+    volumes:
+      - .:/app
+      - go_mod_cache:/root/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # Development server with air live-reload.
   # Mount the full source tree so air can watch and rebuild on the fly.
   app:
@@ -41,22 +60,28 @@ services:
       dockerfile: Dockerfile.dev
     restart: unless-stopped
     volumes:
-      - .:/app                          # source code (watched by air)
-      - go_mod_cache:/root/go/pkg/mod   # cache modules between restarts
+      - .:/app                            # source code (watched by air)
+      - go_mod_cache:/root/go/pkg/mod     # cache modules between restarts
+      - go_build_cache:/root/.cache/go-build  # cache compiled packages (air rebuilds often)
     ports:
-      - "${PORT}:${PORT}"
+      - "${PORT}:8080"
     env_file: .env
     environment:
-      # Override hosts to use Docker service names instead of localhost
+      # Override hosts to use Docker service names instead of localhost.
+      # In-network ports are fixed (5432/6379/8080) regardless of which host
+      # ports .env publishes them on.
       DB_HOST: postgres
       REDIS_HOST: redis
+      PORT: "8080"
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?sslmode=disable
-      REDIS_URL: redis://redis:${REDIS_PORT}
+      REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   prometheus:
     image: prom/prometheus:latest
@@ -86,4 +111,5 @@ volumes:
   postgres_data:
   redis_data:
   go_mod_cache:
+  go_build_cache:
   grafana_data:

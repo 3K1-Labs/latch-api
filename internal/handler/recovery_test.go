@@ -61,7 +61,7 @@ func TestInitiate_UserNotFound_StillOK(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	data := resp["data"].(map[string]any)
-	assert.Contains(t, data["message"].(string), "if an account exists")
+	assert.Contains(t, data["message"].(string), "If an account exists")
 }
 
 func TestInitiate_UserFound_SendsOTP(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 )
 
 const getOnRampIntentByID = `-- name: GetOnRampIntentByID :one
-SELECT id, memo_id, destination_c_address, external_customer_id, moonpay_transaction_id, status, fiat_amount, fiat_code, created_at, updated_at
+SELECT id, memo_id, destination_c_address, external_customer_id, moonpay_transaction_id, status, fiat_amount, fiat_code, created_at, updated_at, relayer_intent_id, pool_address, expires_at
 FROM webapp.on_ramp_intents
 WHERE id = $1
 `
@@ -32,24 +32,30 @@ func (q *Queries) GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (Webapp
 		&i.FiatCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RelayerIntentID,
+		&i.PoolAddress,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
 
 const insertOnRampIntent = `-- name: InsertOnRampIntent :one
-INSERT INTO webapp.on_ramp_intents (id, memo_id, destination_c_address, external_customer_id, status, fiat_amount, fiat_code, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+INSERT INTO webapp.on_ramp_intents (id, memo_id, destination_c_address, external_customer_id, status, fiat_amount, fiat_code, relayer_intent_id, pool_address, expires_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
 RETURNING id
 `
 
 type InsertOnRampIntentParams struct {
-	ID                  uuid.UUID `json:"id"`
-	MemoID              string    `json:"memo_id"`
-	DestinationCAddress string    `json:"destination_c_address"`
-	ExternalCustomerID  string    `json:"external_customer_id"`
-	Status              string    `json:"status"`
-	FiatAmount          string    `json:"fiat_amount"`
-	FiatCode            string    `json:"fiat_code"`
+	ID                  uuid.UUID      `json:"id"`
+	MemoID              string         `json:"memo_id"`
+	DestinationCAddress string         `json:"destination_c_address"`
+	ExternalCustomerID  string         `json:"external_customer_id"`
+	Status              string         `json:"status"`
+	FiatAmount          string         `json:"fiat_amount"`
+	FiatCode            string         `json:"fiat_code"`
+	RelayerIntentID     sql.NullString `json:"relayer_intent_id"`
+	PoolAddress         sql.NullString `json:"pool_address"`
+	ExpiresAt           sql.NullTime   `json:"expires_at"`
 }
 
 func (q *Queries) InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntentParams) (uuid.UUID, error) {
@@ -61,38 +67,34 @@ func (q *Queries) InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntent
 		arg.Status,
 		arg.FiatAmount,
 		arg.FiatCode,
+		arg.RelayerIntentID,
+		arg.PoolAddress,
+		arg.ExpiresAt,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
 }
 
-const onRampMemoIDExists = `-- name: OnRampMemoIDExists :one
-SELECT EXISTS(SELECT 1 FROM webapp.on_ramp_intents WHERE memo_id = $1)
-`
-
-func (q *Queries) OnRampMemoIDExists(ctx context.Context, memoID string) (bool, error) {
-	row := q.db.QueryRowContext(ctx, onRampMemoIDExists, memoID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const updateOnRampIntent = `-- name: UpdateOnRampIntent :one
 UPDATE webapp.on_ramp_intents
-SET status = $2,
-    moonpay_transaction_id = $3,
+SET status = COALESCE($2, status),
+    moonpay_transaction_id = COALESCE($3, moonpay_transaction_id),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, memo_id, destination_c_address, external_customer_id, moonpay_transaction_id, status, fiat_amount, fiat_code, created_at, updated_at
+RETURNING id, memo_id, destination_c_address, external_customer_id, moonpay_transaction_id, status, fiat_amount, fiat_code, created_at, updated_at, relayer_intent_id, pool_address, expires_at
 `
 
 type UpdateOnRampIntentParams struct {
 	ID                   uuid.UUID      `json:"id"`
-	Status               string         `json:"status"`
+	Status               sql.NullString `json:"status"`
 	MoonpayTransactionID sql.NullString `json:"moonpay_transaction_id"`
 }
 
+// Partial update in a single statement. Reading the row first and merging in Go
+// lost concurrent updates: two callers could read the same row and each write
+// back its own field, discarding the other's. COALESCE keeps the existing value
+// whenever the caller passed NULL, so both fields survive either order.
 func (q *Queries) UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error) {
 	row := q.db.QueryRowContext(ctx, updateOnRampIntent, arg.ID, arg.Status, arg.MoonpayTransactionID)
 	var i WebappOnRampIntent
@@ -107,6 +109,9 @@ func (q *Queries) UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntent
 		&i.FiatCode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RelayerIntentID,
+		&i.PoolAddress,
+		&i.ExpiresAt,
 	)
 	return i, err
 }

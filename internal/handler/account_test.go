@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,4 +390,43 @@ func TestDepositStatus_Success(t *testing.T) {
 	forwards := data["forwards"].([]any)
 	require.Len(t, forwards, 1)
 	assert.Equal(t, "hash1", forwards[0].(map[string]any)["tx_hash"])
+}
+
+// The bug this guards: expires_in, expected_amt and external_id were absent from
+// the request struct, so Go discarded them silently. Mobile was sending a
+// seven-day TTL for bank-funded deposits and getting the relayer's one-hour
+// default, which sweeps anything arriving later to recovery.
+func TestCreateDepositIntent_ForwardsIntentOptions(t *testing.T) {
+	account := &stubAccount{}
+	h := newAccountHandler(account, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	body := `{"smart_account_address":"CABC","network":"testnet",` +
+		`"expires_in":604800,"expected_amt":"25.0000000","external_id":"order-1"}`
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", strings.NewReader(body)), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, 604800, account.intentOpts.ExpiresIn, "a bank-transfer TTL must reach the relayer")
+	assert.Equal(t, "25.0000000", account.intentOpts.ExpectedAmt)
+	assert.Equal(t, "order-1", account.intentOpts.ExternalID)
+}
+
+// Omitting them stays valid — the relayer applies its own default.
+func TestCreateDepositIntent_OptionsAreOptional(t *testing.T) {
+	account := &stubAccount{}
+	h := newAccountHandler(account, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent",
+		strings.NewReader(`{"smart_account_address":"CABC"}`)), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.NotEqual(t, http.StatusBadRequest, w.Code)
+	assert.Zero(t, account.intentOpts.ExpiresIn)
 }

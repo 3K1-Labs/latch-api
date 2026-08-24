@@ -6,36 +6,48 @@ import (
 	"testing"
 	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// testAuditSvc builds an audit service over a nil query set. Audit writes are
+// deliberately non-fatal, so handler tests exercise the real call path without
+// needing a database behind it.
+func testAuditSvc() *webapp.AuditService {
+	sqlDB, _, _ := sqlmock.New()
+	return webapp.NewAuditService(db.New(sqlDB))
+}
+
 func prodCfg() *config.Config {
 	return &config.Config{AppEnv: "production"}
 }
 
-// ── devOnlyGuard ─────────────────────────────────────────────────────────────
+// ── production availability ──────────────────────────────────────────────────
 
-func TestOnRamp_DevOnlyGuard_BlocksInProduction(t *testing.T) {
-	h := NewOnRampHandler(&stubOnRamp{}, prodCfg())
+// These routes used to 403 in production behind devOnlyGuard. That guard is
+// gone, so the thing worth asserting is the opposite: they serve. The guard was
+// removed only once provider error text stopped reaching callers, the money
+// path got its own rate limiter, and state changes were audited — this test
+// fails loudly if the routes are ever quietly re-gated.
+func TestOnRamp_RoutesServeInProduction(t *testing.T) {
+	h := NewOnRampHandler(&stubOnRamp{}, testAuditSvc(), prodCfg())
 	r := gin.New()
 	r.POST("/on-ramp/session", h.Session)
-	r.GET("/on-ramp/intent/:id", h.GetIntent)
-	r.PATCH("/on-ramp/intent/:id", h.UpdateIntent)
 	r.GET("/on-ramp/pool", h.Pool)
 
 	for _, req := range []*http.Request{
-		httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{"destinationCAddress": "C"})),
-		httptest.NewRequest(http.MethodGet, "/on-ramp/intent/abc", nil),
-		httptest.NewRequest(http.MethodPatch, "/on-ramp/intent/abc", postJSONBody(map[string]any{"status": "pending"})),
+		httptest.NewRequest(http.MethodPost, "/on-ramp/session", postJSONBody(map[string]any{"destinationCAddress": "CADDR"})),
 		httptest.NewRequest(http.MethodGet, "/on-ramp/pool", nil),
 	} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusForbidden, w.Code, "%s %s", req.Method, req.URL.Path)
+		assert.NotEqual(t, http.StatusForbidden, w.Code, "%s %s", req.Method, req.URL.Path)
 	}
 }
 
@@ -47,7 +59,7 @@ func TestOnRampSession_Success(t *testing.T) {
 		PoolAddress: "GPOOL", FiatAmount: "25", FiatCode: "USD",
 		IntegrationMode: "widget", WidgetURL: "https://buy.moonpay.com?x=1",
 	}}
-	h := NewOnRampHandler(stub, testCfg())
+	h := NewOnRampHandler(stub, testAuditSvc(), testCfg())
 	r := gin.New()
 	r.POST("/on-ramp/session", h.Session)
 
@@ -62,7 +74,7 @@ func TestOnRampSession_Success(t *testing.T) {
 }
 
 func TestOnRampSession_MissingDestinationCAddress(t *testing.T) {
-	h := NewOnRampHandler(&stubOnRamp{}, testCfg())
+	h := NewOnRampHandler(&stubOnRamp{}, testAuditSvc(), testCfg())
 	r := gin.New()
 	r.POST("/on-ramp/session", h.Session)
 
@@ -83,11 +95,14 @@ func TestOnRampSession_ServiceErrors(t *testing.T) {
 		{"invalid fiat amount", webapp.ErrOnRampInvalidFiatAmount, http.StatusBadRequest},
 		{"moonpay config error", webapp.ErrMoonPaySecretKeyMissing, http.StatusInternalServerError},
 		{"moonpay api error", &webapp.MoonPayAPIError{StatusCode: http.StatusBadGateway, Message: "boom"}, http.StatusBadGateway},
+		// Fail closed rather than hand out a session whose memo no relayer knows.
+		{"relayer unavailable", service.ErrRelayerUnavailable, http.StatusServiceUnavailable},
+		{"relayer not configured", service.ErrRelayerNotConfigured, http.StatusServiceUnavailable},
 		{"unexpected error", assertErr, http.StatusInternalServerError},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewOnRampHandler(&stubOnRamp{createErr: tc.err}, testCfg())
+			h := NewOnRampHandler(&stubOnRamp{createErr: tc.err}, testAuditSvc(), testCfg())
 			r := gin.New()
 			r.POST("/on-ramp/session", h.Session)
 
@@ -110,7 +125,7 @@ func TestOnRampSession_TransakProvider(t *testing.T) {
 			IntegrationMode: "widget", Provider: "transak", CryptoCurrency: "XLM",
 			WidgetURL: "https://global-stg.transak.com?sessionId=abc",
 		}}
-		h := NewOnRampHandler(stub, testCfg())
+		h := NewOnRampHandler(stub, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.POST("/on-ramp/session", h.Session)
 
@@ -133,7 +148,7 @@ func TestOnRampSession_TransakProvider(t *testing.T) {
 		stub := &stubOnRamp{createResult: webapp.OnRampSession{
 			IntentID: "intent-1", IntegrationMode: "widget", WidgetURL: "https://buy.moonpay.com?x=1",
 		}}
-		h := NewOnRampHandler(stub, testCfg())
+		h := NewOnRampHandler(stub, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.POST("/on-ramp/session", h.Session)
 
@@ -148,7 +163,7 @@ func TestOnRampSession_TransakProvider(t *testing.T) {
 	})
 
 	t.Run("rejects unknown provider", func(t *testing.T) {
-		h := NewOnRampHandler(&stubOnRamp{}, testCfg())
+		h := NewOnRampHandler(&stubOnRamp{}, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.POST("/on-ramp/session", h.Session)
 
@@ -162,7 +177,7 @@ func TestOnRampSession_TransakProvider(t *testing.T) {
 	})
 
 	t.Run("requires cryptoCurrency for transak", func(t *testing.T) {
-		h := NewOnRampHandler(&stubOnRamp{}, testCfg())
+		h := NewOnRampHandler(&stubOnRamp{}, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.POST("/on-ramp/session", h.Session)
 
@@ -193,7 +208,7 @@ func TestOnRampSession_TransakServiceErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewOnRampHandler(&stubOnRamp{transakErr: tc.err}, testCfg())
+			h := NewOnRampHandler(&stubOnRamp{transakErr: tc.err}, testAuditSvc(), testCfg())
 			r := gin.New()
 			r.POST("/on-ramp/session", h.Session)
 
@@ -217,7 +232,7 @@ func TestOnRampGetIntent(t *testing.T) {
 			ID: "intent-1", MemoID: "123", Status: "pending", FiatAmount: "25", FiatCode: "USD",
 			CreatedAt: now, UpdatedAt: now,
 		}, getMoonpay: "completed"}
-		h := NewOnRampHandler(stub, testCfg())
+		h := NewOnRampHandler(stub, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.GET("/on-ramp/intent/:id", h.GetIntent)
 
@@ -230,7 +245,7 @@ func TestOnRampGetIntent(t *testing.T) {
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		h := NewOnRampHandler(&stubOnRamp{getErr: webapp.ErrOnRampIntentNotFound}, testCfg())
+		h := NewOnRampHandler(&stubOnRamp{getErr: webapp.ErrOnRampIntentNotFound}, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.GET("/on-ramp/intent/:id", h.GetIntent)
 
@@ -253,7 +268,7 @@ func TestOnRampUpdateIntent(t *testing.T) {
 			getIntent:    webapp.OnRampIntent{ID: "intent-1", Status: "pending", CreatedAt: now, UpdatedAt: now},
 			getMoonpay:   "pending",
 		}
-		h := NewOnRampHandler(stub, testCfg())
+		h := NewOnRampHandler(stub, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.PATCH("/on-ramp/intent/:id", h.UpdateIntent)
 
@@ -266,7 +281,7 @@ func TestOnRampUpdateIntent(t *testing.T) {
 	})
 
 	t.Run("empty moonpayTransactionId rejected", func(t *testing.T) {
-		h := NewOnRampHandler(&stubOnRamp{}, testCfg())
+		h := NewOnRampHandler(&stubOnRamp{}, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.PATCH("/on-ramp/intent/:id", h.UpdateIntent)
 
@@ -278,7 +293,7 @@ func TestOnRampUpdateIntent(t *testing.T) {
 	})
 
 	t.Run("update error propagates", func(t *testing.T) {
-		h := NewOnRampHandler(&stubOnRamp{updateErr: webapp.ErrOnRampNoUpdateFields}, testCfg())
+		h := NewOnRampHandler(&stubOnRamp{updateErr: webapp.ErrOnRampNoUpdateFields}, testAuditSvc(), testCfg())
 		r := gin.New()
 		r.PATCH("/on-ramp/intent/:id", h.UpdateIntent)
 
@@ -301,7 +316,7 @@ func TestOnRampPool_Success(t *testing.T) {
 			{TransactionID: "tx-2", CreatedAt: "t2", MemoType: "none", Successful: true},
 		},
 	}}
-	h := NewOnRampHandler(stub, testCfg())
+	h := NewOnRampHandler(stub, testAuditSvc(), testCfg())
 	r := gin.New()
 	r.GET("/on-ramp/pool", h.Pool)
 
@@ -316,7 +331,7 @@ func TestOnRampPool_Success(t *testing.T) {
 }
 
 func TestOnRampPool_ServiceError(t *testing.T) {
-	h := NewOnRampHandler(&stubOnRamp{poolErr: assertErr}, testCfg())
+	h := NewOnRampHandler(&stubOnRamp{poolErr: assertErr}, testAuditSvc(), testCfg())
 	r := gin.New()
 	r.GET("/on-ramp/pool", h.Pool)
 

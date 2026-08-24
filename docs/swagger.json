@@ -1557,7 +1557,7 @@
         },
         "/api/on-ramp/intent/{id}": {
             "get": {
-                "description": "Dev-only (403 in production). Fetches an on-ramp intent by id, including its live MoonPay transaction status if one is attached.",
+                "description": "Fetches an on-ramp intent by id, including its live MoonPay transaction status if one is attached.",
                 "produces": [
                     "application/json"
                 ],
@@ -1581,12 +1581,6 @@
                             "$ref": "#/definitions/internal_handler_webapp.onRampIntentResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -1602,7 +1596,7 @@
                 }
             },
             "patch": {
-                "description": "Dev-only (403 in production). Partial update: at least one of status or moonpayTransactionId is required. Returns the updated intent with its live MoonPay transaction status.",
+                "description": "Partial update: at least one of status or moonpayTransactionId is required. Returns the updated intent with its live MoonPay transaction status.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1644,12 +1638,6 @@
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -1667,7 +1655,7 @@
         },
         "/api/on-ramp/pool": {
             "get": {
-                "description": "Dev-only (403 in production). Returns the on-ramp pool account's XLM balance and up to 20 recent transactions, optionally filtered to a single memo.",
+                "description": "Returns the on-ramp pool account's XLM balance and up to 20 recent transactions, optionally filtered to a single memo.",
                 "produces": [
                     "application/json"
                 ],
@@ -1690,12 +1678,6 @@
                             "$ref": "#/definitions/internal_handler_webapp.onRampPoolResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -1707,7 +1689,7 @@
         },
         "/api/on-ramp/session": {
             "post": {
-                "description": "Dev-only (403 in production). Creates a MoonPay on-ramp intent for destinationCAddress and returns either a Platform API session token or a signed widget URL depending on MOONPAY_INTEGRATION_MODE (\"auto\" falls back to a widget URL if the Platform API returns 404).",
+                "description": "Creates an on-ramp intent for destinationCAddress and returns either a Platform API session token or a signed widget URL depending on MOONPAY_INTEGRATION_MODE (\"auto\" falls back to a widget URL if the Platform API returns 404).",
                 "consumes": [
                     "application/json"
                 ],
@@ -1738,12 +1720,6 @@
                     },
                     "400": {
                         "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
@@ -3058,7 +3034,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register. network is optional and defaults to testnet;\nmainnet is rejected with 400 until a mainnet relayer is deployed.",
+                "description": "Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry;\npass expires_in to cover slower settlement — bank transfers take days, and a\ndeposit arriving after expiry is swept to recovery, not credited)\nfor a smart account already associated with the caller. Not idempotent — every call\nmints a new intent, matching latch-relayer's \"one intent per funding session\"\nmodel. The caller must have already registered the address via\nPOST /v1/accounts/register. network is optional and defaults to testnet;\nmainnet is rejected with 400 until a mainnet relayer is deployed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4489,6 +4465,384 @@
                 }
             }
         },
+        "/v1/smart-account/challenge": {
+            "post": {
+                "description": "Issues a single-use nonce bound to the key being deployed. Sign it with that\nkey and pass the signature to the matching deploy route.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Get a nonce to prove key possession for a deploy",
+                "parameters": [
+                    {
+                        "description": "Key type and key reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.deployChallengeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/smart-account/ed25519": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deploys (or idempotently returns) the deterministic smart account for a\nraw Ed25519 public key from a BIP-44 seed wallet. The bundler pays the fee.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy a seed-wallet smart account",
+                "parameters": [
+                    {
+                        "description": "Raw 32-byte Ed25519 public key, hex-encoded",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.deployEd25519Request"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/smart-account/g-address": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deploys (or idempotently returns) the deterministic smart account whose\nsigner is a classic Stellar account — the Freighter / external-wallet path.\nTestnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy a delegated (G-address) smart account",
+                "parameters": [
+                    {
+                        "description": "Classic Stellar public key (G...)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.deployGAddressRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/smart-account/multisig": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deploys (or idempotently returns) the deterministic smart account for a\nsigner set and threshold. The signer order and salt are the client's and\nare used verbatim — both determine the resulting address.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy a shared (multi-signer) smart account",
+                "parameters": [
+                    {
+                        "description": "Canonically ordered signers, threshold, and 32-byte salt",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.deployMultisigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/smart-account/webauthn": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deploys (or idempotently returns) the deterministic smart account for a\npasskey's key data (P-256 public key + credential ID). The bundler pays the fee.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "smart-account"
+                ],
+                "summary": "Deploy a passkey smart account",
+                "parameters": [
+                    {
+                        "description": "Hex-encoded P-256 public key + credential ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.deployWebauthnRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/transaction/bundler": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Clients need this to build and simulate an invocation before submitting it.\nIt is a public key: knowing it grants nothing.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Get the bundler's fee-paying address",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "testnet",
+                        "description": "Network",
+                        "name": "network",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/transaction/submit": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Rebuilds the caller's invocation with the bundler as fee-paying source,\nre-simulates it in enforcing mode against the supplied auth entries, signs\nand submits. Used by latch-mobile for sends, swaps and admin operations.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transaction"
+                ],
+                "summary": "Submit a Soroban transaction paid for by the bundler",
+                "parameters": [
+                    {
+                        "description": "Built transaction and signed auth entries",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.submitTransactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/wck-bundles/{pickup_key}": {
             "get": {
                 "security": [
@@ -4812,12 +5166,176 @@
                 "smart_account_address"
             ],
             "properties": {
+                "expected_amt": {
+                    "description": "ExpectedAmt is the deposit size in the asset's own units — XLM, not fiat.\nAdvisory only: the relayer logs a mismatch and credits what arrives.",
+                    "type": "string"
+                },
+                "expires_in": {
+                    "description": "ExpiresIn is how long the intent stays fundable, in seconds. Omit for\nlatch-relayer's own default of one hour.\n\nAnything funded by bank transfer must set this. The relayer sweeps a\ndeposit arriving against an expired intent to the recovery address, so an\nACH or SEPA payment landing two days after a one-hour intent is not\ncredited. Clamped to [MinFundingIntentTTL, MaxFundingIntentTTL].",
+                    "type": "integer"
+                },
+                "external_id": {
+                    "description": "ExternalID is the on-ramp provider's order ID, so a deposit can be traced\nfrom either side during reconciliation.",
+                    "type": "string"
+                },
                 "network": {
                     "description": "Network is optional; empty means testnet. Only testnet is served today —\nsee AccountService.CreateFundingIntent.",
                     "type": "string"
                 },
                 "smart_account_address": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.deployChallengeRequest": {
+            "type": "object",
+            "required": [
+                "key_ref",
+                "key_type"
+            ],
+            "properties": {
+                "key_ref": {
+                    "type": "string"
+                },
+                "key_type": {
+                    "type": "string"
+                },
+                "network": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.deployEd25519Request": {
+            "type": "object",
+            "required": [
+                "proof",
+                "public_key_hex"
+            ],
+            "properties": {
+                "network": {
+                    "type": "string"
+                },
+                "proof": {
+                    "$ref": "#/definitions/internal_handler.deployProof"
+                },
+                "public_key_hex": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.deployGAddressRequest": {
+            "type": "object",
+            "required": [
+                "g_address",
+                "proof"
+            ],
+            "properties": {
+                "g_address": {
+                    "type": "string"
+                },
+                "network": {
+                    "type": "string"
+                },
+                "proof": {
+                    "$ref": "#/definitions/internal_handler.deployProof"
+                }
+            }
+        },
+        "internal_handler.deployMultisigRequest": {
+            "type": "object",
+            "required": [
+                "proof",
+                "proof_key_ref",
+                "proof_key_type",
+                "salt_hex",
+                "signers",
+                "threshold"
+            ],
+            "properties": {
+                "network": {
+                    "type": "string"
+                },
+                "proof": {
+                    "$ref": "#/definitions/internal_handler.deployProof"
+                },
+                "proof_key_ref": {
+                    "type": "string"
+                },
+                "proof_key_type": {
+                    "description": "ProofKeyType/ProofKeyRef identify which signer in the set is proving\npossession — the deploying device. It must be one of Signers.",
+                    "type": "string"
+                },
+                "salt_hex": {
+                    "type": "string"
+                },
+                "signers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.deployMultisigSigner"
+                    }
+                },
+                "threshold": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler.deployMultisigSigner": {
+            "type": "object",
+            "required": [
+                "type"
+            ],
+            "properties": {
+                "g_address": {
+                    "description": "GAddress is the classic Stellar account, for \"delegated\" only.",
+                    "type": "string"
+                },
+                "key_data_hex": {
+                    "description": "KeyDataHex carries the raw Ed25519 public key or the passkey key data,\ndepending on Type. Empty for \"delegated\".",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is \"ed25519\", \"webauthn\", or \"delegated\".",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.deployProof": {
+            "type": "object",
+            "required": [
+                "nonce",
+                "signature"
+            ],
+            "properties": {
+                "authenticator_data": {
+                    "description": "WebAuthn assertion parts — passkey deploys only.",
+                    "type": "string"
+                },
+                "client_data_json": {
+                    "type": "string"
+                },
+                "nonce": {
+                    "type": "string"
+                },
+                "signature": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.deployWebauthnRequest": {
+            "type": "object",
+            "required": [
+                "key_data_hex",
+                "proof"
+            ],
+            "properties": {
+                "key_data_hex": {
+                    "type": "string"
+                },
+                "network": {
+                    "type": "string"
+                },
+                "proof": {
+                    "$ref": "#/definitions/internal_handler.deployProof"
                 }
             }
         },
@@ -5196,6 +5714,29 @@
                 }
             }
         },
+        "internal_handler.submitTransactionRequest": {
+            "type": "object",
+            "required": [
+                "auth_entries",
+                "tx_xdr"
+            ],
+            "properties": {
+                "auth_entries": {
+                    "description": "AuthEntries are base64 SorobanAuthorizationEntry XDRs the client already\nsigned with the user's key.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "network": {
+                    "type": "string"
+                },
+                "tx_xdr": {
+                    "description": "TxXdr is the client-built, simulated transaction. Only its host function\nis used; the envelope itself is discarded and rebuilt.",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.tokenDataResponse": {
             "type": "object",
             "properties": {
@@ -5531,6 +6072,14 @@
                 "destinationCAddress"
             ],
             "properties": {
+                "cryptoCurrency": {
+                    "type": "string",
+                    "enum": [
+                        "XLM",
+                        "USDC"
+                    ],
+                    "example": "XLM"
+                },
                 "destinationCAddress": {
                     "type": "string",
                     "example": "CABC...XYZ"
@@ -5542,6 +6091,14 @@
                 "fiatCode": {
                     "type": "string",
                     "example": "USD"
+                },
+                "provider": {
+                    "type": "string",
+                    "enum": [
+                        "moonpay",
+                        "transak"
+                    ],
+                    "example": "moonpay"
                 }
             }
         },
