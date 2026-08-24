@@ -220,11 +220,11 @@ func TestContract_MobileChallengeRoundTrip(t *testing.T) {
 // Generated with @noble/curves — the same library and the same construction the
 // app uses. This is the most format-sensitive path in the deploy flow.
 const (
-	fixturePasskeyPubKeyHex  = "049d7296001bac99b61dbab403fcbd2a9d906af23ea9b42824f674efe5f95a39f384dd98a7c56f0c01bded87a329d864b6d35bdd549bae6b7bf18a4768671f7659"
+	fixturePasskeyPubKeyHex  = "049d7296001bac99b61dbab403fcbd2a9d906af23ea9b42824f674efe5f95a39f384dd98a7c56f0c01bded87a329d864b6d35bdd549bae6b7bf18a4768671f7659" //nolint:gosec // G101 false positive: public key, not a credential
 	fixturePasskeyKeyDataHex = fixturePasskeyPubKeyHex + "00112233445566778899aabbccddeeff"
 	fixtureAuthDataB64       = "zBLPyOYxRbuToqS6EmruJqbvhI+G5NI54kKec+KN2usFAAAAAA=="
 	fixtureClientDataB64     = "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoib19HajhhUHhvX0dqOGFQeG9fR2o4YVB4b19HajhhUHhvX0dqOGFQeG9fRSIsIm9yaWdpbiI6ImxhdGNoLmZpbmFuY2UifQ=="
-	fixturePasskeySigDERB64  = "MEUCIQDrRAzVtDQKJeY7QEn/cDYO8S9nTFwwVPXxXqPZvakDKAIgFYDa5x6aFLrQgupeecWPJj/dQ0mjIWWJnfF6NlbImTs="
+	fixturePasskeySigDERB64  = "MEUCIQDrRAzVtDQKJeY7QEn/cDYO8S9nTFwwVPXxXqPZvakDKAIgFYDa5x6aFLrQgupeecWPJj/dQ0mjIWWJnfF6NlbImTs=" //nolint:gosec // G101 false positive: signature fixture, not a credential
 	fixtureRPID              = "latch.finance"
 )
 
