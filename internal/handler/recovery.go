@@ -63,9 +63,9 @@ func (h *RecoveryHandler) Initiate(c *gin.Context) {
 
 	userID, _ := h.authSvc.GetVerifiedUserByEmail(c.Request.Context(), req.Email)
 
-	if userID != "" {
-		otp, err := h.otpSvc.Generate(c.Request.Context(), "recovery:"+req.Email)
-		if err == nil {
+	otp, err := h.otpSvc.Generate(c.Request.Context(), "recovery:"+req.Email)
+	if err == nil {
+		if userID != "" {
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -76,11 +76,11 @@ func (h *RecoveryHandler) Initiate(c *gin.Context) {
 					slog.Error("send recovery OTP", "email", req.Email, "err", err)
 				}
 			}()
-			h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRecoveryInitiated), c.ClientIP(), c.Request.UserAgent(), nil)
 		}
+		h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRecoveryInitiated), c.ClientIP(), c.Request.UserAgent(), nil)
 	}
 
-	httpx.Success(c, http.StatusOK, gin.H{"message": "if an account exists for this email, a recovery code has been sent"})
+	httpx.Success(c, http.StatusOK, gin.H{"message": "If an account exists for this email, a recovery code has been sent"})
 }
 
 // VerifyRecovery godoc
