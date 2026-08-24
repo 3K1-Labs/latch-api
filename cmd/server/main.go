@@ -150,6 +150,10 @@ func main() {
 		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
 	case cfg.WebAppFactoryAddress == "":
 		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
+	case cfg.WebAppWebAuthnRPID == "":
+		slog.Warn("WEBAUTHN_RP_ID not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
+	case cfg.WebAppWebAuthnOrigin == "":
+		slog.Warn("WEBAUTHN_ORIGIN not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
 	default:
 		if bundlerSvc, err := webapp.NewBundlerService(cfg.WebAppBundlerSecret, cfg.WebAppLegacyDelegatedSignerSecret); err != nil {
 			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account/transaction/multisig routes disabled", "err", err)

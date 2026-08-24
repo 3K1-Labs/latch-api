@@ -96,7 +96,7 @@ func TestResolveCeremonyContext_ExtensionFromBody(t *testing.T) {
 		ChromeExtensionIDFromBody: validExtID,
 	}, WebAuthnConfig{RPID: "latch.finance", Origin: "https://latch.finance"})
 	require.NoError(t, err)
-	assert.Equal(t, validExtID, rpID)
+	assert.Equal(t, "latch.finance", rpID)
 	assert.Equal(t, "chrome-extension://"+validExtID, origin)
 }
 
@@ -105,7 +105,7 @@ func TestResolveCeremonyContext_ExtensionFromOriginHeader(t *testing.T) {
 		OriginHeader: "chrome-extension://" + validExtID,
 	}, WebAuthnConfig{RPID: "latch.finance", Origin: "https://latch.finance"})
 	require.NoError(t, err)
-	assert.Equal(t, validExtID, rpID)
+	assert.Equal(t, "latch.finance", rpID)
 	assert.Equal(t, "chrome-extension://"+validExtID, origin)
 }
 
@@ -114,7 +114,7 @@ func TestResolveCeremonyContext_ExtensionFromRefererHeader(t *testing.T) {
 		RefererHeader: "chrome-extension://" + validExtID + "/popup.html",
 	}, WebAuthnConfig{RPID: "latch.finance", Origin: "https://latch.finance"})
 	require.NoError(t, err)
-	assert.Equal(t, validExtID, rpID)
+	assert.Equal(t, "latch.finance", rpID)
 	assert.Equal(t, "chrome-extension://"+validExtID, origin)
 }
 
@@ -194,18 +194,18 @@ func TestResolveFinishVerification_ExtensionFromBody(t *testing.T) {
 	origin, rpids, err := ResolveFinishVerification(
 		CeremonyFinishInput{ChromeExtensionIDFromBody: validExtID},
 		StoredChallengeContext{},
-		WebAuthnConfig{AllowedExtensionIDs: []string{validExtID}},
+		WebAuthnConfig{RPID: "latch.finance", AllowedExtensionIDs: []string{validExtID}},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "chrome-extension://"+validExtID, origin)
-	assert.ElementsMatch(t, []string{validExtID, "chrome-extension://" + validExtID}, rpids)
+	assert.Equal(t, []string{"latch.finance"}, rpids)
 }
 
 func TestResolveFinishVerification_ExtensionNotAllowlisted(t *testing.T) {
 	_, _, err := ResolveFinishVerification(
 		CeremonyFinishInput{ChromeExtensionIDFromBody: validExtID},
 		StoredChallengeContext{},
-		WebAuthnConfig{AllowedExtensionIDs: []string{otherExtID}},
+		WebAuthnConfig{RPID: "latch.finance", AllowedExtensionIDs: []string{otherExtID}},
 	)
 	require.ErrorIs(t, err, ErrExtensionIDNotAllowed)
 }
@@ -214,11 +214,23 @@ func TestResolveFinishVerification_ExtensionFromClientDataOriginOnly(t *testing.
 	origin, rpids, err := ResolveFinishVerification(
 		CeremonyFinishInput{ClientDataOrigin: "chrome-extension://" + validExtID},
 		StoredChallengeContext{},
-		WebAuthnConfig{AllowedExtensionIDs: []string{validExtID}},
+		WebAuthnConfig{RPID: "latch.finance", AllowedExtensionIDs: []string{validExtID}},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "chrome-extension://"+validExtID, origin)
-	assert.ElementsMatch(t, []string{validExtID, "chrome-extension://" + validExtID}, rpids)
+	assert.Equal(t, []string{"latch.finance"}, rpids)
+}
+
+func TestResolveFinishVerification_ExtensionNeverReturnsExtensionIDAsRPID(t *testing.T) {
+	_, rpids, err := ResolveFinishVerification(
+		CeremonyFinishInput{ChromeExtensionIDFromBody: validExtID},
+		StoredChallengeContext{},
+		WebAuthnConfig{RPID: "latch.finance", AllowedExtensionIDs: []string{validExtID}},
+	)
+	require.NoError(t, err)
+	assert.NotContains(t, rpids, validExtID)
+	assert.NotContains(t, rpids, "chrome-extension://"+validExtID)
+	assert.Equal(t, []string{"latch.finance"}, rpids)
 }
 
 func TestResolveFinishVerification_ConflictingExtensionSources(t *testing.T) {
