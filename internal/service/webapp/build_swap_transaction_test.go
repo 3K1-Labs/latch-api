@@ -39,7 +39,7 @@ func (f *balanceThenAuthFakeRPC) SimulateTransaction(ctx context.Context, rpcURL
 		require.NoError(f.t, err)
 		return &service.SimulateResult{Results: []service.SimResultEntry{{XDR: b64}}}, nil
 	}
-	return f.fakeSorobanRPC.simulateFn(ctx, rpcURL, txXDR, rc)
+	return f.simulateFn(ctx, rpcURL, txXDR, rc)
 }
 
 func TestBuildSwap_PasskeySuccess(t *testing.T) {

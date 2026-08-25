@@ -1,38 +1,58 @@
-run:
-  timeout: 5m
-
+version: "2"
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - gosec
     - bodyclose
     - contextcheck
+    - gosec
     - noctx
-
-linters-settings:
-  gosec:
-    excludes:
-      - G115
-
+  settings:
+    gosec:
+      excludes:
+        - G115
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gosec
+          - staticcheck
+          - unused
+        path: internal/db/generated/
+      - linters:
+          - unused
+        path: internal/handler/types.go
+      - linters:
+          - unused
+        path: internal/handler/webapp/swagger_types.go
+      # Test-only exclusions: httptest.NewRequest requests are served in-process
+      # with no cancellation to propagate (noctx), and fixture strings such as
+      # fake push tokens trip gosec's hardcoded-credential scan (G101). Both are
+      # false positives — production code still uses request contexts.
+      - path: '(.+)_test\.go'
+        linters:
+          - noctx
+      - path: '(.+)_test\.go'
+        text: G101
+        linters:
+          - gosec
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
-  exclude-rules:
-    - path: internal/db/generated/
-      linters:
-        - errcheck
-        - gosec
-        - staticcheck
-        - unused
-    - path: internal/handler/types.go
-      linters:
-        - unused
-    - path: internal/handler/webapp/swagger_types.go
-      linters:
-        - unused
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

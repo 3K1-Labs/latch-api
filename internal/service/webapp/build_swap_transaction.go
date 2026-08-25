@@ -68,7 +68,7 @@ func ruleHasOnlyDelegatedGSigner(rule ContextRuleSummary, gAddress string) bool 
 		return false
 	}
 	for _, sg := range rule.Signers {
-		if !(sg.Kind == "Delegated" && sg.GAddress == gAddress) {
+		if sg.Kind != "Delegated" || sg.GAddress != gAddress {
 			return false
 		}
 	}

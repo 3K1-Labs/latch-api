@@ -62,7 +62,7 @@ func TestSignPayloadCreate_Validation(t *testing.T) {
 }
 
 func TestSignPayloadCreate_ServiceError(t *testing.T) {
-	h := NewSignPayloadHandler(&stubSignPayload{createErr: assertErr})
+	h := NewSignPayloadHandler(&stubSignPayload{createErr: errStub})
 	r := gin.New()
 	r.POST("/sign-payload", h.Create)
 
@@ -77,7 +77,7 @@ func TestSignPayloadCreate_ServiceError(t *testing.T) {
 
 func TestSignPayloadGet(t *testing.T) {
 	t.Run("malformed ref does not touch the service", func(t *testing.T) {
-		h := NewSignPayloadHandler(&stubSignPayload{consumeErr: assertErr})
+		h := NewSignPayloadHandler(&stubSignPayload{consumeErr: errStub})
 		r := gin.New()
 		r.GET("/sign-payload/:payloadRef", h.Get)
 
@@ -140,7 +140,7 @@ func TestSignPayloadGet(t *testing.T) {
 	})
 
 	t.Run("unexpected error", func(t *testing.T) {
-		h := NewSignPayloadHandler(&stubSignPayload{consumeErr: assertErr})
+		h := NewSignPayloadHandler(&stubSignPayload{consumeErr: errStub})
 		r := gin.New()
 		r.GET("/sign-payload/:payloadRef", h.Get)
 

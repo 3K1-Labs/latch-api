@@ -21,15 +21,15 @@ func TestPoolBalanceFetcher_FetchSnapshot(t *testing.T) {
 	t.Run("funded account with transactions", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			switch {
-			case r.URL.Path == "/accounts/GPOOL":
+			switch r.URL.Path {
+			case "/accounts/GPOOL":
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"balances": []map[string]any{
 						{"balance": "100.0000000", "asset_type": "native"},
 						{"balance": "5.0000000", "asset_type": "credit_alphanum4", "asset_code": "USDC"},
 					},
 				})
-			case r.URL.Path == "/accounts/GPOOL/transactions":
+			case "/accounts/GPOOL/transactions":
 				assert.Equal(t, "desc", r.URL.Query().Get("order"))
 				assert.Equal(t, "20", r.URL.Query().Get("limit"))
 				_ = json.NewEncoder(w).Encode(map[string]any{
@@ -59,10 +59,10 @@ func TestPoolBalanceFetcher_FetchSnapshot(t *testing.T) {
 	t.Run("filters by memo", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			switch {
-			case r.URL.Path == "/accounts/GPOOL":
+			switch r.URL.Path {
+			case "/accounts/GPOOL":
 				_ = json.NewEncoder(w).Encode(map[string]any{"balances": []map[string]any{{"balance": "10", "asset_type": "native"}}})
-			case r.URL.Path == "/accounts/GPOOL/transactions":
+			case "/accounts/GPOOL/transactions":
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"_embedded": map[string]any{
 						"records": []map[string]any{

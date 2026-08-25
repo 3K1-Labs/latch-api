@@ -152,6 +152,9 @@ func (s *RelayerService) send(ctx context.Context, req *http.Request) (*http.Res
 			attempt.Body = body
 		}
 
+		// #nosec G704 -- the request URL is the operator-configured RELAYER_URL
+		// plus fixed paths; the only variable segment (memo_id) is validated as
+		// a uint64 before it reaches the URL. No user-controlled host is used.
 		resp, err := s.httpClient.Do(attempt)
 		if err == nil && !isRelayerBooting(resp.StatusCode) {
 			return resp, nil

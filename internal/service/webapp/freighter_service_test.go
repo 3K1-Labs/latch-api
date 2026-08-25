@@ -156,10 +156,10 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 
 	var friendbotCalled bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/accounts/"+testGAddress:
+		switch r.URL.Path {
+		case "/accounts/" + testGAddress:
 			w.WriteHeader(http.StatusNotFound)
-		case r.URL.Path == "/":
+		case "/":
 			friendbotCalled = true
 			assert.Equal(t, testGAddress, r.URL.Query().Get("addr"))
 			w.WriteHeader(http.StatusOK)
