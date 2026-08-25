@@ -4190,20 +4190,28 @@
         },
         "/v1/prices": {
             "get": {
-                "description": "Returns the current USD price for each requested Stellar asset. Results are Redis-cached for 60 seconds.",
+                "description": "Returns the current price for each requested Stellar asset, quoted in the requested fiat currency (default usd). Results are Redis-cached for 60 seconds, per currency. The response names the currency it is quoted in via the top-level `currency` field; `data` maps each requested token to {\"price\", \"change_24h\"}. Supported currencies (ISO 4217, lowercase): aed, ars, aud, brl, cad, chf, clp, cny, cop, czk, dkk, eur, gbp, hkd, idr, ils, inr, jpy, krw, mxn, ngn, nok, nzd, php, pln, rub, sar, sek, sgd, thb, try, uah, usd, vnd, zar. An unsupported currency returns 400.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "market"
                 ],
-                "summary": "Live USD prices",
+                "summary": "Live prices",
                 "parameters": [
                     {
                         "type": "string",
                         "example": "native,xlm",
                         "description": "Comma-separated token symbols",
                         "name": "tokens",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "usd",
+                        "example": "usd",
+                        "description": "ISO 4217 currency code (lowercase); defaults to usd",
+                        "name": "currency",
                         "in": "query"
                     }
                 ],
@@ -4971,6 +4979,19 @@
         }
     },
     "definitions": {
+        "github_com_latch_backend_internal_service.PriceData": {
+            "type": "object",
+            "properties": {
+                "change_24h": {
+                    "description": "percentage, e.g. -1.23",
+                    "type": "number"
+                },
+                "price": {
+                    "description": "price in the requested currency as string, e.g. \"0.1423\"",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_latch_backend_internal_service.PushRegistration": {
             "type": "object",
             "properties": {
@@ -5514,11 +5535,14 @@
         "internal_handler.pricesDataResponse": {
             "type": "object",
             "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "usd"
+                },
                 "data": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "number",
-                        "format": "float64"
+                        "$ref": "#/definitions/github_com_latch_backend_internal_service.PriceData"
                     }
                 }
             }

@@ -70,8 +70,10 @@ var tokenToCoinGeckoID = map[string]string{
 }
 
 // PriceData holds the current price and 24-hour change for a token.
+// Price is a string so large/small values keep full precision; it is quoted
+// in the fiat currency the caller requested (e.g. "0.1423" for USD).
 type PriceData struct {
-	Price     string  `json:"price"`      // USD price as string, e.g. "0.1423"
+	Price     string  `json:"price"`      // price in the requested currency as string, e.g. "0.1423"
 	Change24h float64 `json:"change_24h"` // percentage, e.g. -1.23
 }
 
@@ -90,10 +92,15 @@ func NewPriceService(redisClient *redis.Client, coinGeckoAPIKey string) *PriceSe
 	}
 }
 
-// GetPrices returns USD prices for the requested token identifiers.
-// Unknown tokens get a nil entry in the result. Results are cached in Redis.
-func (s *PriceService) GetPrices(ctx context.Context, tokens []string) map[string]*PriceData {
+// GetPrices returns prices quoted in the given fiat currency for the
+// requested token identifiers. currency is a lowercase ISO 4217 code (e.g.
+// "usd", "eur"); the handler validates it against the supported list before
+// this is called. Unknown tokens get a nil entry in the result. Results are
+// cached in Redis, per currency, so one currency's cache can never serve
+// another's numbers.
+func (s *PriceService) GetPrices(ctx context.Context, tokens []string, currency string) map[string]*PriceData {
 	result := make(map[string]*PriceData, len(tokens))
+	currency = strings.ToLower(currency)
 
 	// Resolve token IDs to CoinGecko IDs, collecting unique ones.
 	cgIDs := map[string][]string{} // cgID → []originalToken
@@ -109,11 +116,11 @@ func (s *PriceService) GetPrices(ctx context.Context, tokens []string) map[strin
 		return result
 	}
 
-	// Check Redis cache per CoinGecko ID.
+	// Check Redis cache per CoinGecko ID and currency.
 	missing := []string{}
 	cached := map[string]*PriceData{}
 	for cgID := range cgIDs {
-		key := fmt.Sprintf("prices:cg:%s", cgID)
+		key := priceCacheKey(cgID, currency)
 		val, err := s.redis.Get(ctx, key).Result()
 		if err == nil {
 			var pd PriceData
@@ -130,16 +137,15 @@ func (s *PriceService) GetPrices(ctx context.Context, tokens []string) map[strin
 	// Fetch missing prices from CoinGecko.
 	fetched := map[string]*PriceData{}
 	if len(missing) > 0 {
-		fetched = s.fetchFromCoinGecko(ctx, missing)
+		fetched = s.fetchFromCoinGecko(ctx, missing, currency)
 		// Populate Redis cache for each fetched price.
 		for cgID, pd := range fetched {
 			if pd == nil {
 				continue
 			}
 			if b, err := json.Marshal(pd); err == nil {
-				key := fmt.Sprintf("prices:cg:%s", cgID)
-				if err := s.redis.Set(ctx, key, b, pricesCacheTTL).Err(); err != nil {
-					slog.Error("prices cache write failed", "cgID", cgID, "err", err)
+				if err := s.redis.Set(ctx, priceCacheKey(cgID, currency), b, pricesCacheTTL).Err(); err != nil {
+					slog.Error("prices cache write failed", "cgID", cgID, "currency", currency, "err", err)
 				}
 			}
 		}
@@ -160,17 +166,24 @@ func (s *PriceService) GetPrices(ctx context.Context, tokens []string) map[strin
 	return result
 }
 
-type coinGeckoResponse map[string]struct {
-	USD          float64 `json:"usd"`
-	USD24hChange float64 `json:"usd_24h_change"`
+// priceCacheKey names the Redis entry holding a coin's price in one currency.
+// The currency is part of the key so separate currencies never share a cache
+// entry — an EUR request must not be served a USD number.
+func priceCacheKey(cgID, currency string) string {
+	return fmt.Sprintf("prices:cg:%s:%s", cgID, currency)
 }
 
-func (s *PriceService) fetchFromCoinGecko(ctx context.Context, cgIDs []string) map[string]*PriceData {
+// coinGeckoResponse maps a CoinGecko ID to its per-currency values, e.g.
+// {"stellar": {"eur": 0.1122, "eur_24h_change": 1.25}} for a request with
+// vs_currencies=eur. Currency keys are lowercase, matching the request.
+type coinGeckoResponse map[string]map[string]float64
+
+func (s *PriceService) fetchFromCoinGecko(ctx context.Context, cgIDs []string, currency string) map[string]*PriceData {
 	result := map[string]*PriceData{}
 
 	url := fmt.Sprintf(
-		"https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd&include_24hr_change=true",
-		strings.Join(cgIDs, ","),
+		"https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_24hr_change=true",
+		strings.Join(cgIDs, ","), currency,
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -200,10 +213,16 @@ func (s *PriceService) fetchFromCoinGecko(ctx context.Context, cgIDs []string) m
 		return result
 	}
 
-	for cgID, data := range raw {
+	for cgID, coin := range raw {
+		price, ok := coin[currency]
+		if !ok {
+			// CoinGecko has no pair for this currency — leave the entry nil
+			// rather than reporting a bogus zero price.
+			continue
+		}
 		result[cgID] = &PriceData{
-			Price:     strconv.FormatFloat(data.USD, 'f', -1, 64),
-			Change24h: data.USD24hChange,
+			Price:     strconv.FormatFloat(price, 'f', -1, 64),
+			Change24h: coin[currency+"_24h_change"],
 		}
 	}
 	return result

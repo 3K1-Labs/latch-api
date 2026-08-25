@@ -1,5 +1,14 @@
 basePath: /
 definitions:
+  github_com_latch_backend_internal_service.PriceData:
+    properties:
+      change_24h:
+        description: percentage, e.g. -1.23
+        type: number
+      price:
+        description: price in the requested currency as string, e.g. "0.1423"
+        type: string
+    type: object
   github_com_latch_backend_internal_service.PushRegistration:
     properties:
       blind_signer_id:
@@ -380,10 +389,12 @@ definitions:
     type: object
   internal_handler.pricesDataResponse:
     properties:
+      currency:
+        example: usd
+        type: string
       data:
         additionalProperties:
-          format: float64
-          type: number
+          $ref: '#/definitions/github_com_latch_backend_internal_service.PriceData'
         type: object
     type: object
   internal_handler.recoveryTokenDataResponse:
@@ -4164,13 +4175,25 @@ paths:
       - memberships
   /v1/prices:
     get:
-      description: Returns the current USD price for each requested Stellar asset.
-        Results are Redis-cached for 60 seconds.
+      description: 'Returns the current price for each requested Stellar asset, quoted
+        in the requested fiat currency (default usd). Results are Redis-cached for
+        60 seconds, per currency. The response names the currency it is quoted in
+        via the top-level `currency` field; `data` maps each requested token to {"price",
+        "change_24h"}. Supported currencies (ISO 4217, lowercase): aed, ars, aud,
+        brl, cad, chf, clp, cny, cop, czk, dkk, eur, gbp, hkd, idr, ils, inr, jpy,
+        krw, mxn, ngn, nok, nzd, php, pln, rub, sar, sek, sgd, thb, try, uah, usd,
+        vnd, zar. An unsupported currency returns 400.'
       parameters:
       - description: Comma-separated token symbols
         example: native,xlm
         in: query
         name: tokens
+        type: string
+      - default: usd
+        description: ISO 4217 currency code (lowercase); defaults to usd
+        example: usd
+        in: query
+        name: currency
         type: string
       produces:
       - application/json
@@ -4183,7 +4206,7 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
-      summary: Live USD prices
+      summary: Live prices
       tags:
       - market
   /v1/push-tokens:
