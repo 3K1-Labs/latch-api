@@ -103,6 +103,9 @@ func TestPasskeyCredentialLookup_RoundTrip(t *testing.T) {
 	assert.Equal(t, address, cred.SmartAccountAddress)
 	assert.Equal(t, "Savings", cred.Label)
 	assert.Equal(t, int32(2), cred.Seq)
+	// A recovering client cannot reconstruct this from an assertion, so the
+	// lookup has to hand it back or the wallet is discoverable but unusable.
+	assert.Equal(t, keyDataHex, cred.KeyDataHex)
 }
 
 func TestPasskeyCredentialLookup_UnknownCredential(t *testing.T) {

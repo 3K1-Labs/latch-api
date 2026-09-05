@@ -36,7 +36,7 @@ const (
 	ActionSmartAccountDeployed    AuditAction = "smart_account_deployed"
 	ActionTransactionRelayed      AuditAction = "transaction_relayed"
 	ActionFundingIntentCreated    AuditAction = "funding_intent_created"
-	ActionPasskeyCredentialLookup AuditAction = "passkey_credential_lookup"
+	ActionPasskeyCredentialLookup AuditAction = "passkey_credential_lookup" //nolint:gosec // G101 false positive: audit action name, not a credential
 )
 
 type AuditService struct {

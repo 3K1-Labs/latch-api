@@ -113,5 +113,6 @@ func (h *PasskeyCredentialHandler) Lookup(c *gin.Context) {
 		"smart_account_address": cred.SmartAccountAddress,
 		"label":                 cred.Label,
 		"seq":                   cred.Seq,
+		"key_data_hex":          cred.KeyDataHex,
 	})
 }

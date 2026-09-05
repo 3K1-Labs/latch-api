@@ -42,7 +42,7 @@ const passkeyLookupNonceTTL = 60 * time.Second
 // time — discovering the credential ID is the whole point of the ceremony —
 // so every lookup nonce binds against the same constant identity instead.
 const (
-	passkeyLookupNonceKeyType = "webauthn-lookup"
+	passkeyLookupNonceKeyType = "webauthn-lookup" //nolint:gosec // G101 false positive: nonce namespace, not a credential
 	passkeyLookupNonceScope   = "passkey-lookup"
 )
 
@@ -58,6 +58,12 @@ type PasskeyCredential struct {
 	SmartAccountAddress string
 	Label               string
 	Seq                 int32
+	// KeyDataHex is the P-256 public key followed by the credential ID — the
+	// same value the account was deployed with. A recovering client needs it
+	// to sign: a WebAuthn assertion carries no public key, so a device that
+	// only regained the synced passkey cannot reconstruct it. Not a secret;
+	// it is readable from the account's own on-chain signer record.
+	KeyDataHex string
 }
 
 // PasskeyCredentialService indexes credential ID -> deployed smart account.
@@ -155,5 +161,6 @@ func (s *PasskeyCredentialService) Lookup(ctx context.Context, credentialID, non
 		SmartAccountAddress: row.SmartAccountAddress,
 		Label:               row.Label,
 		Seq:                 row.Seq,
+		KeyDataHex:          row.KeyDataHex,
 	}, nil
 }
