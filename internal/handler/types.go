@@ -1,5 +1,7 @@
 package handler
 
+import "github.com/latch/backend/internal/service"
+
 // ── Request types ─────────────────────────────────────────────────────────────
 
 type registerRequest struct {
@@ -137,8 +139,12 @@ type accountsListDataResponse struct {
 	Data accountsListResponse `json:"data"`
 }
 
+// pricesDataResponse is the payload of GET /v1/prices. Data maps each
+// requested token to its price in the quoted currency; Currency names that
+// currency (ISO 4217, lowercase) so the response is self-describing.
 type pricesDataResponse struct {
-	Data map[string]float64 `json:"data"`
+	Data     map[string]service.PriceData `json:"data"`
+	Currency string                       `json:"currency" example:"usd"`
 }
 
 type historyDataInner struct {

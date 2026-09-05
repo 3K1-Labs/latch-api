@@ -137,7 +137,7 @@ type pushNotifier interface {
 }
 
 type priceService interface {
-	GetPrices(ctx context.Context, tokens []string) map[string]*service.PriceData
+	GetPrices(ctx context.Context, tokens []string, currency string) map[string]*service.PriceData
 }
 
 type historyService interface {

@@ -54,7 +54,7 @@ Go REST API backend for a Stellar blockchain mobile wallet. Handles auth, encryp
 | POST   | `/v1/recovery/initiate`     | None         | Send recovery OTP (rate-limited per email)        |
 | POST   | `/v1/recovery/verify`       | None         | Verify recovery OTP → short-lived recovery token  |
 | GET    | `/v1/recovery/blob`         | Recovery JWT | Decrypt and return credential blob                |
-| GET    | `/v1/prices`                | None         | Live USD prices for Stellar assets (Redis-cached) |
+| GET    | `/v1/prices`                | None         | Live prices for Stellar assets in any supported fiat currency (`currency` query param, default `usd`; Redis-cached per currency) |
 | GET    | `/v1/history`               | Bearer JWT   | Transaction history for the authenticated user    |
 | POST   | `/api/transaction/simulate` | None         | Simulate a Soroban transaction                    |
 
@@ -126,7 +126,7 @@ The primary client. React Native + Expo 55, Bun package manager, Expo Router, Zu
 | POST | `/v1/recovery/initiate` | Send recovery OTP |
 | POST | `/v1/recovery/verify` | Verify recovery OTP → recovery token |
 | GET | `/v1/recovery/blob` | Fetch encrypted backup blob (client decrypts locally with recovery password) |
-| GET | `/v1/prices` | Live asset prices (XLM etc.) |
+| GET | `/v1/prices` | Live asset prices (XLM etc.; optional `currency` param, defaults to USD) |
 | GET | `/v1/history` | Transaction history |
 
 **Key client-side details to keep in mind:**

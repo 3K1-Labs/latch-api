@@ -48,14 +48,10 @@ type Config struct {
 	// Passkey wallet sign-in: which Soroban RPC to read smart-account signers
 	// from (per network — a smart account exists on exactly one network, so the
 	// sign-in request's network selects the RPC), and which WebAuthn origins
-	// (clientDataJSON.origin) are accepted. Entries are matched verbatim, with
-	// the single exception that a bare host and its https:// form are the same
-	// origin ("latch.finance" == "https://latch.finance") — see originAllowed.
-	// Everything else must be listed exactly as the client sends it:
-	// "chrome-extension://<id>" for the extension, and
-	// "android:apk-key-hash:<base64url-sha256-of-signing-cert>" for each
-	// Android signing certificate whose build uses OS platform passkeys
-	// (debug, EAS/Play upload, and Play app-signing keys are all distinct).
+	// (clientDataJSON.origin) are accepted. Origins are matched by exact string
+	// equality, so each entry must be a full origin including the scheme —
+	// "https://uselatch.app", "chrome-extension://<id>". A bare host never
+	// matches anything a browser produces.
 	WalletAuthSorobanURL        string
 	WalletAuthSorobanURLMainnet string
 	WebAuthnAllowedOrigins      []string
@@ -247,7 +243,7 @@ func Load() (*Config, error) {
 		CoinGeckoAPIKey:             getEnv("COINGECKO_API_KEY", ""),
 		WalletAuthSorobanURL:        getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
 		WalletAuthSorobanURLMainnet: getEnv("WALLET_AUTH_SOROBAN_URL_MAINNET", getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com")),
-		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance")),
+		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://uselatch.app")),
 
 		BundlerAllowedContracts:        splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS", "")),
 		BundlerAllowedContractsMainnet: splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS_MAINNET", "")),

@@ -308,10 +308,12 @@ func (s *stubAccount) GetFundingStatus(_ context.Context, _, _, _, network strin
 // ── priceService stub ─────────────────────────────────────────────────────────
 
 type stubPrice struct {
-	prices map[string]*service.PriceData
+	prices      map[string]*service.PriceData
+	gotCurrency string
 }
 
-func (s *stubPrice) GetPrices(_ context.Context, tokens []string) map[string]*service.PriceData {
+func (s *stubPrice) GetPrices(_ context.Context, tokens []string, currency string) map[string]*service.PriceData {
+	s.gotCurrency = currency
 	if s.prices != nil {
 		return s.prices
 	}

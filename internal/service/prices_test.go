@@ -25,7 +25,7 @@ func newTestPriceService(redisClient *redis.Client, httpClient *http.Client) *Pr
 
 func TestPriceService_UnknownToken(t *testing.T) {
 	svc := NewPriceService(disconnectedRedis(), "")
-	result := svc.GetPrices(context.Background(), []string{"UNKNOWNTOKEN"})
+	result := svc.GetPrices(context.Background(), []string{"UNKNOWNTOKEN"}, "usd")
 	if pd, ok := result["UNKNOWNTOKEN"]; !ok {
 		t.Error("unknown token should be present in result map")
 	} else if pd != nil {
@@ -35,7 +35,7 @@ func TestPriceService_UnknownToken(t *testing.T) {
 
 func TestPriceService_EmptyTokenList(t *testing.T) {
 	svc := NewPriceService(disconnectedRedis(), "")
-	result := svc.GetPrices(context.Background(), []string{})
+	result := svc.GetPrices(context.Background(), []string{}, "usd")
 	if len(result) != 0 {
 		t.Errorf("empty token list: got %d entries, want 0", len(result))
 	}
@@ -43,10 +43,13 @@ func TestPriceService_EmptyTokenList(t *testing.T) {
 
 func TestPriceService_NativeToken_FetchesFromCoinGecko(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the CoinGecko ID is correct.
+		// Verify the CoinGecko ID and currency are correct.
 		ids := r.URL.Query().Get("ids")
 		if ids != "stellar" {
 			t.Errorf("CoinGecko ids = %q, want stellar", ids)
+		}
+		if vs := r.URL.Query().Get("vs_currencies"); vs != "usd" {
+			t.Errorf("CoinGecko vs_currencies = %q, want usd", vs)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -69,7 +72,7 @@ func TestPriceService_NativeToken_FetchesFromCoinGecko(t *testing.T) {
 	client := &http.Client{Transport: transport}
 
 	svc := newTestPriceService(disconnectedRedis(), client)
-	result := svc.GetPrices(context.Background(), []string{"native"})
+	result := svc.GetPrices(context.Background(), []string{"native"}, "usd")
 
 	pd, ok := result["native"]
 	if !ok {
@@ -83,6 +86,93 @@ func TestPriceService_NativeToken_FetchesFromCoinGecko(t *testing.T) {
 	}
 	if pd.Change24h != -2.5 {
 		t.Errorf("Change24h = %f, want -2.5", pd.Change24h)
+	}
+}
+
+func TestPriceService_QuotesInRequestedCurrency(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if vs := r.URL.Query().Get("vs_currencies"); vs != "eur" {
+			t.Errorf("CoinGecko vs_currencies = %q, want eur", vs)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"stellar": map[string]any{
+				"eur":            0.112233,
+				"eur_24h_change": 1.25,
+			},
+		})
+	}))
+	defer ts.Close()
+
+	transport := &rewriteHostTransport{
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
+		targetScheme: "http",
+	}
+	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
+	result := svc.GetPrices(context.Background(), []string{"native"}, "eur")
+
+	pd, ok := result["native"]
+	if !ok {
+		t.Fatal("native token not in result")
+	}
+	if pd == nil {
+		t.Fatal("native price data is nil")
+	}
+	if pd.Price != "0.112233" {
+		t.Errorf("Price = %q, want EUR quote 0.112233", pd.Price)
+	}
+	if pd.Change24h != 1.25 {
+		t.Errorf("Change24h = %f, want 1.25", pd.Change24h)
+	}
+}
+
+func TestPriceService_UpperCurrencyNormalized(t *testing.T) {
+	var vsCurrency string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vsCurrency = r.URL.Query().Get("vs_currencies")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"stellar": map[string]any{"gbp": 0.09, "gbp_24h_change": 0.0},
+		})
+	}))
+	defer ts.Close()
+
+	transport := &rewriteHostTransport{
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
+		targetScheme: "http",
+	}
+	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
+	svc.GetPrices(context.Background(), []string{"native"}, "GBP")
+
+	if vsCurrency != "gbp" {
+		t.Errorf("vs_currencies = %q, want lowercase gbp", vsCurrency)
+	}
+}
+
+func TestPriceService_MissingCurrencyPair_ReturnsNil(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CoinGecko returns no eur entry for this coin — the service must not
+		// fabricate a zero price.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"stellar": map[string]any{"usd": 0.1, "usd_24h_change": 0.0},
+		})
+	}))
+	defer ts.Close()
+
+	transport := &rewriteHostTransport{
+		base:         ts.Client().Transport,
+		targetHost:   ts.Listener.Addr().String(),
+		targetScheme: "http",
+	}
+	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
+	result := svc.GetPrices(context.Background(), []string{"native"}, "eur")
+
+	if pd := result["native"]; pd != nil {
+		t.Errorf("expected nil when currency pair is missing, got %+v", pd)
 	}
 }
 
@@ -103,7 +193,7 @@ func TestPriceService_XLMAliasMapsToStellar(t *testing.T) {
 		targetScheme: "http",
 	}
 	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
-	svc.GetPrices(context.Background(), []string{"xlm"})
+	svc.GetPrices(context.Background(), []string{"xlm"}, "usd")
 
 	if capturedIDs != "stellar" {
 		t.Errorf("xlm alias should map to CoinGecko ID 'stellar', got %q", capturedIDs)
@@ -122,7 +212,7 @@ func TestPriceService_CoinGeckoDown_ReturnsNil(t *testing.T) {
 		targetScheme: "http",
 	}
 	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
-	result := svc.GetPrices(context.Background(), []string{"native"})
+	result := svc.GetPrices(context.Background(), []string{"native"}, "usd")
 
 	// On CoinGecko failure the service should return nil (not panic).
 	if pd := result["native"]; pd != nil {
@@ -140,7 +230,7 @@ func TestPriceService_NetworkError(t *testing.T) {
 		targetScheme: "http",
 	}
 	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
-	result := svc.GetPrices(context.Background(), []string{"native"})
+	result := svc.GetPrices(context.Background(), []string{"native"}, "usd")
 	if pd := result["native"]; pd != nil {
 		t.Errorf("expected nil on network error, got %+v", pd)
 	}
@@ -159,7 +249,7 @@ func TestPriceService_DecodeError(t *testing.T) {
 		targetScheme: "http",
 	}
 	svc := newTestPriceService(disconnectedRedis(), &http.Client{Transport: transport})
-	result := svc.GetPrices(context.Background(), []string{"native"})
+	result := svc.GetPrices(context.Background(), []string{"native"}, "usd")
 	if pd := result["native"]; pd != nil {
 		t.Errorf("expected nil on decode error, got %+v", pd)
 	}
@@ -183,7 +273,7 @@ func TestPriceService_WithAPIKey_SendsHeader(t *testing.T) {
 	}
 	svc := NewPriceService(disconnectedRedis(), "test-api-key")
 	svc.httpClient = &http.Client{Transport: transport}
-	svc.GetPrices(context.Background(), []string{"native"})
+	svc.GetPrices(context.Background(), []string{"native"}, "usd")
 
 	if gotKey != "test-api-key" {
 		t.Errorf("API key header = %q, want test-api-key", gotKey)
