@@ -89,6 +89,24 @@ type deployProofService interface {
 	Verify(ctx context.Context, in service.DeployProofInput) error
 }
 
+// passkeyCredentialRegisterService records which smart account a passkey
+// deployed, keyed by that passkey's own WebAuthn credential ID, so a device
+// that only has the (synced) passkey — no local state, no session — can later
+// recover the wallet's address and label instead of the user pasting them in.
+// Called once, right after a successful passkey deploy.
+type passkeyCredentialRegisterService interface {
+	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
+}
+
+// passkeyCredentialLookupService resolves a WebAuthn credential ID to the
+// smart account it deployed, after verifying the caller holds that passkey.
+// Unlike deployProofService, Challenge takes no key reference: the caller
+// doesn't know which credential will answer until the OS ceremony returns one.
+type passkeyCredentialLookupService interface {
+	Challenge(ctx context.Context) (nonceHex string, ttl time.Duration, err error)
+	Lookup(ctx context.Context, credentialID, nonceHex string, authenticatorData, clientDataJSON, signature []byte) (service.PasskeyCredential, error)
+}
+
 type cosignService interface {
 	Create(ctx context.Context, in service.CreateCosignInput) (service.CosignRequest, error)
 	List(ctx context.Context, queueIndex string) ([]service.CosignRequest, error)

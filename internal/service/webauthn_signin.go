@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -271,13 +272,38 @@ func VerifyWebAuthnAssertion(
 	return fmt.Errorf("%w: no on-chain signer key verified the assertion (%d candidates)", ErrBadSignature, len(candidatePubKeys))
 }
 
+// originAllowed reports whether a clientDataJSON origin is permitted.
+//
+// Matching is exact, with one deliberate equivalence: a bare host
+// ("latch.finance") and its https:// form ("https://latch.finance") name the
+// same origin. Browsers and the OS passkey APIs always produce the
+// scheme-qualified form, but mobile's local (non-platform) passkey builds its
+// own clientDataJSON and set origin to the bare RP ID, so an allow-list naming
+// one form silently rejected clients sending the other — a spelling difference
+// that verifies identically but fails the string compare.
+//
+// Nothing else is normalised. A different scheme (http://, chrome-extension://,
+// android:apk-key-hash:) or a different host is a different origin and has to
+// be listed verbatim.
 func originAllowed(origin string, allowed []string) bool {
+	if origin == "" {
+		return false
+	}
 	for _, a := range allowed {
-		if origin == a {
+		if origin == a || httpsForm(origin) == httpsForm(a) {
 			return true
 		}
 	}
 	return false
+}
+
+// httpsForm canonicalises a bare host to its https:// URL form and returns
+// anything that already carries a scheme (or a port) unchanged.
+func httpsForm(origin string) string {
+	if origin == "" || strings.Contains(origin, ":") {
+		return origin
+	}
+	return "https://" + origin
 }
 
 // parseP256PubKey parses a 65-byte uncompressed P-256 point (0x04||X||Y).

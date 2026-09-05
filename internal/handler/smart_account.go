@@ -43,14 +43,16 @@ type SmartAccountHandler struct {
 	deploySvcMainnet smartAccountDeployService
 	proofSvc         deployProofService
 	auditSvc         auditService
+	credSvc          passkeyCredentialRegisterService
 }
 
-func NewSmartAccountHandler(deploySvc, deploySvcMainnet smartAccountDeployService, proofSvc deployProofService, auditSvc auditService) *SmartAccountHandler {
+func NewSmartAccountHandler(deploySvc, deploySvcMainnet smartAccountDeployService, proofSvc deployProofService, auditSvc auditService, credSvc passkeyCredentialRegisterService) *SmartAccountHandler {
 	return &SmartAccountHandler{
 		deploySvc:        deploySvc,
 		deploySvcMainnet: deploySvcMainnet,
 		proofSvc:         proofSvc,
 		auditSvc:         auditSvc,
+		credSvc:          credSvc,
 	}
 }
 
@@ -277,6 +279,13 @@ type deployWebauthnRequest struct {
 	KeyDataHex string      `json:"key_data_hex" binding:"required"`
 	Network    string      `json:"network,omitempty"`
 	Proof      deployProof `json:"proof" binding:"required"`
+	// Label and Seq feed the passkey-credential recovery index (see
+	// passkeyCredentialRegisterService) so a device that only regains this
+	// passkey — via iCloud Keychain / Google Password Manager sync — can
+	// recover the wallet's address and name later. Both optional: omitting
+	// them still deploys the account, just without a recoverable label.
+	Label string `json:"label,omitempty"`
+	Seq   int32  `json:"seq,omitempty"`
 }
 
 // DeployWebauthn godoc
@@ -323,6 +332,16 @@ func (h *SmartAccountHandler) DeployWebauthn(c *gin.Context) {
 		slog.Error("deploy webauthn smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
+	}
+
+	// Best-effort: the deployment itself already succeeded and is the artifact
+	// that matters. A recovery-index write failing here must not turn into a
+	// failed deploy response — the client would retry a deploy that doesn't
+	// need retrying, and DeployByKeyData is idempotent so a retry only wastes
+	// a round trip, it can't fix the index anyway without the same credential
+	// coming back through here again.
+	if err := h.credSvc.Register(c.Request.Context(), req.KeyDataHex, address, req.Label, req.Seq); err != nil {
+		slog.Error("register passkey credential index", "network", network, "err", err)
 	}
 
 	h.respondDeploy(c, req.KeyDataHex, "webauthn", network, address, alreadyDeployed)
