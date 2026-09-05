@@ -79,6 +79,33 @@ func TestVerifyWebAuthnAssertion(t *testing.T) {
 	t.Run("disallowed origin", func(t *testing.T) {
 		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, cdj, sig, []string{"evil.example"}), ErrBadSignature)
 	})
+	// Mobile's local passkey spells its origin as a bare host; the OS passkey
+	// APIs and browsers spell the same origin with the https:// scheme. Either
+	// allow-list entry has to accept either spelling, or a client is rejected
+	// for how the origin is written rather than for what it is.
+	t.Run("bare-host origin against https allow-list entry", func(t *testing.T) {
+		_, _, bareCDJ, bareSig := makeAssertion(t, priv, nonce, "latch.finance")
+		require.NoError(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, bareCDJ, bareSig, []string{"https://latch.finance"}))
+	})
+	t.Run("https origin against bare-host allow-list entry", func(t *testing.T) {
+		require.NoError(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, cdj, sig, []string{"latch.finance"}))
+	})
+	t.Run("http origin is not the https origin", func(t *testing.T) {
+		_, _, plainCDJ, plainSig := makeAssertion(t, priv, nonce, "http://latch.finance")
+		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, plainCDJ, plainSig, []string{"https://latch.finance"}), ErrBadSignature)
+	})
+	t.Run("empty origin is never allowed", func(t *testing.T) {
+		_, _, emptyCDJ, emptySig := makeAssertion(t, priv, nonce, "")
+		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, emptyCDJ, emptySig, []string{"https://latch.finance", ""}), ErrBadSignature)
+	})
+	// The Android OS passkey origin is a scheme of its own: it must match
+	// verbatim and must never be reachable by host normalisation.
+	t.Run("android apk-key-hash origin matches verbatim", func(t *testing.T) {
+		const androidOrigin = "android:apk-key-hash:Rk9PQkFSQkFaUVVYMTIzNDU2Nzg5MGFiY2RlZmdo"
+		_, _, androidCDJ, androidSig := makeAssertion(t, priv, nonce, androidOrigin)
+		require.NoError(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, androidCDJ, androidSig, []string{androidOrigin}))
+		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, androidCDJ, androidSig, []string{"https://latch.finance"}), ErrBadSignature)
+	})
 	t.Run("short authenticator data", func(t *testing.T) {
 		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData[:20], cdj, sig, []string{testOrigin}), ErrBadSignature)
 	})

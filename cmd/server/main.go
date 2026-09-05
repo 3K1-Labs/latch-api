@@ -94,6 +94,7 @@ func main() {
 	relayerMainnetSvc := service.NewRelayerService(cfg.RelayerURLMainnet, cfg.RelayerAPIKeyMainnet, cfg.RelayerTimeout)
 	backupSvc := service.NewBackupService(queries, encSvc)
 	accountSvc := service.NewAccountService(queries, relayerSvc, relayerMainnetSvc)
+	passkeyCredentialSvc := service.NewPasskeyCredentialService(queries, walletNonceSvc, cfg.WebAuthnAllowedOrigins)
 	cosignSvc := service.NewCosignService(queries)
 	wckBundleSvc := service.NewWCKBundleService(queries)
 	pushTokenSvc := service.NewPushTokenService(queries)
@@ -255,7 +256,9 @@ func main() {
 		handler.SmartAccountDeployServiceOrNil(webappSmartAccountSvcMainnet),
 		service.NewDeployProofService(walletNonceSvc, cfg.WebAuthnAllowedOrigins),
 		auditSvc,
+		passkeyCredentialSvc,
 	)
+	passkeyCredentialHandler := handler.NewPasskeyCredentialHandler(passkeyCredentialSvc, auditSvc)
 	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
 	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
 	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
@@ -280,6 +283,12 @@ func main() {
 	// onboarding screen.
 	smartAccountDeployLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "smart-account-deploy", 10, time.Minute)
 	smartAccountChallengeLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "smart-account-challenge", 60, time.Minute)
+	// Recovery lookup carries no session either, so these key by IP too.
+	// Looser than smart-account-deploy: a lookup spends no bundler funds, the
+	// worst case is a wrong guess at someone else's credential ID being told
+	// "no wallet found" a few extra times per minute.
+	passkeyCredentialChallengeLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "passkey-credential-challenge", 60, time.Minute)
+	passkeyCredentialLookupLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "passkey-credential-lookup", 30, time.Minute)
 	// Each relayed transaction spends bundler XLM on resource fees. Authenticated
 	// and per-subject, so this bounds how much one wallet can burn, not one IP.
 	transactionRelayLimiter := middleware.NewSubjectActionRateLimiter(redisClient, "transaction-relay", 30, time.Minute)
@@ -448,6 +457,17 @@ func main() {
 				smartAccount.POST("/webauthn", smartAccountDeployLimiter, smartAccountHandler.DeployWebauthn)
 				smartAccount.POST("/g-address", smartAccountDeployLimiter, smartAccountHandler.DeployGAddress)
 				smartAccount.POST("/multisig", smartAccountDeployLimiter, smartAccountHandler.DeployMultisig)
+			}
+
+			// Passkey recovery index: resolve a WebAuthn credential ID to the
+			// smart account it deployed. No RequireAuth, same reason as
+			// smart-account above — the whole point is a device with no local
+			// state and no session, only the passkey itself. Each route proves
+			// possession of that passkey instead.
+			passkeyCredentials := v1.Group("/passkey-credentials")
+			{
+				passkeyCredentials.POST("/challenge", passkeyCredentialChallengeLimiter, passkeyCredentialHandler.Challenge)
+				passkeyCredentials.POST("/lookup", passkeyCredentialLookupLimiter, passkeyCredentialHandler.Lookup)
 			}
 		} else {
 			slog.Warn("no bundler configured — mobile /v1/smart-account deploy routes disabled")

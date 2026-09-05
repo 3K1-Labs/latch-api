@@ -64,6 +64,17 @@ type CredentialBackup struct {
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
 }
 
+type PasskeyCredential struct {
+	ID                  uuid.UUID `json:"id"`
+	CredentialID        string    `json:"credential_id"`
+	KeyDataHex          string    `json:"key_data_hex"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	Label               string    `json:"label"`
+	Seq                 int32     `json:"seq"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
 type RefreshToken struct {
 	ID            uuid.UUID      `json:"id"`
 	UserID        uuid.NullUUID  `json:"user_id"`

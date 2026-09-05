@@ -120,6 +120,27 @@ type stubAudit struct{}
 
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
+// ── passkeyCredentialRegisterService stub ─────────────────────────────────────
+
+// stubPasskeyCredentialRegister accepts every registration unless err is set,
+// so smart-account deploy tests stay focused on their own behaviour.
+type stubPasskeyCredentialRegister struct {
+	err error
+
+	gotKeyDataHex string
+	gotAddress    string
+	gotLabel      string
+	gotSeq        int32
+}
+
+func (s *stubPasskeyCredentialRegister) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
+	s.gotKeyDataHex = keyDataHex
+	s.gotAddress = smartAccountAddress
+	s.gotLabel = label
+	s.gotSeq = seq
+	return s.err
+}
+
 // ── wckBundleService stub ─────────────────────────────────────────────────────
 
 type stubWCKBundle struct {

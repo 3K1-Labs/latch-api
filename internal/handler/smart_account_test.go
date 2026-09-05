@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,7 +105,7 @@ func newSmartAccountRouter(t *testing.T, testnet, mainnet smartAccountDeployServ
 
 func newSmartAccountRouterWithProof(t *testing.T, testnet, mainnet smartAccountDeployService, proof deployProofService) *gin.Engine {
 	t.Helper()
-	h := NewSmartAccountHandler(testnet, mainnet, proof, &stubAudit{})
+	h := NewSmartAccountHandler(testnet, mainnet, proof, &stubAudit{}, &stubPasskeyCredentialRegister{})
 	r := gin.New()
 	r.POST("/smart-account/challenge", h.DeployChallenge)
 	r.POST("/smart-account/ed25519", h.DeployEd25519)
@@ -266,6 +267,41 @@ func TestDeployWebauthn_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, testContractAddr, decodeDataEnvelope(t, w)["smart_account_address"])
 	assert.Equal(t, testKeyDataHex, svc.gotKeyDataHex)
+}
+
+func TestDeployWebauthn_RegistersPasskeyCredential(t *testing.T) {
+	deploy := &stubSmartAccountDeploy{address: testContractAddr}
+	cred := &stubPasskeyCredentialRegister{}
+	h := NewSmartAccountHandler(deploy, nil, &stubDeployProof{}, &stubAudit{}, cred)
+	r := gin.New()
+	r.POST("/smart-account/webauthn", h.DeployWebauthn)
+
+	w := doDeploy(t, r, "/smart-account/webauthn", map[string]any{
+		"key_data_hex": testKeyDataHex,
+		"label":        "Savings",
+		"seq":          float64(2),
+	})
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, testKeyDataHex, cred.gotKeyDataHex)
+	assert.Equal(t, testContractAddr, cred.gotAddress)
+	assert.Equal(t, "Savings", cred.gotLabel)
+	assert.Equal(t, int32(2), cred.gotSeq)
+}
+
+// A recovery-index write failing must not turn a successful deploy into a
+// failed response — see the comment in DeployWebauthn.
+func TestDeployWebauthn_CredentialRegisterFailureDoesNotFailDeploy(t *testing.T) {
+	deploy := &stubSmartAccountDeploy{address: testContractAddr}
+	cred := &stubPasskeyCredentialRegister{err: errors.New("index unavailable")}
+	h := NewSmartAccountHandler(deploy, nil, &stubDeployProof{}, &stubAudit{}, cred)
+	r := gin.New()
+	r.POST("/smart-account/webauthn", h.DeployWebauthn)
+
+	w := doDeploy(t, r, "/smart-account/webauthn", map[string]any{"key_data_hex": testKeyDataHex})
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, testContractAddr, decodeDataEnvelope(t, w)["smart_account_address"])
 }
 
 func TestDeployWebauthn_InvalidKeyData(t *testing.T) {

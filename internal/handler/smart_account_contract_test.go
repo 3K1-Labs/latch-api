@@ -186,7 +186,7 @@ func TestContract_MobileMultisigDeployBody(t *testing.T) {
 // The challenge body and the envelope mobile parses in requestChallenge().
 func TestContract_MobileChallengeRoundTrip(t *testing.T) {
 	proofSvc := newRealProofService(t)
-	h := NewSmartAccountHandler(&stubSmartAccountDeploy{}, nil, proofSvc, &stubAudit{})
+	h := NewSmartAccountHandler(&stubSmartAccountDeploy{}, nil, proofSvc, &stubAudit{}, &stubPasskeyCredentialRegister{})
 	r := gin.New()
 	r.POST("/smart-account/challenge", h.DeployChallenge)
 

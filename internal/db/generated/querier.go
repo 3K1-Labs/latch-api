@@ -45,6 +45,7 @@ type Querier interface {
 	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error)
 	GetMultisigProposalByID(ctx context.Context, id uuid.UUID) (WebappMultisigProposal, error)
 	GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (WebappOnRampIntent, error)
+	GetPasskeyCredential(ctx context.Context, credentialID string) (PasskeyCredential, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
 	GetSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
@@ -122,6 +123,7 @@ type Querier interface {
 	UpsertMultisigMemberByCredential(ctx context.Context, arg UpsertMultisigMemberByCredentialParams) (uuid.UUID, error)
 	// Same as UpsertMultisigMemberByCredential but for delegated (g_address) signers.
 	UpsertMultisigMemberByGAddress(ctx context.Context, arg UpsertMultisigMemberByGAddressParams) (uuid.UUID, error)
+	UpsertPasskeyCredential(ctx context.Context, arg UpsertPasskeyCredentialParams) (PasskeyCredential, error)
 	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertSmartAccountRegistration(ctx context.Context, arg UpsertSmartAccountRegistrationParams) (SmartAccountRegistration, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
