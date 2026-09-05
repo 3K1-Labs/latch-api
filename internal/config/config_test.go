@@ -100,7 +100,7 @@ func TestLoad_WebAuthnAllowedOrigins(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://latch.finance"}, cfg.WebAuthnAllowedOrigins)
+	assert.Equal(t, []string{"https://uselatch.app"}, cfg.WebAuthnAllowedOrigins)
 
 	t.Setenv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance,chrome-extension://cgmboajonamcelkfpikbmmpohccmkmog")
 
