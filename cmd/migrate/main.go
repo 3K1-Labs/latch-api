@@ -67,7 +67,8 @@ func main() {
 		if len(os.Args) > 2 {
 			n, err := strconv.Atoi(os.Args[2])
 			if err != nil || n < 1 {
-				log.Fatalf("down: N must be a positive integer, got %q", os.Args[2])
+				// #nosec G706 -- sanitizeLogArg strips CR/LF before the argument is echoed, so no log line can be forged
+				log.Fatalf("down: N must be a positive integer, got %q", sanitizeLogArg(os.Args[2]))
 			}
 			steps = n
 		}
@@ -98,7 +99,8 @@ func main() {
 		}
 		v, err := strconv.Atoi(os.Args[2])
 		if err != nil {
-			log.Fatalf("force: invalid version %q", os.Args[2])
+			// #nosec G706 -- sanitizeLogArg strips CR/LF before the argument is echoed, so no log line can be forged
+			log.Fatalf("force: invalid version %q", sanitizeLogArg(os.Args[2]))
 		}
 		if err := m.Force(v); err != nil {
 			log.Fatalf("force version: %v", err)
@@ -110,6 +112,18 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+// sanitizeLogArg strips CR/LF control characters from a user-supplied CLI
+// argument before it is echoed into a log message, preventing CRLF log
+// injection from forging additional log lines.
+func sanitizeLogArg(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // toPgx5URL converts a standard postgres:// URL to the pgx5:// scheme

@@ -68,7 +68,7 @@ func TestSetupSendRules_InvalidSignerType(t *testing.T) {
 }
 
 func TestSetupSendRules_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{setupSendRulesErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{setupSendRulesErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-send-rules", h.SetupSendRules)
 
@@ -262,7 +262,7 @@ func TestSetupSwapRules_AlreadyConfigured(t *testing.T) {
 }
 
 func TestSetupSwapRules_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{setupSwapRulesErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{setupSwapRulesErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/setup-swap-rules", h.SetupSwapRules)
 
@@ -320,7 +320,7 @@ func TestBuildCounter_BadBody(t *testing.T) {
 }
 
 func TestBuildCounter_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildCounterErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildCounterErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build", h.BuildCounter)
 
@@ -367,7 +367,7 @@ func TestBuildDelegatedCounter_BadBody(t *testing.T) {
 }
 
 func TestBuildDelegatedCounter_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildDelegatedCounterErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildDelegatedCounterErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-delegated", h.BuildDelegatedCounter)
 
@@ -564,7 +564,7 @@ func TestBuildSwap_ValidationError(t *testing.T) {
 }
 
 func TestBuildSwap_InternalError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSwapErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSwapErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 

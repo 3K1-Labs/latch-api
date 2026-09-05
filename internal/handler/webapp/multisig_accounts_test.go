@@ -32,7 +32,7 @@ func TestMultisigAccountsList_Success(t *testing.T) {
 }
 
 func TestMultisigAccountsList_ServiceError(t *testing.T) {
-	stub := &stubMultisigAccounts{listErr: assertErr}
+	stub := &stubMultisigAccounts{listErr: errStub}
 	h := NewMultisigAccountsHandler(stub)
 	r := gin.New()
 	r.GET("/multisig/accounts", h.List)

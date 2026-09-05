@@ -98,7 +98,7 @@ func TestOnRampSession_ServiceErrors(t *testing.T) {
 		// Fail closed rather than hand out a session whose memo no relayer knows.
 		{"relayer unavailable", service.ErrRelayerUnavailable, http.StatusServiceUnavailable},
 		{"relayer not configured", service.ErrRelayerNotConfigured, http.StatusServiceUnavailable},
-		{"unexpected error", assertErr, http.StatusInternalServerError},
+		{"unexpected error", errStub, http.StatusInternalServerError},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -331,7 +331,7 @@ func TestOnRampPool_Success(t *testing.T) {
 }
 
 func TestOnRampPool_ServiceError(t *testing.T) {
-	h := NewOnRampHandler(&stubOnRamp{poolErr: assertErr}, testAuditSvc(), testCfg())
+	h := NewOnRampHandler(&stubOnRamp{poolErr: errStub}, testAuditSvc(), testCfg())
 	r := gin.New()
 	r.GET("/on-ramp/pool", h.Pool)
 

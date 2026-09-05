@@ -30,7 +30,7 @@ func TestAccountsList_Success(t *testing.T) {
 }
 
 func TestAccountsList_ServiceError(t *testing.T) {
-	h := NewAccountsHandler(&stubAccounts{err: assertErr}, false)
+	h := NewAccountsHandler(&stubAccounts{err: errStub}, false)
 	r := gin.New()
 	r.GET("/accounts", h.List)
 

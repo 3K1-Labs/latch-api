@@ -24,7 +24,7 @@ func TestCounterGet_Success(t *testing.T) {
 }
 
 func TestCounterGet_ServiceError(t *testing.T) {
-	h := NewCounterHandler(&stubCounter{err: assertErr})
+	h := NewCounterHandler(&stubCounter{err: errStub})
 	r := gin.New()
 	r.GET("/counter", h.Get)
 

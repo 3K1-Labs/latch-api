@@ -743,9 +743,10 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 	}
 
 	submitMethod := "webauthn"
-	if in.SignerType == "freighter" {
+	switch in.SignerType {
+	case "freighter":
 		submitMethod = "delegated"
-	} else if in.SignerType == "phantom" {
+	case "phantom":
 		submitMethod = "bundler-delegated"
 	}
 

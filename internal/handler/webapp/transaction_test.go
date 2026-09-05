@@ -112,7 +112,7 @@ func TestBuildSend_FreighterMissingSignerG(t *testing.T) {
 }
 
 func TestBuildSend_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSendErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSendErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -331,7 +331,7 @@ func TestSubmitWebAuthn_AuthEntriesXdrAccepted(t *testing.T) {
 }
 
 func TestSubmitWebAuthn_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -486,7 +486,7 @@ func TestSubmitDelegated_MissingAuthEntry(t *testing.T) {
 }
 
 func TestSubmitDelegated_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -637,7 +637,7 @@ func TestSubmitPhantom_MissingAuthEntry(t *testing.T) {
 }
 
 func TestSubmitPhantom_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitPhantomErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitPhantomErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit", h.SubmitPhantom)
 
@@ -855,7 +855,7 @@ func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
 }
 
 func TestPrepareSign_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{prepareSignErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: errStub}, nil, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 

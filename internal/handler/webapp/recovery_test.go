@@ -51,7 +51,7 @@ func TestRecoveryBackupPasskey_UnknownAccount(t *testing.T) {
 }
 
 func TestRecoveryBackupPasskey_ServiceError(t *testing.T) {
-	h := NewRecoveryHandler(&stubBackupPasskey{err: assertErr})
+	h := NewRecoveryHandler(&stubBackupPasskey{err: errStub})
 	r := gin.New()
 	r.POST("/recovery/backup-passkey", h.BackupPasskey)
 

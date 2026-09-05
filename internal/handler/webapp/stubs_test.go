@@ -9,7 +9,7 @@ import (
 	"github.com/latch/backend/internal/service/webapp"
 )
 
-var assertErr = errors.New("stub error")
+var errStub = errors.New("stub error")
 
 type stubWebauthn struct {
 	beginRegOpts   webapp.RegistrationOptions

@@ -56,7 +56,7 @@ func TestSmartAccountQuery_MissingParams(t *testing.T) {
 }
 
 func TestSmartAccountQuery_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{queryErr: errStub}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/webauthn", h.Query)
 
@@ -158,7 +158,7 @@ func TestSmartAccountDeploy_MissingCredentialID(t *testing.T) {
 }
 
 func TestSmartAccountDeploy_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployByKeyErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployByKeyErr: errStub}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.Deploy)
 
@@ -254,7 +254,7 @@ func TestSmartAccountContextRules_MissingAddress(t *testing.T) {
 }
 
 func TestSmartAccountContextRules_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{err: assertErr}, &stubContextRules{err: assertErr}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{err: errStub}, &stubContextRules{err: errStub}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/context-rules", h.ContextRules)
 
@@ -326,7 +326,7 @@ func TestSmartAccountBalances_MissingAddress(t *testing.T) {
 }
 
 func TestSmartAccountBalances_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{err: assertErr}, &stubBalances{err: assertErr}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{err: errStub}, &stubBalances{err: errStub}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/balances", h.Balances)
 
@@ -382,7 +382,7 @@ func TestQueryFreighter_InvalidGAddress(t *testing.T) {
 }
 
 func TestQueryFreighter_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterErr: errStub}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.GET("/smart-account/freighter", h.QueryFreighter)
 
@@ -484,7 +484,7 @@ func TestDeployFreighter_NetworkInvalid(t *testing.T) {
 }
 
 func TestDeployFreighter_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterErr: errStub}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/freighter", h.DeployFreighter)
 
@@ -536,7 +536,7 @@ func TestConnectPhantom_InvalidPublicKey(t *testing.T) {
 }
 
 func TestConnectPhantom_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{connectPhantomErr: assertErr}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{connectPhantomErr: errStub}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account", h.ConnectPhantom)
 

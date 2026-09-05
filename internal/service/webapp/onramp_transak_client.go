@@ -228,6 +228,8 @@ func (c *transakClient) CreateWidgetURL(ctx context.Context, in transakSessionIn
 // *TransakAPIError carrying Transak's own message, truncated — the body is
 // upstream-controlled and ends up in a dev-only error response.
 func (c *transakClient) do(req *http.Request, out any) error {
+	// #nosec G704 -- request URLs are fixed Transak endpoints or the
+	// operator-configured apiBaseOverride; no user-controlled URL is used.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("transak request: %w", err)
