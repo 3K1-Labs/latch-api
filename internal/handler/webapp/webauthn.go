@@ -28,12 +28,13 @@ type WebAuthnHandler struct {
 	webauthnSvc     webauthnService
 	smartAccountSvc smartAccountService
 	accountsSvc     accountsService
+	credentialSvc   passkeyCredentialIndexService
 	auditSvc        auditService
 	cfg             *config.Config
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, auditSvc auditService, cfg *config.Config) *WebAuthnHandler {
-	return &WebAuthnHandler{webauthnSvc: webauthnSvc, smartAccountSvc: smartAccountSvc, accountsSvc: accountsSvc, auditSvc: auditSvc, cfg: cfg}
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, auditSvc auditService, cfg *config.Config) *WebAuthnHandler {
+	return &WebAuthnHandler{webauthnSvc: webauthnSvc, smartAccountSvc: smartAccountSvc, accountsSvc: accountsSvc, credentialSvc: credentialSvc, auditSvc: auditSvc, cfg: cfg}
 }
 
 func (h *WebAuthnHandler) webAuthnConfig() webapp.WebAuthnConfig {
@@ -217,6 +218,16 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 		slog.Error("deploy smart account for credential", "userID", userID, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
+	}
+
+	// Best-effort recovery-index write, mirroring the mobile deploy path
+	// (handler.SmartAccountHandler.DeployWebauthn). The deploy already
+	// succeeded and is the artifact that matters; a failed index write must
+	// not turn into a failed registration. Label is empty — the display name
+	// is a begin-ceremony field and isn't carried into finish; the address is
+	// what unblocks passkey sign-in on a fresh device.
+	if err := h.credentialSvc.Register(c.Request.Context(), keyDataHex, smartAccountAddress, "", 0); err != nil {
+		slog.Error("register passkey credential index", "userID", userID, "err", err)
 	}
 
 	h.auditSvc.Log(c.Request.Context(), userID, "webauthn_registered", c.ClientIP(), c.Request.UserAgent(), map[string]any{

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -277,6 +279,9 @@ func TestFinishAuthentication_Success(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+// TestFinishAuthentication_CredentialNotFound: the credential is in neither
+// webapp.webauthn_credentials nor the public.passkey_credentials recovery
+// index, so there is nothing to verify against.
 func TestFinishAuthentication_CredentialNotFound(t *testing.T) {
 	svc, mock := newMockWebAuthnService(t)
 	uid := uuid.New()
@@ -288,7 +293,9 @@ func TestFinishAuthentication_CredentialNotFound(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "purpose", "challenge", "rp_id", "origin", "expires_at", "created_at"}).
 			AddRow(uuid.New(), uid, PurposeAuthentication, "chal", "latch.finance", "https://latch.finance", time.Now().Add(time.Minute).UnixMilli(), time.Now().UnixMilli()))
 	mock.ExpectQuery("SELECT id, user_id, credential_id, credential_id_bytes, cose_public_key").
-		WillReturnError(assert.AnError)
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("FROM passkey_credentials").
+		WillReturnError(sql.ErrNoRows)
 
 	_, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
 		UserID:            uid.String(),
@@ -296,8 +303,89 @@ func TestFinishAuthentication_CredentialNotFound(t *testing.T) {
 		ClientDataJSON:    cdJSON,
 		AuthenticatorData: authData,
 	})
-	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
 	require.ErrorIs(t, err, ErrCredentialNotFound)
+}
+
+// TestFinishAuthentication_AdoptsExternalPasskey: a passkey with no
+// webapp.webauthn_credentials row but a public.passkey_credentials index
+// entry (e.g. created on mobile) verifies against the indexed key and is
+// provisioned into the webapp for the current session user.
+func TestFinishAuthentication_AdoptsExternalPasskey(t *testing.T) {
+	svc, mock := newMockWebAuthnService(t)
+	uid := uuid.New()
+	credID := []byte("credential-id-bytes")
+	credIDB64 := base64.RawURLEncoding.EncodeToString(credID)
+	priv, rawPubKey := testP256Key(t)
+	keyDataHex := hex.EncodeToString(rawPubKey) + hex.EncodeToString(credID)
+	addr := "CDJKQLOBZG6GJDQLLYYB7Z65MMFD4B2C45ANEIGTACTBALRZXLZRLZMK"
+
+	authData := buildAuthenticatorData(t, "latch.finance", flagUserPresent, 9, nil, nil)
+	cdJSON := clientDataJSON(t, "webauthn.get", "chal", "https://latch.finance")
+	sig := signAssertion(t, priv, authData, cdJSON)
+
+	mock.ExpectQuery("SELECT id, user_id, purpose, challenge, rp_id, origin, expires_at, created_at").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "purpose", "challenge", "rp_id", "origin", "expires_at", "created_at"}).
+			AddRow(uuid.New(), uid, PurposeAuthentication, "chal", "latch.finance", "https://latch.finance", time.Now().Add(time.Minute).UnixMilli(), time.Now().UnixMilli()))
+	mock.ExpectQuery("SELECT id, user_id, credential_id, credential_id_bytes, cose_public_key").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("FROM passkey_credentials").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
+		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, addr, "", int32(0), time.Now(), time.Now()))
+	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectQuery("INSERT INTO webapp.webauthn_credentials").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+	mock.ExpectQuery("INSERT INTO webapp.smart_accounts").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+	mock.ExpectCommit()
+
+	result, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
+		UserID:            uid.String(),
+		CredentialID:      credID,
+		ClientDataJSON:    cdJSON,
+		AuthenticatorData: authData,
+		Signature:         sig,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, credIDB64, result.CredentialID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestFinishAuthentication_AdoptExternalPasskeyBadSignature: an indexed
+// credential is found but the assertion doesn't verify against its key —
+// nothing is provisioned and the challenge is not consumed.
+func TestFinishAuthentication_AdoptExternalPasskeyBadSignature(t *testing.T) {
+	svc, mock := newMockWebAuthnService(t)
+	uid := uuid.New()
+	credID := []byte("credential-id-bytes")
+	_, rawPubKey := testP256Key(t)
+	wrongPriv, _ := testP256Key(t)
+	keyDataHex := hex.EncodeToString(rawPubKey) + hex.EncodeToString(credID)
+
+	authData := buildAuthenticatorData(t, "latch.finance", flagUserPresent, 9, nil, nil)
+	cdJSON := clientDataJSON(t, "webauthn.get", "chal", "https://latch.finance")
+	sig := signAssertion(t, wrongPriv, authData, cdJSON)
+
+	mock.ExpectQuery("SELECT id, user_id, purpose, challenge, rp_id, origin, expires_at, created_at").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "purpose", "challenge", "rp_id", "origin", "expires_at", "created_at"}).
+			AddRow(uuid.New(), uid, PurposeAuthentication, "chal", "latch.finance", "https://latch.finance", time.Now().Add(time.Minute).UnixMilli(), time.Now().UnixMilli()))
+	mock.ExpectQuery("SELECT id, user_id, credential_id, credential_id_bytes, cose_public_key").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("FROM passkey_credentials").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
+		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, "CDJKQLOBZG6GJDQLLYYB7Z65MMFD4B2C45ANEIGTACTBALRZXLZRLZMK", "", int32(0), time.Now(), time.Now()))
+
+	_, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
+		UserID:            uid.String(),
+		CredentialID:      credID,
+		ClientDataJSON:    cdJSON,
+		AuthenticatorData: authData,
+		Signature:         sig,
+	})
+	require.ErrorIs(t, err, ErrVerificationFailed)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 // TestFinishAuthentication_ReassignsOwnerOnMismatch covers logging in from a

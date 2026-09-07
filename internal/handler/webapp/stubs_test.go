@@ -108,6 +108,19 @@ type stubAudit struct{}
 
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
+type stubCredentialIndex struct {
+	gotKeyDataHex, gotAddress, gotLabel string
+	gotSeq                              int32
+	called                              bool
+	err                                 error
+}
+
+func (s *stubCredentialIndex) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
+	s.called = true
+	s.gotKeyDataHex, s.gotAddress, s.gotLabel, s.gotSeq = keyDataHex, smartAccountAddress, label, seq
+	return s.err
+}
+
 type stubTransaction struct {
 	buildSendResult         webapp.BuildSendResult
 	buildSendErr            error

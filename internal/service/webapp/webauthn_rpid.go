@@ -119,7 +119,7 @@ func ResolveCeremonyContext(in CeremonyBeginInput, cfg WebAuthnConfig) (rpID, or
 		return "", "", err
 	}
 	if found {
-		return extID, "chrome-extension://" + extID, nil
+		return cfg.RPID, "chrome-extension://" + extID, nil
 	}
 
 	return resolveWebRPIDAndOrigin(cfg, in.RequestHost)
@@ -206,7 +206,7 @@ func ResolveFinishVerification(in CeremonyFinishInput, challenge StoredChallenge
 		if !containsString(cfg.AllowedExtensionIDs, extID) {
 			return "", nil, ErrExtensionIDNotAllowed
 		}
-		return "chrome-extension://" + extID, chromeExtensionRPIDCandidates(extID), nil
+		return "chrome-extension://" + extID, dedupe(cfg.RPID), nil
 	}
 
 	if clientDataIsExt {
@@ -215,7 +215,7 @@ func ResolveFinishVerification(in CeremonyFinishInput, challenge StoredChallenge
 		if !containsString(cfg.AllowedExtensionIDs, clientDataExtID) {
 			return "", nil, ErrExtensionIDNotAllowed
 		}
-		return "chrome-extension://" + clientDataExtID, chromeExtensionRPIDCandidates(clientDataExtID), nil
+		return "chrome-extension://" + clientDataExtID, dedupe(cfg.RPID), nil
 	}
 
 	// Plain web flow: the authenticator's clientDataJSON.origin must match the
