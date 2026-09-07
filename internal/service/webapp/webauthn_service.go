@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -404,8 +405,17 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 
 	credentialIDB64 := base64.RawURLEncoding.EncodeToString(in.CredentialID)
 	cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credentialIDB64)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A passkey created on another Latch surface — the mobile app writes
+		// only public.passkey_credentials, never webapp.webauthn_credentials —
+		// signing in here for the first time. Verify it against that shared
+		// index and adopt it into the webapp so later sign-ins take the path
+		// below. All ceremony checks (challenge, client data, rpID hash, user
+		// presence) have already passed.
+		return s.adoptExternalPasskey(ctx, in, challenge, authData, credentialIDB64)
+	}
 	if err != nil {
-		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
+		return AuthenticatedCredential{}, fmt.Errorf("get webauthn credential: %w", err)
 	}
 
 	digest := signedDataDigest(in.AuthenticatorData, in.ClientDataJSON)
@@ -447,6 +457,106 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 		if err := s.reassignCredentialOwner(ctx, credentialIDB64, newOwnerID); err != nil {
 			return AuthenticatedCredential{}, fmt.Errorf("reassign credential owner: %w", err)
 		}
+	}
+
+	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: in.UserID}, nil
+}
+
+// p256UncompressedHexLen is the hex length of a 65-byte uncompressed P-256
+// point (0x04 || X || Y) — the prefix of a passkey's key_data_hex, the rest
+// being the credential ID (mirrors deploy_proof.go's webauthnPubKeyHexLen).
+const p256UncompressedHexLen = 130
+
+// adoptExternalPasskey completes an authentication ceremony for a passkey
+// that has no webapp.webauthn_credentials row — one registered on another
+// Latch surface (the mobile deploy path writes only
+// public.passkey_credentials). It verifies the assertion against the public
+// key recorded in that shared index, then provisions the webapp credential +
+// smart-account rows for the current session user so every later sign-in
+// takes the normal path. The caller has already verified the challenge,
+// client data, rpID hash and user-presence flag.
+func (s *WebAuthnService) adoptExternalPasskey(
+	ctx context.Context,
+	in FinishAuthenticationInput,
+	challenge storedChallenge,
+	authData *authenticatorData,
+	credentialIDB64 string,
+) (AuthenticatedCredential, error) {
+	row, err := s.q.GetPasskeyCredential(ctx, hex.EncodeToString(in.CredentialID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
+	}
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("get passkey credential index: %w", err)
+	}
+
+	if len(row.KeyDataHex) <= p256UncompressedHexLen {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: indexed key data too short", ErrVerificationFailed)
+	}
+	pubKey, err := hex.DecodeString(row.KeyDataHex[:p256UncompressedHexLen])
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: indexed key data not hex", ErrVerificationFailed)
+	}
+
+	digest := signedDataDigest(in.AuthenticatorData, in.ClientDataJSON)
+	if !verifyP256Signature(pubKey, digest, in.Signature) {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: signature verification failed", ErrVerificationFailed)
+	}
+
+	// Verification succeeded — consume the challenge before the writes, so a
+	// failed write can't leave it replayable (matches the normal path).
+	if err := s.consumeChallenge(ctx, challenge.ID); err != nil {
+		return AuthenticatedCredential{}, err
+	}
+
+	ownerID, err := uuid.Parse(in.UserID)
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("parse user id: %w", err)
+	}
+	cosePublicKey, err := rawP256ToCoseEC2(pubKey)
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("encode cose key: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback on any non-commit path is intentional
+	qtx := s.q.WithTx(tx)
+
+	now := time.Now().UnixMilli()
+	if _, err := qtx.UpsertWebauthnCredential(ctx, db.UpsertWebauthnCredentialParams{
+		ID:                uuid.New(),
+		UserID:            ownerID,
+		CredentialID:      credentialIDB64,
+		CredentialIDBytes: in.CredentialID,
+		CosePublicKey:     cosePublicKey,
+		P256RawPublicKey:  pubKey,
+		SignCount:         int64(authData.SignCount),
+		Transports:        sql.NullString{},
+		DeviceType:        sql.NullString{},
+		BackedUp:          1, // reached us from another surface — a synced passkey by definition
+		CreatedAt:         now,
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("store adopted webauthn credential: %w", err)
+	}
+
+	if _, err := qtx.UpsertSmartAccount(ctx, db.UpsertSmartAccountParams{
+		ID:                  uuid.New(),
+		UserID:              ownerID,
+		CredentialID:        credentialIDB64,
+		KeyDataHex:          row.KeyDataHex,
+		SaltHex:             hex.EncodeToString(DeriveWebauthnSalt(row.KeyDataHex)),
+		SmartAccountAddress: row.SmartAccountAddress,
+		Deployed:            1,
+		CreatedAt:           now,
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("store adopted smart account: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("commit: %w", err)
 	}
 
 	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: in.UserID}, nil
@@ -597,6 +707,24 @@ func coseEC2ToRawP256Uncompressed(cosePublicKey []byte) ([]byte, error) {
 	copy(raw[1:33], key.X)
 	copy(raw[33:65], key.Y)
 	return raw, nil
+}
+
+// rawP256ToCoseEC2 is the inverse of coseEC2ToRawP256Uncompressed: it wraps a
+// 65-byte uncompressed P-256 point (0x04 || X || Y) into a CBOR-encoded EC2
+// COSE_Key. Needed when adopting a passkey whose only stored form is the raw
+// point — public.passkey_credentials keeps key_data_hex, not the original
+// COSE bytes, but webapp.webauthn_credentials.cose_public_key is NOT NULL.
+func rawP256ToCoseEC2(rawPubKey []byte) ([]byte, error) {
+	if len(rawPubKey) != 65 || rawPubKey[0] != 0x04 {
+		return nil, fmt.Errorf("expected 65-byte uncompressed P-256 point")
+	}
+	return cbor.Marshal(coseKey{
+		Kty: 2,  // EC2
+		Alg: -7, // ES256
+		Crv: 1,  // P-256
+		X:   rawPubKey[1:33],
+		Y:   rawPubKey[33:65],
+	})
 }
 
 // attestationObjectCBOR is the top-level CBOR structure of the
