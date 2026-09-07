@@ -514,7 +514,7 @@ func main() {
 	}
 
 	if webappSmartAccountSvc != nil {
-		webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, webappAuditSvc, cfg)
+		webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAuditSvc, cfg)
 		webauthnGroup := webappGroup.Group("/webauthn")
 		{
 			webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)

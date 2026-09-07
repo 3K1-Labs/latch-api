@@ -30,6 +30,17 @@ type accountsService interface {
 	ListAccounts(ctx context.Context, userID string) ([]webapp.Account, error)
 }
 
+// passkeyCredentialIndexService records which smart account a passkey
+// deployed, keyed by that passkey's own WebAuthn credential ID, so a device
+// that only has the (synced) passkey — no local state, no session — can later
+// recover the wallet's address without the user pasting it in. The mobile
+// deploy path (handler.SmartAccountHandler.DeployWebauthn) already does this;
+// wiring it here closes the gap where an extension-created passkey account is
+// invisible to that recovery lookup.
+type passkeyCredentialIndexService interface {
+	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
+}
+
 type auditService interface {
 	Log(ctx context.Context, userID, action, ipAddr, userAgent string, metadata map[string]any)
 }
