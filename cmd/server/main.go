@@ -168,10 +168,6 @@ func main() {
 		slog.Warn("BUNDLER_SECRET not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
 	case cfg.WebAppFactoryAddress == "":
 		slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
-	case cfg.WebAppWebAuthnRPID == "":
-		slog.Warn("WEBAUTHN_RP_ID not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
-	case cfg.WebAppWebAuthnOrigin == "":
-		slog.Warn("WEBAUTHN_ORIGIN not configured — webapp webauthn/smart-account/transaction/multisig routes disabled")
 	default:
 		if bundlerSvc, err := webapp.NewBundlerService(cfg.WebAppBundlerSecret, cfg.WebAppLegacyDelegatedSignerSecret); err != nil {
 			slog.Warn("invalid BUNDLER_SECRET — webapp webauthn/smart-account/transaction/multisig routes disabled", "err", err)
@@ -514,14 +510,23 @@ func main() {
 	}
 
 	if webappSmartAccountSvc != nil {
-		webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAuditSvc, cfg)
-		webauthnGroup := webappGroup.Group("/webauthn")
-		{
-			webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
-			webauthnGroup.POST("/registration/finish", webappWebauthnHandler.RegistrationFinish)
-			webauthnGroup.POST("/authentication/begin", webappWebauthnHandler.AuthenticationBegin)
-			webauthnGroup.POST("/authentication/finish", webappWebauthnHandler.AuthenticationFinish)
-			webauthnGroup.GET("/credentials", webappWebauthnHandler.Credentials)
+		// The webapp WebAuthn ceremony routes (registration/authentication) are
+		// the only consumers of WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN — the bundler-paid
+		// deploy/transaction paths, including mobile's shared /v1/smart-account
+		// routes, do not touch them. Gate only these routes on that config so a
+		// missing webapp RP setup can't disable smart-account deployment.
+		if cfg.WebAppWebAuthnRPID == "" || cfg.WebAppWebAuthnOrigin == "" {
+			slog.Warn("WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN not configured — webapp /webapp/webauthn ceremony routes disabled")
+		} else {
+			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAuditSvc, cfg)
+			webauthnGroup := webappGroup.Group("/webauthn")
+			{
+				webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
+				webauthnGroup.POST("/registration/finish", webappWebauthnHandler.RegistrationFinish)
+				webauthnGroup.POST("/authentication/begin", webappWebauthnHandler.AuthenticationBegin)
+				webauthnGroup.POST("/authentication/finish", webappWebauthnHandler.AuthenticationFinish)
+				webauthnGroup.GET("/credentials", webappWebauthnHandler.Credentials)
+			}
 		}
 
 		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
