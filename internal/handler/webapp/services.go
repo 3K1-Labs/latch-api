@@ -28,6 +28,14 @@ type smartAccountService interface {
 
 type accountsService interface {
 	ListAccounts(ctx context.Context, userID string) ([]webapp.Account, error)
+	ListAccountsForCredential(ctx context.Context, userID, credentialID string) ([]webapp.Account, error)
+}
+
+// sessionIssuer mints a fresh webapp session bound to an existing user. Used
+// by the WebAuthn login handler when a verified assertion resolves to a
+// different user than the caller's "sid" cookie names.
+type sessionIssuer interface {
+	IssueForUser(ctx context.Context, userID string) (webapp.Session, error)
 }
 
 // passkeyCredentialIndexService records which smart account a passkey
