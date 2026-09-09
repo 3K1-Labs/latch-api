@@ -75,11 +75,14 @@ type Querier interface {
 	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
 	InsertWebauthnChallenge(ctx context.Context, arg InsertWebauthnChallengeParams) error
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
-	// Visible to a user if they created the account OR they have a member row
-	// (established at draft-join time or via register) linked to their session.
-	// The caller's own member id (needed by the extension for proposal
-	// approvals) is resolved separately in Go from ListMultisigMembersForAccount,
-	// since sqlc can't reliably infer nullability for a synthetic joined column.
+	// Visible to a user only if they hold a member row (established at draft-join
+	// time, via register, or re-linked at login by RelinkMultisigMembersByCredential)
+	// linked to their session — i.e. a wallet they can actually sign for. Creator
+	// rows (a.user_id) are deliberately NOT a visibility source: a session that
+	// merely deployed a wallet it holds no signer in must not appear to own it.
+	// The caller's own member id (needed by the extension for proposal approvals)
+	// is resolved separately in Go from ListMultisigMembersForAccount, since sqlc
+	// can't reliably infer nullability for a synthetic joined column.
 	ListMultisigAccountsWithProposalCountForUser(ctx context.Context, userID uuid.UUID) ([]ListMultisigAccountsWithProposalCountForUserRow, error)
 	ListMultisigApprovalsWithMemberForProposal(ctx context.Context, proposalID uuid.UUID) ([]ListMultisigApprovalsWithMemberForProposalRow, error)
 	ListMultisigDraftMembersForDraft(ctx context.Context, draftID uuid.UUID) ([]WebappMultisigDraftMember, error)
@@ -93,6 +96,12 @@ type Querier interface {
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
 	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
+	// Re-points every member row for a given passkey at the user who just proved
+	// ownership of it in a WebAuthn assertion. This is the same linking rule
+	// RegisterAccount applies, triggered at login where it needs no salt and no
+	// member list — the fix for "my multisig wallets are missing on a new device".
+	// Delegated (g_address) members have no login ceremony and are unaffected.
+	RelinkMultisigMembersByCredential(ctx context.Context, arg RelinkMultisigMembersByCredentialParams) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
@@ -108,9 +117,7 @@ type Querier interface {
 	// back its own field, discarding the other's. COALESCE keeps the existing value
 	// whenever the caller passed NULL, so both fields survive either order.
 	UpdateOnRampIntent(ctx context.Context, arg UpdateOnRampIntentParams) (WebappOnRampIntent, error)
-	UpdateSmartAccountUserIDByCredentialID(ctx context.Context, arg UpdateSmartAccountUserIDByCredentialIDParams) error
 	UpdateWebauthnCredentialSignCount(ctx context.Context, arg UpdateWebauthnCredentialSignCountParams) error
-	UpdateWebauthnCredentialUserID(ctx context.Context, arg UpdateWebauthnCredentialUserIDParams) error
 	UpsertBackup(ctx context.Context, arg UpsertBackupParams) error
 	UpsertClientEncryptedBackup(ctx context.Context, arg UpsertClientEncryptedBackupParams) error
 	UpsertEncryptionKey(ctx context.Context, arg UpsertEncryptionKeyParams) (string, error)

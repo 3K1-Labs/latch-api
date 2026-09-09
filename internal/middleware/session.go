@@ -44,7 +44,7 @@ func EnsureSession(svc sessionResolver, crossSiteCookies bool) gin.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(c, sess.ID, crossSiteCookies)
+		SetSessionCookie(c, sess.ID, crossSiteCookies)
 
 		ctx := context.WithValue(c.Request.Context(), SessionUserIDKey, sess.UserID)
 		c.Request = c.Request.WithContext(ctx)
@@ -52,7 +52,12 @@ func EnsureSession(svc sessionResolver, crossSiteCookies bool) gin.HandlerFunc {
 	}
 }
 
-func setSessionCookie(c *gin.Context, sessionID string, crossSite bool) {
+// SetSessionCookie writes the "sid" session cookie with the SameSite/Secure
+// attributes appropriate for the deployment. Exported so a handler that
+// re-issues a session mid-request (webapp WebAuthn login resolving to a
+// different user than the cookie names) can refresh the cookie the same way
+// EnsureSession does.
+func SetSessionCookie(c *gin.Context, sessionID string, crossSite bool) {
 	maxAge := int(webapp.SessionTTL.Seconds())
 	if crossSite {
 		c.SetSameSite(http.SameSiteNoneMode)

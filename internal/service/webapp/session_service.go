@@ -76,6 +76,32 @@ func (s *SessionService) refresh(ctx context.Context, sid uuid.UUID) (Session, b
 	return Session{ID: sid.String(), UserID: row.UserID.String(), ExpiresAt: newExpiry}, true, nil
 }
 
+// IssueForUser mints a fresh session bound to an already-existing webapp user
+// and returns it. Used when a WebAuthn assertion proves the caller is a
+// different user than the one their current cookie names — the session
+// follows the credential's owner rather than the credential being relocated
+// onto the cookie (see webauthn_service.FinishAuthentication).
+func (s *SessionService) IssueForUser(ctx context.Context, userID string) (Session, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return Session{}, fmt.Errorf("parse user id: %w", err)
+	}
+
+	now := time.Now()
+	sessionID := uuid.New()
+	expiresAt := now.Add(SessionTTL)
+	if err := s.q.InsertWebappSession(ctx, db.InsertWebappSessionParams{
+		ID:        sessionID,
+		UserID:    uid,
+		CreatedAt: now.UnixMilli(),
+		ExpiresAt: expiresAt.UnixMilli(),
+	}); err != nil {
+		return Session{}, fmt.Errorf("insert webapp session for user: %w", err)
+	}
+
+	return Session{ID: sessionID.String(), UserID: uid.String(), ExpiresAt: expiresAt}, nil
+}
+
 func (s *SessionService) create(ctx context.Context) (Session, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

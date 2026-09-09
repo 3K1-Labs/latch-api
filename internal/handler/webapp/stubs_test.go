@@ -98,10 +98,32 @@ func (s *stubSmartAccount) ConnectPhantom(_ context.Context, _, _, _ string) (we
 type stubAccounts struct {
 	accounts []webapp.Account
 	err      error
+
+	forCredentialAccounts []webapp.Account
+	forCredentialErr      error
+	gotCredentialID       string
 }
 
 func (s *stubAccounts) ListAccounts(_ context.Context, _ string) ([]webapp.Account, error) {
 	return s.accounts, s.err
+}
+
+func (s *stubAccounts) ListAccountsForCredential(_ context.Context, _, credentialID string) ([]webapp.Account, error) {
+	s.gotCredentialID = credentialID
+	return s.forCredentialAccounts, s.forCredentialErr
+}
+
+type stubSessionIssuer struct {
+	session webapp.Session
+	err     error
+	gotUser string
+	calls   int
+}
+
+func (s *stubSessionIssuer) IssueForUser(_ context.Context, userID string) (webapp.Session, error) {
+	s.calls++
+	s.gotUser = userID
+	return s.session, s.err
 }
 
 type stubAudit struct{}

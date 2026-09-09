@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/middleware"
+	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
 
@@ -22,16 +23,25 @@ func NewAccountsHandler(accountsSvc accountsService, crossSiteCookies bool) *Acc
 
 // List godoc
 // @Summary      List the session user's smart accounts
-// @Description  Returns every smart account (seed and passkey wallets) owned by the session user.
+// @Description  Returns every smart account (seed and passkey wallets) owned by the session user. Pass ?credentialId= to narrow the response to the single wallet for that passkey (empty if it isn't the session user's).
 // @Tags         accounts
 // @Produce      json
+// @Param        credentialId query string false "base64url WebAuthn credential ID to filter by"
 // @Success      200 {object} map[string]any
 // @Failure      500 {object} webappErrorResponse
 // @Router       /api/accounts [get]
 func (h *AccountsHandler) List(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	accounts, err := h.accountsSvc.ListAccounts(c.Request.Context(), userID)
+	var (
+		accounts []webapp.Account
+		err      error
+	)
+	if credentialID := c.Query("credentialId"); credentialID != "" {
+		accounts, err = h.accountsSvc.ListAccountsForCredential(c.Request.Context(), userID, credentialID)
+	} else {
+		accounts, err = h.accountsSvc.ListAccounts(c.Request.Context(), userID)
+	}
 	if err != nil {
 		slog.Error("list accounts", "userID", userID, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
