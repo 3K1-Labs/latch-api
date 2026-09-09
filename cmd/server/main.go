@@ -518,7 +518,7 @@ func main() {
 		if cfg.WebAppWebAuthnRPID == "" || cfg.WebAppWebAuthnOrigin == "" {
 			slog.Warn("WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN not configured — webapp /webapp/webauthn ceremony routes disabled")
 		} else {
-			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAuditSvc, cfg)
+			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappSessionSvc, webappAuditSvc, cfg, crossSiteWebAppCookies)
 			webauthnGroup := webappGroup.Group("/webauthn")
 			{
 				webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)

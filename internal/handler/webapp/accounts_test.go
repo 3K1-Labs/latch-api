@@ -29,6 +29,39 @@ func TestAccountsList_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDR1"`)
 }
 
+func TestAccountsList_FiltersByCredentialID(t *testing.T) {
+	stub := &stubAccounts{
+		accounts:              []webapp.Account{{SmartAccountAddress: "CSIBLING", CredentialID: "cred-other"}},
+		forCredentialAccounts: []webapp.Account{{SmartAccountAddress: "CADDR1", CredentialID: "cred-1", Deployed: true}},
+	}
+	h := NewAccountsHandler(stub, false)
+	r := gin.New()
+	r.GET("/accounts", h.List)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodGet, "/accounts?credentialId=cred-1", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "cred-1", stub.gotCredentialID)
+	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDR1"`)
+	assert.NotContains(t, w.Body.String(), "CSIBLING")
+}
+
+func TestAccountsList_CredentialIDNotOwned_EmptyList(t *testing.T) {
+	stub := &stubAccounts{forCredentialAccounts: nil}
+	h := NewAccountsHandler(stub, false)
+	r := gin.New()
+	r.GET("/accounts", h.List)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodGet, "/accounts?credentialId=cred-x", nil), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"accounts":[]`)
+}
+
 func TestAccountsList_ServiceError(t *testing.T) {
 	h := NewAccountsHandler(&stubAccounts{err: assertErr}, false)
 	r := gin.New()

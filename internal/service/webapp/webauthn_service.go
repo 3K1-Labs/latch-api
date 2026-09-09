@@ -363,7 +363,11 @@ type FinishAuthenticationInput struct {
 // authentication.
 type AuthenticatedCredential struct {
 	CredentialID string // base64url
-	UserID       string
+	// UserID is the credential's proven owner — its stored owner for a known
+	// credential, or a freshly-minted user for a first-seen external passkey.
+	// It may differ from the session cookie's user; when it does, the handler
+	// re-issues the session cookie so the caller becomes this user.
+	UserID string
 }
 
 // FinishAuthentication verifies a completed authentication ceremony against
@@ -442,24 +446,26 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 		return AuthenticatedCredential{}, fmt.Errorf("update sign count: %w", err)
 	}
 
-	// A verified signature is the actual proof of ownership here — the
-	// session cookie is secondary and may legitimately not match the
-	// credential's original owner (first login from a new browser context,
-	// cookie cleared, registered via the web app and now signing in via the
-	// extension, etc.). Re-bind the credential and its smart account to the
-	// current session rather than rejecting, mirroring
-	// app/api/webauthn/authentication/finish/route.ts's own reassignment.
-	if cred.UserID.String() != in.UserID {
-		newOwnerID, err := uuid.Parse(in.UserID)
-		if err != nil {
-			return AuthenticatedCredential{}, fmt.Errorf("parse user id: %w", err)
-		}
-		if err := s.reassignCredentialOwner(ctx, credentialIDB64, newOwnerID); err != nil {
-			return AuthenticatedCredential{}, fmt.Errorf("reassign credential owner: %w", err)
-		}
+	// A verified signature is the proof of ownership — the session cookie is
+	// secondary and may legitimately name a different user (first login from a
+	// new browser context, cookie cleared, an anonymous cookie inherited from
+	// a previous user on the same machine). The credential's stored owner is
+	// authoritative and is NOT relocated onto the cookie: the caller instead
+	// resolves to that owner (the handler re-issues the session cookie when
+	// they differ), so signing in with one passkey can never widen the
+	// account list to accounts proven by a different passkey.
+	owner := cred.UserID.String()
+
+	// Re-link every multisig member row for this passkey to its proven owner,
+	// so a member on a fresh device sees their wallets after a single login.
+	if err := s.q.RelinkMultisigMembersByCredential(ctx, db.RelinkMultisigMembersByCredentialParams{
+		UserID:       uuid.NullUUID{UUID: cred.UserID, Valid: true},
+		CredentialID: sql.NullString{String: credentialIDB64, Valid: true},
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("relink multisig members: %w", err)
 	}
 
-	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: in.UserID}, nil
+	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: owner}, nil
 }
 
 // p256UncompressedHexLen is the hex length of a 65-byte uncompressed P-256
@@ -471,10 +477,18 @@ const p256UncompressedHexLen = 130
 // that has no webapp.webauthn_credentials row — one registered on another
 // Latch surface (the mobile deploy path writes only
 // public.passkey_credentials). It verifies the assertion against the public
-// key recorded in that shared index, then provisions the webapp credential +
-// smart-account rows for the current session user so every later sign-in
-// takes the normal path. The caller has already verified the challenge,
-// client data, rpID hash and user-presence flag.
+// key recorded in that shared index, then provisions a dedicated webapp user
+// plus the credential + smart-account rows bound to it, so every later
+// sign-in (any device) takes the normal path and resolves to that same user.
+//
+// A dedicated user — rather than the current session's cookie user — is what
+// keeps the R1 invariant: two people adopting their own mobile passkeys in
+// one browser profile must not both land on the same webapp user and see
+// each other's accounts. The now-orphaned anonymous cookie user (no
+// credentials, no accounts) is left for garbage collection.
+//
+// The caller has already verified the challenge, client data, rpID hash and
+// user-presence flag.
 func (s *WebAuthnService) adoptExternalPasskey(
 	ctx context.Context,
 	in FinishAuthenticationInput,
@@ -509,10 +523,6 @@ func (s *WebAuthnService) adoptExternalPasskey(
 		return AuthenticatedCredential{}, err
 	}
 
-	ownerID, err := uuid.Parse(in.UserID)
-	if err != nil {
-		return AuthenticatedCredential{}, fmt.Errorf("parse user id: %w", err)
-	}
 	cosePublicKey, err := rawP256ToCoseEC2(pubKey)
 	if err != nil {
 		return AuthenticatedCredential{}, fmt.Errorf("encode cose key: %w", err)
@@ -526,6 +536,12 @@ func (s *WebAuthnService) adoptExternalPasskey(
 	qtx := s.q.WithTx(tx)
 
 	now := time.Now().UnixMilli()
+
+	ownerID := uuid.New()
+	if err := qtx.InsertWebappUser(ctx, db.InsertWebappUserParams{ID: ownerID, CreatedAt: now}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("create user for adopted passkey: %w", err)
+	}
+
 	if _, err := qtx.UpsertWebauthnCredential(ctx, db.UpsertWebauthnCredentialParams{
 		ID:                uuid.New(),
 		UserID:            ownerID,
@@ -555,43 +571,21 @@ func (s *WebAuthnService) adoptExternalPasskey(
 		return AuthenticatedCredential{}, fmt.Errorf("store adopted smart account: %w", err)
 	}
 
+	// Same login-time member re-link as the normal path — a mobile passkey
+	// that co-signs a multisig wallet becomes visible on this device once its
+	// owner is known.
+	if err := qtx.RelinkMultisigMembersByCredential(ctx, db.RelinkMultisigMembersByCredentialParams{
+		UserID:       uuid.NullUUID{UUID: ownerID, Valid: true},
+		CredentialID: sql.NullString{String: credentialIDB64, Valid: true},
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("relink multisig members: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return AuthenticatedCredential{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: in.UserID}, nil
-}
-
-// reassignCredentialOwner re-binds a webauthn credential and its associated
-// smart account (if any) to newOwnerID in a single transaction. Called by
-// FinishAuthentication after a successful signature verification when the
-// credential's stored owner no longer matches the current session.
-func (s *WebAuthnService) reassignCredentialOwner(ctx context.Context, credentialIDB64 string, newOwnerID uuid.UUID) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // rollback on any non-commit path is intentional
-
-	qtx := s.q.WithTx(tx)
-
-	if err := qtx.UpdateWebauthnCredentialUserID(ctx, db.UpdateWebauthnCredentialUserIDParams{
-		CredentialID: credentialIDB64,
-		UserID:       newOwnerID,
-	}); err != nil {
-		return fmt.Errorf("update credential user id: %w", err)
-	}
-	if err := qtx.UpdateSmartAccountUserIDByCredentialID(ctx, db.UpdateSmartAccountUserIDByCredentialIDParams{
-		CredentialID: credentialIDB64,
-		UserID:       newOwnerID,
-	}); err != nil {
-		return fmt.Errorf("update smart account user id: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
+	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: ownerID.String()}, nil
 }
 
 // ── credentials list ─────────────────────────────────────────────────────────

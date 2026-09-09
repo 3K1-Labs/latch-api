@@ -25,16 +25,27 @@ func keyDataHashHex(keyDataHex string) string {
 }
 
 type WebAuthnHandler struct {
-	webauthnSvc     webauthnService
-	smartAccountSvc smartAccountService
-	accountsSvc     accountsService
-	credentialSvc   passkeyCredentialIndexService
-	auditSvc        auditService
-	cfg             *config.Config
+	webauthnSvc      webauthnService
+	smartAccountSvc  smartAccountService
+	accountsSvc      accountsService
+	credentialSvc    passkeyCredentialIndexService
+	sessionSvc       sessionIssuer
+	auditSvc         auditService
+	cfg              *config.Config
+	crossSiteCookies bool
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, auditSvc auditService, cfg *config.Config) *WebAuthnHandler {
-	return &WebAuthnHandler{webauthnSvc: webauthnSvc, smartAccountSvc: smartAccountSvc, accountsSvc: accountsSvc, credentialSvc: credentialSvc, auditSvc: auditSvc, cfg: cfg}
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, sessionSvc sessionIssuer, auditSvc auditService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
+	return &WebAuthnHandler{
+		webauthnSvc:      webauthnSvc,
+		smartAccountSvc:  smartAccountSvc,
+		accountsSvc:      accountsSvc,
+		credentialSvc:    credentialSvc,
+		sessionSvc:       sessionSvc,
+		auditSvc:         auditSvc,
+		cfg:              cfg,
+		crossSiteCookies: crossSiteCookies,
+	}
 }
 
 func (h *WebAuthnHandler) webAuthnConfig() webapp.WebAuthnConfig {
@@ -357,6 +368,23 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		slog.Error("finish webauthn authentication", "userID", userID, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "webauthn verification failed")
 		return
+	}
+
+	// The verified assertion is authoritative. When it proves a different user
+	// than the "sid" cookie names — an anonymous cookie inherited from a
+	// previous user on this machine, a first login on a new device, or the
+	// first webapp login for a mobile-created passkey — the session follows
+	// the credential's owner. Re-issue the cookie rather than relocating the
+	// credential onto the stale session, so signing in with one passkey never
+	// widens the account list with accounts proven by a different passkey.
+	if cred.UserID != userID {
+		sess, issueErr := h.sessionSvc.IssueForUser(c.Request.Context(), cred.UserID)
+		if issueErr != nil {
+			slog.Error("issue session for authenticated user", "userID", userID, "err", issueErr)
+			webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+			return
+		}
+		middleware.SetSessionCookie(c, sess.ID, h.crossSiteCookies)
 	}
 
 	smartAccountAddress, keyDataHex, deployed, err := h.smartAccountSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID)

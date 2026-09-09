@@ -266,6 +266,7 @@ func TestFinishAuthentication_Success(t *testing.T) {
 		}).AddRow(uuid.New(), uid, credIDB64, credID, []byte{}, rawPubKey, int64(3), nil, nil, int32(0), time.Now().UnixMilli()))
 	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE webapp.multisig_members").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	result, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
 		UserID:            uid.String(),
@@ -276,6 +277,7 @@ func TestFinishAuthentication_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, credIDB64, result.CredentialID)
+	assert.Equal(t, uid.String(), result.UserID)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -309,7 +311,9 @@ func TestFinishAuthentication_CredentialNotFound(t *testing.T) {
 // TestFinishAuthentication_AdoptsExternalPasskey: a passkey with no
 // webapp.webauthn_credentials row but a public.passkey_credentials index
 // entry (e.g. created on mobile) verifies against the indexed key and is
-// provisioned into the webapp for the current session user.
+// provisioned into the webapp under a dedicated new user — never the current
+// session's cookie user — so a second person adopting their own passkey in
+// the same browser can't land on the first person's account list.
 func TestFinishAuthentication_AdoptsExternalPasskey(t *testing.T) {
 	svc, mock := newMockWebAuthnService(t)
 	uid := uuid.New()
@@ -334,10 +338,12 @@ func TestFinishAuthentication_AdoptsExternalPasskey(t *testing.T) {
 		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, addr, "", int32(0), time.Now(), time.Now()))
 	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO webapp.users").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("INSERT INTO webapp.webauthn_credentials").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 	mock.ExpectQuery("INSERT INTO webapp.smart_accounts").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
+	mock.ExpectExec("UPDATE webapp.multisig_members").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	result, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
@@ -349,6 +355,9 @@ func TestFinishAuthentication_AdoptsExternalPasskey(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, credIDB64, result.CredentialID)
+	// A dedicated user, not the session's cookie user.
+	require.NotEmpty(t, result.UserID)
+	assert.NotEqual(t, uid.String(), result.UserID)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -388,17 +397,17 @@ func TestFinishAuthentication_AdoptExternalPasskeyBadSignature(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-// TestFinishAuthentication_ReassignsOwnerOnMismatch covers logging in from a
-// session whose user doesn't match the credential's stored owner (e.g. a new
-// browser context, cleared cookies, or registering via the web app and later
-// logging in via the Chrome extension). A verified signature is the actual
-// proof of ownership, so the credential and its smart account are re-bound to
-// the current session rather than rejected — mirrors
-// app/api/webauthn/authentication/finish/route.ts's own reassignment.
-func TestFinishAuthentication_ReassignsOwnerOnMismatch(t *testing.T) {
+// TestFinishAuthentication_SessionFollowsCredentialOwner covers logging in
+// from a session whose cookie user doesn't match the credential's stored
+// owner (new browser context, cleared cookies, an anonymous cookie inherited
+// from a previous user on this machine). The verified signature is the proof
+// of ownership: the credential is NOT relocated onto the cookie — no tx, no
+// UPDATE ... user_id — and the result resolves to the credential's existing
+// owner (the handler re-issues the session cookie for that user).
+func TestFinishAuthentication_SessionFollowsCredentialOwner(t *testing.T) {
 	svc, mock := newMockWebAuthnService(t)
-	uid := uuid.New()
-	otherUID := uuid.New()
+	cookieUID := uuid.New()
+	ownerUID := uuid.New()
 	credID := []byte("credential-id-bytes")
 	credIDB64 := base64.RawURLEncoding.EncodeToString(credID)
 	priv, rawPubKey := testP256Key(t)
@@ -408,21 +417,18 @@ func TestFinishAuthentication_ReassignsOwnerOnMismatch(t *testing.T) {
 
 	mock.ExpectQuery("SELECT id, user_id, purpose, challenge, rp_id, origin, expires_at, created_at").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "purpose", "challenge", "rp_id", "origin", "expires_at", "created_at"}).
-			AddRow(uuid.New(), uid, PurposeAuthentication, "chal", "latch.finance", "https://latch.finance", time.Now().Add(time.Minute).UnixMilli(), time.Now().UnixMilli()))
+			AddRow(uuid.New(), cookieUID, PurposeAuthentication, "chal", "latch.finance", "https://latch.finance", time.Now().Add(time.Minute).UnixMilli(), time.Now().UnixMilli()))
 	mock.ExpectQuery("SELECT id, user_id, credential_id, credential_id_bytes, cose_public_key").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "user_id", "credential_id", "credential_id_bytes", "cose_public_key",
 			"p256_raw_public_key", "sign_count", "transports", "device_type", "backed_up", "created_at",
-		}).AddRow(uuid.New(), otherUID, credIDB64, credID, []byte{}, rawPubKey, int64(3), nil, nil, int32(0), time.Now().UnixMilli()))
+		}).AddRow(uuid.New(), ownerUID, credIDB64, credID, []byte{}, rawPubKey, int64(3), nil, nil, int32(0), time.Now().UnixMilli()))
 	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE webapp.smart_accounts").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
+	mock.ExpectExec("UPDATE webapp.multisig_members").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	result, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
-		UserID:            uid.String(),
+		UserID:            cookieUID.String(),
 		CredentialID:      credID,
 		ClientDataJSON:    cdJSON,
 		AuthenticatorData: authData,
@@ -430,7 +436,7 @@ func TestFinishAuthentication_ReassignsOwnerOnMismatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, credIDB64, result.CredentialID)
-	assert.Equal(t, uid.String(), result.UserID)
+	assert.Equal(t, ownerUID.String(), result.UserID)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -584,10 +590,13 @@ func TestFinishAuthentication_UpdateSignCountError(t *testing.T) {
 	assert.Contains(t, err.Error(), "update sign count")
 }
 
-func TestFinishAuthentication_ReassignOwnerError(t *testing.T) {
+// TestFinishAuthentication_RelinkError: the login-time multisig member
+// re-link fails. Proof already succeeded, but the write is treated as
+// mandatory (consistent with the sign-count update) so the caller sees the
+// error rather than a silently half-linked state.
+func TestFinishAuthentication_RelinkError(t *testing.T) {
 	svc, mock := newMockWebAuthnService(t)
 	uid := uuid.New()
-	otherUID := uuid.New()
 	credID := []byte("credential-id-bytes")
 	credIDB64 := base64.RawURLEncoding.EncodeToString(credID)
 	priv, rawPubKey := testP256Key(t)
@@ -602,12 +611,10 @@ func TestFinishAuthentication_ReassignOwnerError(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "user_id", "credential_id", "credential_id_bytes", "cose_public_key",
 			"p256_raw_public_key", "sign_count", "transports", "device_type", "backed_up", "created_at",
-		}).AddRow(uuid.New(), otherUID, credIDB64, credID, []byte{}, rawPubKey, int64(3), nil, nil, int32(0), time.Now().UnixMilli()))
+		}).AddRow(uuid.New(), uid, credIDB64, credID, []byte{}, rawPubKey, int64(3), nil, nil, int32(0), time.Now().UnixMilli()))
 	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnError(assert.AnError)
-	mock.ExpectRollback()
+	mock.ExpectExec("UPDATE webapp.multisig_members").WillReturnError(assert.AnError)
 
 	_, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
 		UserID:            uid.String(),
@@ -617,44 +624,6 @@ func TestFinishAuthentication_ReassignOwnerError(t *testing.T) {
 		Signature:         sig,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reassign credential owner")
-	assert.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestFinishAuthentication_ReassignOwnerSmartAccountError(t *testing.T) {
-	svc, mock := newMockWebAuthnService(t)
-	uid := uuid.New()
-	otherUID := uuid.New()
-	credID := []byte("credential-id-bytes")
-	credIDB64 := base64.RawURLEncoding.EncodeToString(credID)
-	priv, rawPubKey := testP256Key(t)
-	authData := buildAuthenticatorData(t, "latch.finance", flagUserPresent, 5, nil, nil)
-	cdJSON := clientDataJSON(t, "webauthn.get", "chal", "https://latch.finance")
-	sig := signAssertion(t, priv, authData, cdJSON)
-
-	mock.ExpectQuery("SELECT id, user_id, purpose, challenge, rp_id, origin, expires_at, created_at").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "purpose", "challenge", "rp_id", "origin", "expires_at", "created_at"}).
-			AddRow(uuid.New(), uid, PurposeAuthentication, "chal", "latch.finance", "https://latch.finance", time.Now().Add(time.Minute).UnixMilli(), time.Now().UnixMilli()))
-	mock.ExpectQuery("SELECT id, user_id, credential_id, credential_id_bytes, cose_public_key").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "user_id", "credential_id", "credential_id_bytes", "cose_public_key",
-			"p256_raw_public_key", "sign_count", "transports", "device_type", "backed_up", "created_at",
-		}).AddRow(uuid.New(), otherUID, credIDB64, credID, []byte{}, rawPubKey, int64(3), nil, nil, int32(0), time.Now().UnixMilli()))
-	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE webapp.webauthn_credentials").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE webapp.smart_accounts").WillReturnError(assert.AnError)
-	mock.ExpectRollback()
-
-	_, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
-		UserID:            uid.String(),
-		CredentialID:      credID,
-		ClientDataJSON:    cdJSON,
-		AuthenticatorData: authData,
-		Signature:         sig,
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "update smart account user id")
+	assert.Contains(t, err.Error(), "relink multisig members")
 	assert.NoError(t, mock.ExpectationsWereMet())
 }

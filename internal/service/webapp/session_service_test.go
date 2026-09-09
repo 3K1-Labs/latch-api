@@ -28,6 +28,35 @@ func TestGetOrCreate_EmptyCookie_CreatesNewSession(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestIssueForUser_MintsSessionForExistingUser(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	uid := uuid.New()
+	mock.ExpectExec("INSERT INTO webapp.sessions").
+		WithArgs(sqlmock.AnyArg(), uid, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	sess, err := svc.IssueForUser(context.Background(), uid.String())
+	require.NoError(t, err)
+	assert.NotEmpty(t, sess.ID)
+	assert.Equal(t, uid.String(), sess.UserID)
+	assert.WithinDuration(t, time.Now().Add(SessionTTL), sess.ExpiresAt, time.Minute)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestIssueForUser_InvalidUserID(t *testing.T) {
+	svc, _ := newMockSessionService(t)
+	_, err := svc.IssueForUser(context.Background(), "not-a-uuid")
+	require.Error(t, err)
+}
+
+func TestIssueForUser_InsertError(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	mock.ExpectExec("INSERT INTO webapp.sessions").WillReturnError(assert.AnError)
+
+	_, err := svc.IssueForUser(context.Background(), uuid.New().String())
+	require.Error(t, err)
+}
+
 func TestGetOrCreate_MalformedCookie_CreatesNewSession(t *testing.T) {
 	svc, mock := newMockSessionService(t)
 	mock.ExpectBegin()
