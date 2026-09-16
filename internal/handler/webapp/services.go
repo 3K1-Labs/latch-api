@@ -14,6 +14,7 @@ type webauthnService interface {
 	BeginAuthentication(ctx context.Context, userID, rpID, origin string) (webapp.AuthenticationOptions, error)
 	FinishAuthentication(ctx context.Context, in webapp.FinishAuthenticationInput) (webapp.AuthenticatedCredential, error)
 	ListCredentials(ctx context.Context, userID string) ([]webapp.CredentialSummary, error)
+	GetCredentialKeyDataHex(ctx context.Context, credentialID string) (string, error)
 }
 
 type smartAccountService interface {
@@ -47,6 +48,7 @@ type sessionIssuer interface {
 // invisible to that recovery lookup.
 type passkeyCredentialIndexService interface {
 	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
+	Deregister(ctx context.Context, keyDataHex string) error
 }
 
 type auditService interface {
@@ -64,6 +66,10 @@ type transactionService interface {
 	BuildCounter(ctx context.Context, in webapp.BuildCounterInput) (webapp.BuildCounterResult, error)
 	BuildDelegatedCounter(ctx context.Context, in webapp.BuildDelegatedCounterInput) (webapp.BuildDelegatedCounterResult, error)
 	BuildSwap(ctx context.Context, in webapp.BuildSwapInput) (webapp.BuildSwapResult, error)
+	AddSigner(ctx context.Context, in webapp.AddSignerInput) (webapp.AddSignerResult, error)
+	RemoveSigner(ctx context.Context, in webapp.RemoveSignerInput) (webapp.RemoveSignerResult, error)
+	ConfirmAddSigner(ctx context.Context, in webapp.ConfirmAddSignerInput) (signerID uint32, err error)
+	ConfirmRemoveSigner(ctx context.Context, in webapp.ConfirmRemoveSignerInput) error
 }
 
 type contextRulesService interface {
@@ -120,6 +126,20 @@ type onRampService interface {
 
 type backupPasskeyService interface {
 	RecordIntent(ctx context.Context, userID, smartAccountAddress, label string) error
+}
+
+// accountSignerService owns the webapp.account_signers rows behind backup
+// passkey signers: attaching a second credential, gating add/remove-signer
+// build to callers who already prove ownership of a signer on the account,
+// and persisting the on-chain signer_id once add_signer succeeds.
+type accountSignerService interface {
+	AttachCredential(ctx context.Context, smartAccountAddress, credentialID, label string) error
+	CallerOwnsSignerCredential(ctx context.Context, userID, smartAccountAddress string) (bool, error)
+	CallerHasOtherSignerCredential(ctx context.Context, userID, smartAccountAddress, excludingCredentialID string) (bool, error)
+	MarkSignerOnChain(ctx context.Context, smartAccountAddress, credentialID string, signerID uint32) error
+	GetSignerID(ctx context.Context, smartAccountAddress, credentialID string) (signerID uint32, ok bool, err error)
+	RemoveCredential(ctx context.Context, smartAccountAddress, credentialID string) error
+	ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress string, err error)
 }
 
 type counterService interface {

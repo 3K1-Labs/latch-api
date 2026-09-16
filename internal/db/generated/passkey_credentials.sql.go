@@ -9,6 +9,16 @@ import (
 	"context"
 )
 
+const deletePasskeyCredential = `-- name: DeletePasskeyCredential :exec
+DELETE FROM passkey_credentials
+WHERE credential_id = $1
+`
+
+func (q *Queries) DeletePasskeyCredential(ctx context.Context, credentialID string) error {
+	_, err := q.db.ExecContext(ctx, deletePasskeyCredential, credentialID)
+	return err
+}
+
 const getPasskeyCredential = `-- name: GetPasskeyCredential :one
 SELECT id, credential_id, key_data_hex, smart_account_address, label, seq, created_at, updated_at FROM passkey_credentials
 WHERE credential_id = $1

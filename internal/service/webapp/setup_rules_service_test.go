@@ -282,3 +282,182 @@ func TestSetupSwapRules_MissingGAddressForFreighter(t *testing.T) {
 	})
 	require.Error(t, err)
 }
+
+// ── AddSigner ────────────────────────────────────────────────────────────────
+
+func TestAddSigner_AlreadyConfigured_ExactMatch(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	contextRules := newContextRulesService(t,
+		scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb})),
+		buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb})),
+	)
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	result, err := svc.AddSigner(context.Background(), AddSignerInput{
+		SmartAccountAddress: smartAccountAddr,
+		KeyDataHex:          "aabb",
+	})
+	require.NoError(t, err)
+	assert.True(t, result.AlreadyConfigured)
+}
+
+// A second passkey is a *different* External signer on the same verifier —
+// ruleAuthorizesSigner's loose (verifier-only) match would wrongly report
+// this as already configured (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md §2.5).
+// AddSigner must require an exact keyDataHex match instead.
+func TestAddSigner_DifferentPasskeyIsNotAlreadyConfigured(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 11, 0, "add_signer")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+
+	contextRules := newContextRulesService(t,
+		scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb})),
+		buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb})),
+	)
+	rpc := &fakeSorobanRPC{
+		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
+		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{
+				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+				TransactionData: minimalSorobanTransactionDataXDR(t),
+				MinResourceFee:  "100",
+				LatestLedger:    1000,
+			}, nil
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	result, err := svc.AddSigner(context.Background(), AddSignerInput{
+		SmartAccountAddress: smartAccountAddr,
+		KeyDataHex:          "ccdd", // different from the existing signer's aabb
+	})
+	require.NoError(t, err)
+	assert.False(t, result.AlreadyConfigured)
+	assert.NotEmpty(t, result.TxXdr)
+}
+
+func TestAddSigner_Success(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 5, 0, "add_signer")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+
+	contextRules := newContextRulesService(t,
+		scU32(1), buildTestRuleScVal("default", true, ""),
+		buildTestRuleScVal("default", true, ""),
+	)
+	rpc := &fakeSorobanRPC{
+		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
+		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{
+				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+				TransactionData: minimalSorobanTransactionDataXDR(t),
+				MinResourceFee:  "100",
+				LatestLedger:    1000,
+			}, nil
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+
+	result, err := svc.AddSigner(context.Background(), AddSignerInput{
+		SmartAccountAddress: smartAccountAddr,
+		KeyDataHex:          "aabbcc",
+	})
+	require.NoError(t, err)
+	assert.False(t, result.AlreadyConfigured)
+	assert.NotEmpty(t, result.TxXdr)
+	assert.Equal(t, uint32(0), result.ContextRuleID)
+}
+
+func TestAddSigner_NoDefaultRule(t *testing.T) {
+	// count=0: DiscoverDefaultContextRule finds nothing and falls back.
+	contextRules := newContextRulesService(t, scU32(0))
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+
+	_, err := svc.AddSigner(context.Background(), AddSignerInput{
+		SmartAccountAddress: testContractAddress(t),
+		KeyDataHex:          "aabbcc",
+	})
+	assert.ErrorIs(t, err, ErrNoDefaultRule)
+}
+
+func TestAddSigner_MissingKeyDataHex(t *testing.T) {
+	contextRules := newContextRulesService(t)
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+
+	_, err := svc.AddSigner(context.Background(), AddSignerInput{SmartAccountAddress: testContractAddress(t)})
+	require.Error(t, err)
+}
+
+// ── RemoveSigner ─────────────────────────────────────────────────────────────
+
+func TestRemoveSigner_LastSigner(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	contextRules := newContextRulesService(t,
+		scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})),
+		buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})),
+	)
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+
+	_, err := svc.RemoveSigner(context.Background(), RemoveSignerInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerID:            1,
+	})
+	assert.ErrorIs(t, err, ErrLastSigner)
+}
+
+func TestRemoveSigner_Success(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 6, 0, "remove_signer")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+
+	twoSigners := buildTestRuleScVal("default", true, "",
+		externalSignerScVal(t, verifierAddr, []byte{0xaa}),
+		externalSignerScVal(t, verifierAddr, []byte{0xbb}),
+	)
+	contextRules := newContextRulesService(t, scU32(1), twoSigners, twoSigners)
+	rpc := &fakeSorobanRPC{
+		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
+		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{
+				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+				TransactionData: minimalSorobanTransactionDataXDR(t),
+				MinResourceFee:  "100",
+				LatestLedger:    1000,
+			}, nil
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+
+	result, err := svc.RemoveSigner(context.Background(), RemoveSignerInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerID:            2,
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.TxXdr)
+	assert.Equal(t, uint32(0), result.ContextRuleID)
+}
+
+func TestRemoveSigner_NoDefaultRule(t *testing.T) {
+	contextRules := newContextRulesService(t, scU32(0))
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+
+	_, err := svc.RemoveSigner(context.Background(), RemoveSignerInput{
+		SmartAccountAddress: testContractAddress(t),
+		SignerID:            1,
+	})
+	assert.ErrorIs(t, err, ErrNoDefaultRule)
+}

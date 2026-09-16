@@ -36,4 +36,27 @@ const (
 	// ErrAssetNotFound is returned when assetId/contractId doesn't resolve
 	// against the active network's asset catalog.
 	ErrAssetNotFound ErrorCode = "asset_not_found"
+	// ErrNotASigner is returned by the backup-signer add/remove routes when
+	// the session doesn't hold a credential that's already an authorized
+	// signer on the target account.
+	ErrNotASigner ErrorCode = "not_a_signer"
+	// ErrUnknownAccount is returned when smartAccountAddress has no
+	// webapp.smart_accounts row.
+	ErrUnknownAccount ErrorCode = "unknown_account"
+	// ErrLastSigner is returned when removing a signer would leave the
+	// Default rule with zero signers.
+	ErrLastSigner ErrorCode = "last_signer"
+	// ErrSignerIDUnknown is returned when a stored account_signers row has no
+	// on-chain signer_id recorded, so remove_signer can't be built safely.
+	ErrSignerIDUnknown ErrorCode = "signer_id_unknown"
+	// ErrSignerLockedOut is returned when removing a signer would remove the
+	// caller's own only signer on this account.
+	ErrSignerLockedOut ErrorCode = "signer_locked_out"
+	// ErrNoDefaultRule is returned when the account's Default context rule
+	// can't be discovered.
+	ErrNoDefaultRule ErrorCode = "no_default_rule"
+	// ErrSignerAddedIndexFailed is returned when add_signer succeeded
+	// on-chain but the passkey_credentials index write failed — the client
+	// should retry the confirm step rather than the chain call.
+	ErrSignerAddedIndexFailed ErrorCode = "signer_added_index_failed"
 )

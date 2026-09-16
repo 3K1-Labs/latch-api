@@ -612,6 +612,26 @@ func (s *WebAuthnService) ListCredentials(ctx context.Context, userID string) ([
 	return out, nil
 }
 
+// GetCredentialKeyDataHex returns credentialID's own keyDataHex (its P-256
+// public key followed by its own credential id, matching BuildKeyDataHex's
+// encoding exactly). Used by authentication-finish's backup-signer fallback
+// (R16): a WebAuthn assertion carries no public key, so a client that
+// authenticated with a backup signer credential can't reconstruct its own
+// keyDataHex — the smart_accounts row it would otherwise come from belongs
+// to the account's *original* credential, not this one. Also used to
+// deregister a removed backup signer from the passkey_credentials index
+// (R11), which is keyed by this same value.
+func (s *WebAuthnService) GetCredentialKeyDataHex(ctx context.Context, credentialID string) (string, error) {
+	cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credentialID)
+	if err != nil {
+		return "", fmt.Errorf("get webauthn credential %s: %w", credentialID, err)
+	}
+	if len(cred.P256RawPublicKey) == 0 {
+		return "", fmt.Errorf("credential %s has no stored P-256 public key", credentialID)
+	}
+	return BuildKeyDataHex(cred.P256RawPublicKey, cred.CredentialIDBytes), nil
+}
+
 // ── clientDataJSON verification ─────────────────────────────────────────────
 
 type clientData struct {

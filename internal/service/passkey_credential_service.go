@@ -114,6 +114,22 @@ func (s *PasskeyCredentialService) Register(ctx context.Context, keyDataHex, sma
 	return nil
 }
 
+// Deregister removes the recovery-index row for keyDataHex. Called only
+// after an on-chain remove_signer call succeeds
+// (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R11) — a phantom index entry for a
+// credential that no longer authorizes the account is worse than a missing
+// one, since restore would hand back a wallet the passkey can't sign for.
+func (s *PasskeyCredentialService) Deregister(ctx context.Context, keyDataHex string) error {
+	credentialID, err := credentialIDFromKeyData(keyDataHex)
+	if err != nil {
+		return err
+	}
+	if err := s.q.DeletePasskeyCredential(ctx, credentialID); err != nil {
+		return fmt.Errorf("delete passkey credential: %w", err)
+	}
+	return nil
+}
+
 // Challenge issues a single-use nonce for a lookup ceremony. Not bound to any
 // particular credential ID — the caller doesn't know which credential will
 // answer until the OS ceremony returns one.

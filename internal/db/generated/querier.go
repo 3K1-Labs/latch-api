@@ -16,6 +16,7 @@ type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
 	ConsumeSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
+	DeleteAccountSignerByCredential(ctx context.Context, arg DeleteAccountSignerByCredentialParams) error
 	// Retention / garbage collection. Background sweeps that bound table growth.
 	// The cosign queue is high-churn (every multisig tx creates a request with a
 	// ~23h TTL); without this it grows unbounded. wck_bundles and wallet_memberships
@@ -27,11 +28,16 @@ type Querier interface {
 	DeleteMultisigApprovalsForProposal(ctx context.Context, proposalID uuid.UUID) error
 	DeleteMultisigDraftMember(ctx context.Context, arg DeleteMultisigDraftMemberParams) error
 	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
+	DeletePasskeyCredential(ctx context.Context, credentialID string) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
 	DeleteStaleWCKBundles(ctx context.Context, before time.Time) (int64, error)
 	DeleteStaleWalletMemberships(ctx context.Context, before time.Time) (int64, error)
 	DeleteWebauthnChallenge(ctx context.Context, id uuid.UUID) error
-	GetAccountSignerIntent(ctx context.Context, arg GetAccountSignerIntentParams) (WebappAccountSigner, error)
+	GetAccountSignerByCredential(ctx context.Context, arg GetAccountSignerByCredentialParams) (GetAccountSignerByCredentialRow, error)
+	// Used by authentication-finish's fallback resolution: given only a
+	// credential id (no address yet), find the account it was attached to.
+	GetAccountSignerByCredentialID(ctx context.Context, credentialID sql.NullString) (GetAccountSignerByCredentialIDRow, error)
+	GetAccountSignerIntent(ctx context.Context, arg GetAccountSignerIntentParams) (GetAccountSignerIntentRow, error)
 	GetActiveMultisigDraftForUser(ctx context.Context, creatorUserID uuid.UUID) (WebappMultisigDraft, error)
 	GetBackupByUserID(ctx context.Context, userID uuid.UUID) (GetBackupByUserIDRow, error)
 	GetClientBlobByUserID(ctx context.Context, userID uuid.UUID) (sql.NullString, error)
@@ -74,6 +80,7 @@ type Querier interface {
 	InsertWebappSession(ctx context.Context, arg InsertWebappSessionParams) error
 	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
 	InsertWebauthnChallenge(ctx context.Context, arg InsertWebauthnChallengeParams) error
+	ListAccountSignerCredentialIDsForAddress(ctx context.Context, smartAccountAddress string) ([]sql.NullString, error)
 	ListCosignSignatures(ctx context.Context, requestID uuid.UUID) ([]CosignSignature, error)
 	// Visible to a user only if they hold a member row (established at draft-join
 	// time, via register, or re-linked at login by RelinkMultisigMembersByCredential)
@@ -104,6 +111,7 @@ type Querier interface {
 	RelinkMultisigMembersByCredential(ctx context.Context, arg RelinkMultisigMembersByCredentialParams) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	SetAccountSignerOnChainID(ctx context.Context, arg SetAccountSignerOnChainIDParams) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
 	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error
@@ -131,6 +139,11 @@ type Querier interface {
 	// Same as UpsertMultisigMemberByCredential but for delegated (g_address) signers.
 	UpsertMultisigMemberByGAddress(ctx context.Context, arg UpsertMultisigMemberByGAddressParams) (uuid.UUID, error)
 	UpsertPasskeyCredential(ctx context.Context, arg UpsertPasskeyCredentialParams) (PasskeyCredential, error)
+	// Attaches a real WebAuthn credential to an account before it's an on-chain
+	// signer (signer_id is set later, once add_signer succeeds — see
+	// SetAccountSignerOnChainID). Retried attaches overwrite the label rather
+	// than duplicating the row.
+	UpsertPendingCredentialSigner(ctx context.Context, arg UpsertPendingCredentialSignerParams) (UpsertPendingCredentialSignerRow, error)
 	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertSmartAccountRegistration(ctx context.Context, arg UpsertSmartAccountRegistrationParams) (SmartAccountRegistration, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)
