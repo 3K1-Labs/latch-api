@@ -440,6 +440,23 @@ func main() {
 				transaction.GET("/bundler", transactionRelayHandler.Bundler)
 				transaction.POST("/submit", transactionRelayLimiter, transactionRelayHandler.Submit)
 			}
+
+			// Solo backup signers (LATCH_MOBILE_BACKUP_SIGNERS.md): the client
+			// builds/signs/submits add_signer/remove_signer itself via
+			// /v1/transaction/submit above, then confirms it here. RequireAuth,
+			// unlike /v1/smart-account/* deploy routes above — by this point
+			// the caller already has a deployed account and a wallet-scope
+			// session, same reasoning as the transaction group.
+			backupSignerHandler := handler.NewBackupSignerHandler(
+				handler.BackupSignerServiceOrNil(webappTransactionSvc), handler.BackupSignerServiceOrNil(webappTransactionSvcMainnet),
+				passkeyCredentialSvc, auditSvc,
+			)
+			backupSigner := v1.Group("/smart-account/backup-signer")
+			backupSigner.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+			{
+				backupSigner.POST("/confirm-add", backupSignerHandler.ConfirmAddSigner)
+				backupSigner.POST("/confirm-remove", backupSignerHandler.ConfirmRemoveSigner)
+			}
 		} else {
 			slog.Warn("no bundler configured — mobile /v1/transaction/submit disabled")
 		}

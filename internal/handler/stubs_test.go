@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 )
 
 // ── authService stub ──────────────────────────────────────────────────────────
@@ -131,6 +132,9 @@ type stubPasskeyCredentialRegister struct {
 	gotAddress    string
 	gotLabel      string
 	gotSeq        int32
+
+	deregisterErr        error
+	gotDeregisterKeyData string
 }
 
 func (s *stubPasskeyCredentialRegister) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
@@ -139,6 +143,31 @@ func (s *stubPasskeyCredentialRegister) Register(_ context.Context, keyDataHex, 
 	s.gotLabel = label
 	s.gotSeq = seq
 	return s.err
+}
+
+func (s *stubPasskeyCredentialRegister) Deregister(_ context.Context, keyDataHex string) error {
+	s.gotDeregisterKeyData = keyDataHex
+	return s.deregisterErr
+}
+
+// ── backupSignerConfirmService stub ───────────────────────────────────────────
+
+type stubBackupSignerConfirm struct {
+	confirmAddSignerID  uint32
+	confirmAddSignerErr error
+	confirmRemoveErr    error
+	gotConfirmAdd       webapp.ConfirmAddSignerInput
+	gotConfirmRemove    webapp.ConfirmRemoveSignerInput
+}
+
+func (s *stubBackupSignerConfirm) ConfirmAddSigner(_ context.Context, in webapp.ConfirmAddSignerInput) (uint32, error) {
+	s.gotConfirmAdd = in
+	return s.confirmAddSignerID, s.confirmAddSignerErr
+}
+
+func (s *stubBackupSignerConfirm) ConfirmRemoveSigner(_ context.Context, in webapp.ConfirmRemoveSignerInput) error {
+	s.gotConfirmRemove = in
+	return s.confirmRemoveErr
 }
 
 // ── wckBundleService stub ─────────────────────────────────────────────────────

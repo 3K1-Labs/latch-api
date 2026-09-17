@@ -26,4 +26,9 @@ const (
 
 	// ErrBadGateway is for failures in upstream dependencies (Soroban RPC, Horizon) (HTTP 502).
 	ErrBadGateway ErrorCode = "BAD_GATEWAY"
+
+	// ErrSignerIndexFailed is for add-signer confirm calls where the on-chain
+	// call already succeeded but writing the recovery index failed — the
+	// client must retry this same confirm call, not the chain call (HTTP 500).
+	ErrSignerIndexFailed ErrorCode = "SIGNER_INDEX_FAILED"
 )
