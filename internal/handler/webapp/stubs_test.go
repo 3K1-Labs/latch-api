@@ -22,6 +22,9 @@ type stubWebauthn struct {
 	finishAuthErr  error
 	credentials    []webapp.CredentialSummary
 	credentialsErr error
+
+	keyDataHex    string
+	keyDataHexErr error
 }
 
 func (s *stubWebauthn) BeginRegistration(_ context.Context, _, _, _ string) (webapp.RegistrationOptions, error) {
@@ -35,6 +38,9 @@ func (s *stubWebauthn) BeginAuthentication(_ context.Context, _, _, _ string) (w
 }
 func (s *stubWebauthn) FinishAuthentication(_ context.Context, _ webapp.FinishAuthenticationInput) (webapp.AuthenticatedCredential, error) {
 	return s.finishAuthCred, s.finishAuthErr
+}
+func (s *stubWebauthn) GetCredentialKeyDataHex(_ context.Context, _ string) (string, error) {
+	return s.keyDataHex, s.keyDataHexErr
 }
 func (s *stubWebauthn) ListCredentials(_ context.Context, _ string) ([]webapp.CredentialSummary, error) {
 	return s.credentials, s.credentialsErr
@@ -135,12 +141,63 @@ type stubCredentialIndex struct {
 	gotSeq                              int32
 	called                              bool
 	err                                 error
+
+	deregisterErr        error
+	gotDeregisterKeyData string
 }
 
 func (s *stubCredentialIndex) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
 	s.called = true
 	s.gotKeyDataHex, s.gotAddress, s.gotLabel, s.gotSeq = keyDataHex, smartAccountAddress, label, seq
 	return s.err
+}
+
+func (s *stubCredentialIndex) Deregister(_ context.Context, keyDataHex string) error {
+	s.gotDeregisterKeyData = keyDataHex
+	return s.deregisterErr
+}
+
+type stubAccountSigner struct {
+	attachErr               error
+	gotAttachAddress        string
+	gotAttachCredentialID   string
+	gotAttachLabel          string
+	callerOwns              bool
+	callerOwnsErr           error
+	callerHasOther          bool
+	callerHasOtherErr       error
+	signerID                uint32
+	signerIDOK              bool
+	getSignerIDErr          error
+	markSignerOnChainErr    error
+	gotMarkSignerID         uint32
+	removeCredentialErr     error
+	resolveByCredentialAddr string
+	resolveByCredentialErr  error
+}
+
+func (s *stubAccountSigner) AttachCredential(_ context.Context, smartAccountAddress, credentialID, label string) error {
+	s.gotAttachAddress, s.gotAttachCredentialID, s.gotAttachLabel = smartAccountAddress, credentialID, label
+	return s.attachErr
+}
+func (s *stubAccountSigner) CallerOwnsSignerCredential(_ context.Context, _, _ string) (bool, error) {
+	return s.callerOwns, s.callerOwnsErr
+}
+func (s *stubAccountSigner) CallerHasOtherSignerCredential(_ context.Context, _, _, _ string) (bool, error) {
+	return s.callerHasOther, s.callerHasOtherErr
+}
+func (s *stubAccountSigner) MarkSignerOnChain(_ context.Context, _, _ string, signerID uint32) error {
+	s.gotMarkSignerID = signerID
+	return s.markSignerOnChainErr
+}
+func (s *stubAccountSigner) GetSignerID(_ context.Context, _, _ string) (uint32, bool, error) {
+	return s.signerID, s.signerIDOK, s.getSignerIDErr
+}
+func (s *stubAccountSigner) RemoveCredential(_ context.Context, _, _ string) error {
+	return s.removeCredentialErr
+}
+func (s *stubAccountSigner) ResolveByCredentialID(_ context.Context, _ string) (string, error) {
+	return s.resolveByCredentialAddr, s.resolveByCredentialErr
 }
 
 type stubTransaction struct {
@@ -165,6 +222,16 @@ type stubTransaction struct {
 
 	buildSwapResult webapp.BuildSwapResult
 	buildSwapErr    error
+
+	addSignerResult     webapp.AddSignerResult
+	addSignerErr        error
+	removeSignerResult  webapp.RemoveSignerResult
+	removeSignerErr     error
+	confirmAddSignerID  uint32
+	confirmAddSignerErr error
+	confirmRemoveErr    error
+	gotConfirmAddSigner webapp.ConfirmAddSignerInput
+	gotConfirmRemove    webapp.ConfirmRemoveSignerInput
 }
 
 func (s *stubTransaction) BuildSend(_ context.Context, _ webapp.BuildSendInput, _ []webapp.CatalogAsset) (webapp.BuildSendResult, error) {
@@ -197,6 +264,20 @@ func (s *stubTransaction) BuildDelegatedCounter(_ context.Context, _ webapp.Buil
 }
 func (s *stubTransaction) BuildSwap(_ context.Context, _ webapp.BuildSwapInput) (webapp.BuildSwapResult, error) {
 	return s.buildSwapResult, s.buildSwapErr
+}
+func (s *stubTransaction) AddSigner(_ context.Context, _ webapp.AddSignerInput) (webapp.AddSignerResult, error) {
+	return s.addSignerResult, s.addSignerErr
+}
+func (s *stubTransaction) RemoveSigner(_ context.Context, _ webapp.RemoveSignerInput) (webapp.RemoveSignerResult, error) {
+	return s.removeSignerResult, s.removeSignerErr
+}
+func (s *stubTransaction) ConfirmAddSigner(_ context.Context, in webapp.ConfirmAddSignerInput) (uint32, error) {
+	s.gotConfirmAddSigner = in
+	return s.confirmAddSignerID, s.confirmAddSignerErr
+}
+func (s *stubTransaction) ConfirmRemoveSigner(_ context.Context, in webapp.ConfirmRemoveSignerInput) error {
+	s.gotConfirmRemove = in
+	return s.confirmRemoveErr
 }
 
 type stubContextRules struct {

@@ -122,6 +122,10 @@ func main() {
 	webappSignPayloadSvc := webapp.NewSignPayloadService(queries)
 	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.WebAppCounterContractAddress)
 	webappBackupPasskeySvc := webapp.NewBackupPasskeyService(queries)
+	// Pure DB bookkeeping for backup passkey signers (attach/index/remove
+	// rows) — no bundler dependency, unlike AddSigner/RemoveSigner's chain
+	// calls on webappTransactionSvc below, so this is always constructed.
+	webappAccountSignerSvc := webapp.NewAccountSignerService(queries)
 	// latch-relayer is the on-ramp's sole memo allocator, and a relayer is bound
 	// to one Stellar network watching one pool address on it. Pick the
 	// deployment that watches this pool, exactly as AccountService.relayerFor
@@ -436,6 +440,23 @@ func main() {
 				transaction.GET("/bundler", transactionRelayHandler.Bundler)
 				transaction.POST("/submit", transactionRelayLimiter, transactionRelayHandler.Submit)
 			}
+
+			// Solo backup signers (LATCH_MOBILE_BACKUP_SIGNERS.md): the client
+			// builds/signs/submits add_signer/remove_signer itself via
+			// /v1/transaction/submit above, then confirms it here. RequireAuth,
+			// unlike /v1/smart-account/* deploy routes above — by this point
+			// the caller already has a deployed account and a wallet-scope
+			// session, same reasoning as the transaction group.
+			backupSignerHandler := handler.NewBackupSignerHandler(
+				handler.BackupSignerServiceOrNil(webappTransactionSvc), handler.BackupSignerServiceOrNil(webappTransactionSvcMainnet),
+				passkeyCredentialSvc, auditSvc,
+			)
+			backupSigner := v1.Group("/smart-account/backup-signer")
+			backupSigner.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+			{
+				backupSigner.POST("/confirm-add", backupSignerHandler.ConfirmAddSigner)
+				backupSigner.POST("/confirm-remove", backupSignerHandler.ConfirmRemoveSigner)
+			}
 		} else {
 			slog.Warn("no bundler configured — mobile /v1/transaction/submit disabled")
 		}
@@ -518,7 +539,7 @@ func main() {
 		if cfg.WebAppWebAuthnRPID == "" || cfg.WebAppWebAuthnOrigin == "" {
 			slog.Warn("WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN not configured — webapp /webapp/webauthn ceremony routes disabled")
 		} else {
-			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappSessionSvc, webappAuditSvc, cfg, crossSiteWebAppCookies)
+			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAccountSignerSvc, webappSessionSvc, webappAuditSvc, cfg, crossSiteWebAppCookies)
 			webauthnGroup := webappGroup.Group("/webauthn")
 			{
 				webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
@@ -527,6 +548,13 @@ func main() {
 				webauthnGroup.POST("/authentication/finish", webappWebauthnHandler.AuthenticationFinish)
 				webauthnGroup.GET("/credentials", webappWebauthnHandler.Credentials)
 			}
+
+			// Attach a backup passkey signer to an existing account. Lives
+			// under /accounts rather than /webauthn — it never deploys — but
+			// needs webappWebauthnHandler for the same ceremony-verification
+			// pipeline registration-finish uses, hence the same RPID/Origin
+			// gate.
+			accountsGroup.POST("/:smartAccountAddress/signers/passkey/register", webappWebauthnHandler.AttachSignerFinish)
 		}
 
 		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
@@ -555,6 +583,19 @@ func main() {
 
 		smartAccountGroup.POST("/setup-send-rules", webappTransactionHandler.SetupSendRules)
 		smartAccountGroup.POST("/setup-swap-rules", webappTransactionHandler.SetupSwapRules)
+
+		// Backup passkey signers: add/remove a second on-chain signer on a
+		// solo account. Registered here rather than under webappSmartAccountSvc
+		// because the chain calls run through webappTransactionSvc (same
+		// TransactionService setup-send-rules/setup-swap-rules use above).
+		webappAccountSignerHandler := webapphandler.NewAccountSignerHandler(
+			webappTransactionSvc, webapphandler.TransactionServiceOrNil(webappTransactionSvcMainnet),
+			webappAccountSignerSvc, passkeyCredentialSvc, webappWebauthnSvc, webappAuditSvc,
+		)
+		smartAccountGroup.POST("/add-signer", webappAccountSignerHandler.AddSigner)
+		smartAccountGroup.POST("/add-signer/confirm", webappAccountSignerHandler.ConfirmAddSigner)
+		smartAccountGroup.POST("/remove-signer", webappAccountSignerHandler.RemoveSigner)
+		smartAccountGroup.POST("/remove-signer/confirm", webappAccountSignerHandler.ConfirmRemoveSigner)
 	}
 
 	// Multisig (Safe-style multi-signer smart accounts): drafts (pre-deployment

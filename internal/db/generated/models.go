@@ -130,6 +130,7 @@ type WebappAccountSigner struct {
 	CredentialID        sql.NullString `json:"credential_id"`
 	Label               sql.NullString `json:"label"`
 	CreatedAt           int64          `json:"created_at"`
+	SignerID            sql.NullInt32  `json:"signer_id"`
 }
 
 type WebappAuditLog struct {

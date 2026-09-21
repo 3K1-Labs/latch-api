@@ -93,9 +93,25 @@ type deployProofService interface {
 // deployed, keyed by that passkey's own WebAuthn credential ID, so a device
 // that only has the (synced) passkey — no local state, no session — can later
 // recover the wallet's address and label instead of the user pasting them in.
-// Called once, right after a successful passkey deploy.
+// Register is called once, right after a successful passkey deploy;
+// Deregister after a confirmed on-chain remove_signer for a backup signer
+// (see backupSignerConfirmService).
 type passkeyCredentialRegisterService interface {
 	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
+	Deregister(ctx context.Context, keyDataHex string) error
+}
+
+// backupSignerConfirmService is the subset of *webapp.TransactionService the
+// mobile backup-signer confirm routes need: independently re-fetch a
+// submitted transaction by hash and verify it actually invoked
+// add_signer/remove_signer with the expected arguments before trusting its
+// return value. Shared with the web extension's backup-signer work — mobile
+// and the webapp reuse the exact same TransactionService instance (see
+// cmd/server/main.go), so this interface just narrows what this package
+// needs from it.
+type backupSignerConfirmService interface {
+	ConfirmAddSigner(ctx context.Context, in webapp.ConfirmAddSignerInput) (signerID uint32, err error)
+	ConfirmRemoveSigner(ctx context.Context, in webapp.ConfirmRemoveSignerInput) error
 }
 
 // passkeyCredentialLookupService resolves a WebAuthn credential ID to the

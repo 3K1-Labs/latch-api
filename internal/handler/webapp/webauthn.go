@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -29,18 +30,20 @@ type WebAuthnHandler struct {
 	smartAccountSvc  smartAccountService
 	accountsSvc      accountsService
 	credentialSvc    passkeyCredentialIndexService
+	accountSignerSvc accountSignerService
 	sessionSvc       sessionIssuer
 	auditSvc         auditService
 	cfg              *config.Config
 	crossSiteCookies bool
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, sessionSvc sessionIssuer, auditSvc auditService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionIssuer, auditSvc auditService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
 	return &WebAuthnHandler{
 		webauthnSvc:      webauthnSvc,
 		smartAccountSvc:  smartAccountSvc,
 		accountsSvc:      accountsSvc,
 		credentialSvc:    credentialSvc,
+		accountSignerSvc: accountSignerSvc,
 		sessionSvc:       sessionSvc,
 		auditSvc:         auditSvc,
 		cfg:              cfg,
@@ -170,7 +173,18 @@ type publicKeyCredentialJSON struct {
 type finishRegistrationRequest struct {
 	Response          publicKeyCredentialJSON `json:"response" binding:"required"`
 	ChromeExtensionID string                  `json:"chromeExtensionId,omitempty"`
+	// DisplayName and Seq feed the passkey-credential recovery index (see
+	// credentialSvc.Register below) so a fresh device restoring this passkey
+	// gets its label back. Both optional: an older client that sends neither
+	// gets today's behavior (label "", seq 0) rather than a hard error.
+	DisplayName string `json:"displayName,omitempty"`
+	Seq         int32  `json:"seq,omitempty"`
 }
+
+// finishRegistrationLabelMaxLen bounds the client-supplied label persisted to
+// passkey_credentials — generous enough for any real display name, small
+// enough that a hostile client can't write unbounded text.
+const finishRegistrationLabelMaxLen = 256
 
 // RegistrationFinish godoc
 // @Summary      Finish a WebAuthn registration ceremony
@@ -234,10 +248,12 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 	// Best-effort recovery-index write, mirroring the mobile deploy path
 	// (handler.SmartAccountHandler.DeployWebauthn). The deploy already
 	// succeeded and is the artifact that matters; a failed index write must
-	// not turn into a failed registration. Label is empty — the display name
-	// is a begin-ceremony field and isn't carried into finish; the address is
-	// what unblocks passkey sign-in on a fresh device.
-	if err := h.credentialSvc.Register(c.Request.Context(), keyDataHex, smartAccountAddress, "", 0); err != nil {
+	// not turn into a failed registration.
+	label := strings.TrimSpace(req.DisplayName)
+	if len(label) > finishRegistrationLabelMaxLen {
+		label = label[:finishRegistrationLabelMaxLen]
+	}
+	if err := h.credentialSvc.Register(c.Request.Context(), keyDataHex, smartAccountAddress, label, req.Seq); err != nil {
 		slog.Error("register passkey credential index", "userID", userID, "err", err)
 	}
 
@@ -253,6 +269,119 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 		"smartAccountAddress": smartAccountAddress,
 		"deployed":            deployed,
 		"alreadyDeployed":     alreadyDeployed,
+		"determinismCheck":    gin.H{"keyDataHash": keyDataHashHex(keyDataHex)},
+	})
+}
+
+// attachSignerLabelMaxLen mirrors finishRegistrationLabelMaxLen.
+const attachSignerLabelMaxLen = finishRegistrationLabelMaxLen
+
+// AttachSignerFinish godoc
+// @Summary      Attach a second passkey as a pending backup signer
+// @Description  Verifies a WebAuthn registration ceremony and records the new credential as a pending signer of an existing smart account, without deploying anything. The caller must already hold a credential that's an authorized signer of the target account. The signer isn't authorized on-chain until POST /api/smart-account/add-signer's built transaction is signed (by an existing signer) and submitted, then confirmed via POST /api/smart-account/add-signer/confirm.
+// @Tags         webauthn
+// @Accept       json
+// @Produce      json
+// @Param        smartAccountAddress path string true "Existing smart account address"
+// @Param        body body finishRegistrationRequest true "WebAuthn attestation response"
+// @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
+// @Failure      403 {object} webappErrorResponse
+// @Failure      404 {object} webappErrorResponse
+// @Router       /api/accounts/{smartAccountAddress}/signers/passkey/register [post]
+func (h *WebAuthnHandler) AttachSignerFinish(c *gin.Context) {
+	userID := middleware.SessionUserIDFromContext(c.Request.Context())
+	smartAccountAddress := c.Param("smartAccountAddress")
+
+	// R12: only a caller who already proves a signer credential on this
+	// account may attach a new one — otherwise any authenticated session
+	// could seed someone else's account_signers with a pending attach row.
+	owns, err := h.accountSignerSvc.CallerOwnsSignerCredential(c.Request.Context(), userID, smartAccountAddress)
+	if err != nil {
+		if errors.Is(err, webapp.ErrAccountSignerUnknownAccount) {
+			webappx.Fail(c, http.StatusNotFound, webappx.ErrUnknownAccount, "unknown smart account")
+			return
+		}
+		slog.Error("check signer ownership for attach", "userID", userID, "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+	if !owns {
+		webappx.Fail(c, http.StatusForbidden, webappx.ErrNotASigner, "you are not an authorized signer of this account")
+		return
+	}
+
+	var req finishRegistrationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+
+	rawID, err := base64.RawURLEncoding.DecodeString(req.Response.RawID)
+	if err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid rawId encoding")
+		return
+	}
+	clientDataJSON, err := base64.RawURLEncoding.DecodeString(req.Response.Response.ClientDataJSON)
+	if err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid clientDataJSON encoding")
+		return
+	}
+	attestationObject, err := base64.RawURLEncoding.DecodeString(req.Response.Response.AttestationObject)
+	if err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid attestationObject encoding")
+		return
+	}
+
+	// Verifies the ceremony and persists the new credential exactly like
+	// RegistrationFinish — but deliberately does NOT call
+	// smartAccountSvc.DeployForCredential: that derives a salt from this
+	// credential's own keyDataHex and deploys a *new* factory address, which
+	// would produce a second wallet instead of attaching to smartAccountAddress
+	// (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md §2.1).
+	cred, err := h.webauthnSvc.FinishRegistration(c.Request.Context(), webapp.FinishRegistrationInput{
+		UserID:                    userID,
+		CredentialID:              rawID,
+		ClientDataJSON:            clientDataJSON,
+		AttestationObject:         attestationObject,
+		Transports:                req.Response.Transports,
+		ChromeExtensionIDFromBody: req.ChromeExtensionID,
+		ExtensionIDHeader:         extensionIDHeader(c),
+		Config:                    h.webAuthnConfig(),
+	})
+	if err != nil {
+		slog.Error("finish attach-signer registration", "userID", userID, "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "webauthn verification failed")
+		return
+	}
+	keyDataHex := webapp.BuildKeyDataHex(cred.RawPublicKey, rawID)
+
+	label := strings.TrimSpace(req.DisplayName)
+	if len(label) > attachSignerLabelMaxLen {
+		label = label[:attachSignerLabelMaxLen]
+	}
+	if err := h.accountSignerSvc.AttachCredential(c.Request.Context(), smartAccountAddress, cred.CredentialID, label); err != nil {
+		if errors.Is(err, webapp.ErrAccountSignerUnknownAccount) {
+			webappx.Fail(c, http.StatusNotFound, webappx.ErrUnknownAccount, "unknown smart account")
+			return
+		}
+		slog.Error("attach signer credential", "userID", userID, "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
+	}
+
+	h.auditSvc.Log(c.Request.Context(), userID, string(webapp.ActionSignerAttached), c.ClientIP(), c.Request.UserAgent(), map[string]any{
+		"credentialId":        cred.CredentialID,
+		"smartAccountAddress": smartAccountAddress,
+	})
+
+	webappx.Success(c, http.StatusOK, gin.H{
+		"credentialId":        cred.CredentialID,
+		"keyDataHex":          keyDataHex,
+		"smartAccountAddress": smartAccountAddress,
+		"attached":            true,
+		"deployed":            false,
+		"signerOnChain":       false,
 		"determinismCheck":    gin.H{"keyDataHash": keyDataHashHex(keyDataHex)},
 	})
 }
@@ -389,9 +518,28 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 
 	smartAccountAddress, keyDataHex, deployed, err := h.smartAccountSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID)
 	if err != nil {
-		slog.Error("get smart account for authenticated credential", "userID", userID, "err", err)
-		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "credential verified, but no smart account mapping exists")
-		return
+		// cred.CredentialID may be a backup signer rather than an account's
+		// original credential (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R15) —
+		// smart_accounts only ever holds the original. Fall back to the
+		// account_signers index before failing.
+		fallbackAddress, fallbackErr := h.accountSignerSvc.ResolveByCredentialID(c.Request.Context(), cred.CredentialID)
+		if fallbackErr != nil {
+			slog.Error("get smart account for authenticated credential", "userID", userID, "err", err)
+			webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "credential verified, but no smart account mapping exists")
+			return
+		}
+		// A WebAuthn assertion carries no public key, so the client can't
+		// reconstruct this credential's own keyDataHex itself (R16) — without
+		// this, the client would build auth entries with the *account's*
+		// keyDataHex (the original credential's) while signing with this one,
+		// which fails on-chain as an opaque "Unauthorized function call".
+		fallbackKeyDataHex, keyErr := h.webauthnSvc.GetCredentialKeyDataHex(c.Request.Context(), cred.CredentialID)
+		if keyErr != nil {
+			slog.Error("get backup signer key data", "userID", userID, "err", keyErr)
+			webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+			return
+		}
+		smartAccountAddress, keyDataHex, deployed = fallbackAddress, fallbackKeyDataHex, true
 	}
 
 	accounts, err := h.accountsSvc.ListAccounts(c.Request.Context(), cred.UserID)

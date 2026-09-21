@@ -12,3 +12,7 @@ RETURNING *;
 -- name: GetPasskeyCredential :one
 SELECT * FROM passkey_credentials
 WHERE credential_id = $1;
+
+-- name: DeletePasskeyCredential :exec
+DELETE FROM passkey_credentials
+WHERE credential_id = $1;

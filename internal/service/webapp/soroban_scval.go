@@ -1,6 +1,7 @@
 package webapp
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -180,6 +181,86 @@ func extractReturnAddress(resultMetaXdrB64 string) (string, error) {
 		return scValToContractAddress(meta.V3.SorobanMeta.ReturnValue)
 	}
 	return "", fmt.Errorf("transaction meta missing soroban return value")
+}
+
+// extractReturnU32 decodes a base64 TransactionMeta XDR and extracts the
+// invoked contract's return value as a u32 — used to read back add_signer's
+// returned signer_id. See extractReturnAddress for the V3/V4 fallback this
+// mirrors.
+func extractReturnU32(resultMetaXdrB64 string) (uint32, error) {
+	var meta xdr.TransactionMeta
+	if err := xdr.SafeUnmarshalBase64(resultMetaXdrB64, &meta); err != nil {
+		return 0, fmt.Errorf("decode transaction meta: %w", err)
+	}
+	var retVal *xdr.ScVal
+	switch {
+	case meta.V4 != nil && meta.V4.SorobanMeta != nil:
+		retVal = meta.V4.SorobanMeta.ReturnValue
+	case meta.V3 != nil && meta.V3.SorobanMeta != nil:
+		retVal = &meta.V3.SorobanMeta.ReturnValue
+	}
+	if retVal == nil || retVal.Type != xdr.ScValTypeScvU32 || retVal.U32 == nil {
+		return 0, fmt.Errorf("transaction meta missing soroban u32 return value")
+	}
+	return uint32(*retVal.U32), nil
+}
+
+// scValEqual compares two ScVals by their encoded bytes, sidestepping the
+// pointer-heavy xdr.ScVal struct's unsuitability for reflect.DeepEqual/==.
+func scValEqual(a, b xdr.ScVal) bool {
+	aBytes, err := a.MarshalBinary()
+	if err != nil {
+		return false
+	}
+	bBytes, err := b.MarshalBinary()
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(aBytes, bBytes)
+}
+
+// decodedInvocation is the contract, function, and arguments a single
+// InvokeHostFunction operation invoked.
+type decodedInvocation struct {
+	ContractID   xdr.ContractId
+	FunctionName string
+	Args         []xdr.ScVal
+}
+
+// decodeSingleInvocation decodes a (single-operation) TransactionEnvelope XDR
+// and returns what it invoked. Used by the add/remove-signer confirm steps to
+// verify a submitted transaction actually called the expected contract
+// function with the expected arguments, rather than trusting a caller-
+// supplied "it succeeded" claim tied to an unrelated transaction hash.
+func decodeSingleInvocation(envelopeXdrB64 string) (decodedInvocation, error) {
+	var envelope xdr.TransactionEnvelope
+	if err := xdr.SafeUnmarshalBase64(envelopeXdrB64, &envelope); err != nil {
+		return decodedInvocation{}, fmt.Errorf("decode transaction envelope: %w", err)
+	}
+	if envelope.V1 == nil {
+		return decodedInvocation{}, fmt.Errorf("expected a v1 transaction envelope")
+	}
+	ops := envelope.V1.Tx.Operations
+	if len(ops) != 1 {
+		return decodedInvocation{}, fmt.Errorf("expected exactly one operation, got %d", len(ops))
+	}
+	op := ops[0]
+	if op.Body.Type != xdr.OperationTypeInvokeHostFunction || op.Body.InvokeHostFunctionOp == nil {
+		return decodedInvocation{}, fmt.Errorf("operation is not an invoke host function")
+	}
+	fn := op.Body.InvokeHostFunctionOp.HostFunction
+	invoke, ok := fn.GetInvokeContract()
+	if !ok {
+		return decodedInvocation{}, fmt.Errorf("expected a contract invocation")
+	}
+	if invoke.ContractAddress.Type != xdr.ScAddressTypeScAddressTypeContract || invoke.ContractAddress.ContractId == nil {
+		return decodedInvocation{}, fmt.Errorf("invocation target is not a contract address")
+	}
+	return decodedInvocation{
+		ContractID:   *invoke.ContractAddress.ContractId,
+		FunctionName: string(invoke.FunctionName),
+		Args:         invoke.Args,
+	}, nil
 }
 
 func decodeBase64URL(s string) ([]byte, error) {

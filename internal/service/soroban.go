@@ -221,6 +221,12 @@ type GetTxResult struct {
 	ResultXdr      string `json:"resultXdr,omitempty"`
 	ResultMetaXdr  string `json:"resultMetaXdr,omitempty"` // TransactionMeta XDR; holds the invoked contract's return value
 	ErrorResultXdr string `json:"errorResultXdr,omitempty"`
+	// EnvelopeXdr is the submitted TransactionEnvelope XDR. Callers that must
+	// verify *what* was actually invoked on-chain before trusting a return
+	// value (e.g. confirming a specific add_signer/remove_signer call rather
+	// than trusting any caller-supplied hash) decode this rather than the
+	// caller's own account of what it submitted.
+	EnvelopeXdr string `json:"envelopeXdr,omitempty"`
 }
 
 // GetTransaction fetches the current status of a submitted transaction.

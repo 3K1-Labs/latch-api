@@ -45,17 +45,24 @@ var errMainnetNotConfigured = errors.New("mainnet is not configured on this serv
 // (identical to pre-mainnet-support behavior); "mainnet" resolves to
 // h.txSvcMainnet or fails with errMainnetNotConfigured if that's nil.
 func (h *TransactionHandler) resolveNetwork(raw string) (transactionService, webapp.Network, error) {
+	return resolveNetworkFor(h.txSvc, h.txSvcMainnet, raw)
+}
+
+// resolveNetworkFor is resolveNetwork's testnet/mainnet selection, factored
+// out so other handlers backed by the same transactionService pair (e.g.
+// AccountSignerHandler) share it rather than re-deriving it.
+func resolveNetworkFor(txSvc, txSvcMainnet transactionService, raw string) (transactionService, webapp.Network, error) {
 	network, err := webapp.ParseNetwork(raw)
 	if err != nil {
 		return nil, "", err
 	}
 	if network == webapp.NetworkMainnet {
-		if h.txSvcMainnet == nil {
+		if txSvcMainnet == nil {
 			return nil, "", errMainnetNotConfigured
 		}
-		return h.txSvcMainnet, network, nil
+		return txSvcMainnet, network, nil
 	}
-	return h.txSvc, network, nil
+	return txSvc, network, nil
 }
 
 // failNetworkResolution writes the appropriate 400 response for a

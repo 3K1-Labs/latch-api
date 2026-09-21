@@ -3,7 +3,9 @@ package webapp
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -449,4 +451,181 @@ func ruleAuthorizesSigner(rule ContextRuleSummary, signerType, verifierAddress, 
 		}
 	}
 	return false
+}
+
+// ── backup passkey signers (add-signer / remove-signer) ────────────────────
+
+// ErrNoDefaultRule is returned when DiscoverDefaultContextRule falls back
+// (no Default rule actually found) rather than matching one — add/remove
+// signer must not build against a rule id that doesn't exist.
+var ErrNoDefaultRule = errors.New("no default context rule found for this smart account")
+
+// ErrLastSigner is returned by RemoveSigner when the Default rule would be
+// left with zero signers — a permanently frozen account, worse than the
+// removal it was trying to perform (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R10).
+var ErrLastSigner = errors.New("removing this signer would leave the account with no signers")
+
+// ruleHasExactExternalSigner reports whether rule has an External signer
+// whose verifier and keyDataHex exactly match — unlike ruleAuthorizesSigner
+// (which matches on verifier alone and would report a second passkey as
+// "already configured"), this is the idempotency check add-signer needs to
+// tell "this exact passkey already signs" apart from "some passkey signs"
+// (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md §2.5).
+func ruleHasExactExternalSigner(rule ContextRuleSummary, verifierAddress, keyDataHex string) bool {
+	for _, sg := range rule.Signers {
+		if sg.Kind == "External" && sg.VerifierAddress == verifierAddress && strings.EqualFold(sg.KeyDataHex, keyDataHex) {
+			return true
+		}
+	}
+	return false
+}
+
+// AddSignerInput is the input to AddSigner, ported from
+// POST /api/smart-account/add-signer.
+type AddSignerInput struct {
+	SmartAccountAddress string
+	KeyDataHex          string // the backup passkey's key data
+}
+
+// AddSignerResult is the outcome of AddSigner. When AlreadyConfigured is
+// true, only ContextRuleID is also populated.
+type AddSignerResult struct {
+	BuildAuthTransactionResult
+	AlreadyConfigured bool
+	Message           string
+	ContextRuleID     uint32
+}
+
+// AddSigner builds a transaction that adds a second passkey as an External
+// signer on the smart account's Default rule, so either passkey can sign
+// alone afterwards (solo accounts stay 1-of-N). Modeled directly on
+// SetupSwapRules's add_signer path, with an exact-keyDataHex idempotency
+// check instead of ruleAuthorizesSigner's looser one.
+func (s *TransactionService) AddSigner(ctx context.Context, in AddSignerInput) (AddSignerResult, error) {
+	if in.KeyDataHex == "" {
+		return AddSignerResult{}, fmt.Errorf("keyDataHex is required")
+	}
+	if s.webauthnVerifierAddress == "" {
+		return AddSignerResult{}, fmt.Errorf("webauthn verifier address not configured")
+	}
+
+	contextRuleID, discovery, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+	if err != nil {
+		return AddSignerResult{}, fmt.Errorf("discover default context rule: %w", err)
+	}
+	if discovery != ContextRuleDiscoveryDefault {
+		return AddSignerResult{}, ErrNoDefaultRule
+	}
+	defaultRule, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, contextRuleID)
+	if err != nil {
+		return AddSignerResult{}, fmt.Errorf("fetch default context rule: %w", err)
+	}
+
+	if ruleOK && ruleHasExactExternalSigner(defaultRule, s.webauthnVerifierAddress, in.KeyDataHex) {
+		return AddSignerResult{
+			AlreadyConfigured: true,
+			Message:           "This passkey already signs for this account.",
+			ContextRuleID:     contextRuleID,
+		}, nil
+	}
+
+	keyBytes, err := hex.DecodeString(in.KeyDataHex)
+	if err != nil {
+		return AddSignerResult{}, fmt.Errorf("decode keyDataHex: %w", err)
+	}
+	signerScVal, err := buildExternalSignerScVal(s.webauthnVerifierAddress, keyBytes)
+	if err != nil {
+		return AddSignerResult{}, err
+	}
+
+	smartAccountContractID, err := contractIDFromAddress(in.SmartAccountAddress)
+	if err != nil {
+		return AddSignerResult{}, fmt.Errorf("resolve smart account contract: %w", err)
+	}
+	addSignerFn := invokeContractHostFunction(smartAccountContractID, "add_signer", scU32(contextRuleID), signerScVal)
+
+	bundlerDelegatedAuthMode, delegatedAuthG := adminBundlerDelegatedAuth(defaultRule, ruleOK)
+	coreResult, err := s.buildSetupAuthTransaction(ctx, addSignerFn, authTransactionCoreInput{
+		smartAccountAddress:      in.SmartAccountAddress,
+		contextRuleID:            contextRuleID,
+		signerType:               "passkey",
+		feePayerG:                s.bundler.PublicKey(),
+		bundlerDelegatedAuthMode: bundlerDelegatedAuthMode,
+		delegatedAuthG:           delegatedAuthG,
+	})
+	if err != nil {
+		return AddSignerResult{}, err
+	}
+
+	return AddSignerResult{BuildAuthTransactionResult: coreResult, ContextRuleID: contextRuleID}, nil
+}
+
+// RemoveSignerInput is the input to RemoveSigner, ported from
+// POST /api/smart-account/remove-signer.
+type RemoveSignerInput struct {
+	SmartAccountAddress string
+	SignerID            uint32 // the on-chain signer_id add_signer returned when this signer was added
+}
+
+// RemoveSignerResult is the outcome of RemoveSigner.
+type RemoveSignerResult struct {
+	BuildAuthTransactionResult
+	ContextRuleID uint32
+}
+
+// RemoveSigner builds a transaction that removes signerID from the smart
+// account's Default rule. Refuses to build if that would leave the rule
+// with zero signers (ErrLastSigner) — the caller must still check that the
+// *caller* retains a signer afterwards (R8), which is a session-level
+// check this build step can't see.
+func (s *TransactionService) RemoveSigner(ctx context.Context, in RemoveSignerInput) (RemoveSignerResult, error) {
+	contextRuleID, discovery, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+	if err != nil {
+		return RemoveSignerResult{}, fmt.Errorf("discover default context rule: %w", err)
+	}
+	if discovery != ContextRuleDiscoveryDefault {
+		return RemoveSignerResult{}, ErrNoDefaultRule
+	}
+	defaultRule, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, contextRuleID)
+	if err != nil {
+		return RemoveSignerResult{}, fmt.Errorf("fetch default context rule: %w", err)
+	}
+	if ruleOK && len(defaultRule.Signers) <= 1 {
+		return RemoveSignerResult{}, ErrLastSigner
+	}
+
+	smartAccountContractID, err := contractIDFromAddress(in.SmartAccountAddress)
+	if err != nil {
+		return RemoveSignerResult{}, fmt.Errorf("resolve smart account contract: %w", err)
+	}
+	removeSignerFn := invokeContractHostFunction(smartAccountContractID, "remove_signer", scU32(contextRuleID), scU32(in.SignerID))
+
+	bundlerDelegatedAuthMode, delegatedAuthG := adminBundlerDelegatedAuth(defaultRule, ruleOK)
+	coreResult, err := s.buildSetupAuthTransaction(ctx, removeSignerFn, authTransactionCoreInput{
+		smartAccountAddress:      in.SmartAccountAddress,
+		contextRuleID:            contextRuleID,
+		signerType:               "passkey",
+		feePayerG:                s.bundler.PublicKey(),
+		bundlerDelegatedAuthMode: bundlerDelegatedAuthMode,
+		delegatedAuthG:           delegatedAuthG,
+	})
+	if err != nil {
+		return RemoveSignerResult{}, err
+	}
+
+	return RemoveSignerResult{BuildAuthTransactionResult: coreResult, ContextRuleID: contextRuleID}, nil
+}
+
+// adminBundlerDelegatedAuth is SetupSwapRules'/SetupSendRules' inline
+// bundlerDelegatedAuthMode/delegatedAuthG resolution, factored out so
+// AddSigner/RemoveSigner share it exactly rather than re-deriving it.
+func adminBundlerDelegatedAuth(rule ContextRuleSummary, ruleOK bool) (bundlerDelegatedAuthMode bool, delegatedAuthG string) {
+	if !ruleOK {
+		return false, ""
+	}
+	ruleG := delegatedGFromContextRule(rule)
+	if ruleG != "" && !ruleHasExternalSigner(rule) {
+		return true, ruleG
+	}
+	return false, ""
 }

@@ -26,6 +26,14 @@ const (
 	ActionOnRampIntentUpdated  AuditAction = "onramp_intent_updated"
 )
 
+// Backup-signer actions. Adding or removing a signer changes who can spend
+// from a smart account, so every state change is recorded.
+const (
+	ActionSignerAttached AuditAction = "signer_attached"
+	ActionSignerAdded    AuditAction = "signer_added"
+	ActionSignerRemoved  AuditAction = "signer_removed"
+)
+
 type AuditService struct {
 	q *db.Queries
 }

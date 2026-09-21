@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -43,7 +44,7 @@ func postJSONBody(v any) *bytes.Reader {
 
 func TestRegistrationBegin_Success(t *testing.T) {
 	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
@@ -59,7 +60,7 @@ func TestRegistrationBegin_Success(t *testing.T) {
 
 func TestRegistrationBegin_HonorsDisplayName(t *testing.T) {
 	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
@@ -75,7 +76,7 @@ func TestRegistrationBegin_HonorsDisplayName(t *testing.T) {
 
 func TestRegistrationBegin_FallbackDisplayNameIsUnique(t *testing.T) {
 	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
@@ -100,7 +101,7 @@ func TestRegistrationBegin_IncludesExcludeCredentials(t *testing.T) {
 		ExcludeCredentials: []string{"cred-existing"},
 		Timeout:            60000,
 	}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
@@ -115,7 +116,7 @@ func TestRegistrationBegin_IncludesExcludeCredentials(t *testing.T) {
 
 func TestRegistrationBegin_OmitsExcludeCredentialsWhenEmpty(t *testing.T) {
 	stub := &stubWebauthn{beginRegOpts: webapp.RegistrationOptions{Challenge: "chal", RPID: "latch.finance", UserID: "uid-b64", Timeout: 60000}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
@@ -129,7 +130,7 @@ func TestRegistrationBegin_OmitsExcludeCredentialsWhenEmpty(t *testing.T) {
 }
 
 func TestRegistrationBegin_ConflictingExtensionID(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
 
@@ -142,7 +143,7 @@ func TestRegistrationBegin_ConflictingExtensionID(t *testing.T) {
 }
 
 func TestRegistrationBegin_ServiceError(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{beginRegErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{beginRegErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/begin", h.RegistrationBegin)
 
@@ -178,7 +179,7 @@ func TestRegistrationFinish_Success(t *testing.T) {
 		deployDeployed:            true,
 		deployAlreadyDeployed:     false,
 	}
-	h := NewWebAuthnHandler(webauthnStub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(webauthnStub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -199,7 +200,7 @@ func TestRegistrationFinish_RegistersRecoveryIndex(t *testing.T) {
 		deploySmartAccountAddress: "CADDRESS",
 		deployDeployed:            true,
 	}
-	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -213,10 +214,144 @@ func TestRegistrationFinish_RegistersRecoveryIndex(t *testing.T) {
 	assert.Equal(t, "CADDRESS", credStub.gotAddress)
 }
 
+func TestRegistrationFinish_PersistsDisplayNameAndSeq(t *testing.T) {
+	credStub := &stubCredentialIndex{}
+	smartAccountStub := &stubSmartAccount{
+		deployKeyDataHex:          "aabb",
+		deploySmartAccountAddress: "CADDRESS",
+		deployDeployed:            true,
+	}
+	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/finish", h.RegistrationFinish)
+
+	body := validFinishRegistrationBody()
+	body["displayName"] = "Savings (Latch 2)"
+	body["seq"] = 2
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/finish", postJSONBody(body)), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Savings (Latch 2)", credStub.gotLabel)
+	assert.Equal(t, int32(2), credStub.gotSeq)
+}
+
+func TestRegistrationFinish_OmittedDisplayNameAndSeqDefaultToEmpty(t *testing.T) {
+	credStub := &stubCredentialIndex{}
+	smartAccountStub := &stubSmartAccount{deploySmartAccountAddress: "CADDRESS", deployDeployed: true}
+	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/finish", h.RegistrationFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/finish", postJSONBody(validFinishRegistrationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "", credStub.gotLabel)
+	assert.Equal(t, int32(0), credStub.gotSeq)
+}
+
+func TestRegistrationFinish_TrimsAndCapsDisplayName(t *testing.T) {
+	credStub := &stubCredentialIndex{}
+	smartAccountStub := &stubSmartAccount{deploySmartAccountAddress: "CADDRESS", deployDeployed: true}
+	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/finish", h.RegistrationFinish)
+
+	body := validFinishRegistrationBody()
+	body["displayName"] = "  " + strings.Repeat("x", 300) + "  "
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/finish", postJSONBody(body)), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Len(t, credStub.gotLabel, 256)
+}
+
+// ── AttachSignerFinish ───────────────────────────────────────────────────────
+
+func TestAttachSignerFinish_Success(t *testing.T) {
+	webauthnStub := &stubWebauthn{finishRegCred: webapp.RegisteredCredential{CredentialID: "cred-b-b64"}}
+	signerStub := &stubAccountSigner{callerOwns: true}
+	h := NewWebAuthnHandler(webauthnStub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, signerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
+
+	body := validFinishRegistrationBody()
+	body["displayName"] = "Backup (Latch 2)"
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(body)), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"attached":true`)
+	assert.Contains(t, w.Body.String(), `"deployed":false`)
+	assert.Contains(t, w.Body.String(), `"signerOnChain":false`)
+	assert.Equal(t, "CADDR", signerStub.gotAttachAddress)
+	assert.Equal(t, "cred-b-b64", signerStub.gotAttachCredentialID)
+	assert.Equal(t, "Backup (Latch 2)", signerStub.gotAttachLabel)
+}
+
+func TestAttachSignerFinish_NotASigner(t *testing.T) {
+	signerStub := &stubAccountSigner{callerOwns: false}
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, signerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestAttachSignerFinish_UnknownAccount(t *testing.T) {
+	signerStub := &stubAccountSigner{callerOwnsErr: webapp.ErrAccountSignerUnknownAccount}
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, signerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestAttachSignerFinish_VerificationFailure(t *testing.T) {
+	webauthnStub := &stubWebauthn{finishRegErr: assertErr}
+	signerStub := &stubAccountSigner{callerOwns: true}
+	h := NewWebAuthnHandler(webauthnStub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, signerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAttachSignerFinish_AttachError(t *testing.T) {
+	webauthnStub := &stubWebauthn{finishRegCred: webapp.RegisteredCredential{CredentialID: "cred-b-b64"}}
+	signerStub := &stubAccountSigner{callerOwns: true, attachErr: assertErr}
+	h := NewWebAuthnHandler(webauthnStub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, signerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
 func TestRegistrationFinish_RecoveryIndexErrorDoesNotFailRequest(t *testing.T) {
 	credStub := &stubCredentialIndex{err: assertErr}
 	smartAccountStub := &stubSmartAccount{deploySmartAccountAddress: "CADDRESS", deployDeployed: true}
-	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, smartAccountStub, &stubAccounts{}, credStub, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -228,7 +363,7 @@ func TestRegistrationFinish_RecoveryIndexErrorDoesNotFailRequest(t *testing.T) {
 }
 
 func TestRegistrationFinish_InvalidBody(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -240,7 +375,7 @@ func TestRegistrationFinish_InvalidBody(t *testing.T) {
 }
 
 func TestRegistrationFinish_InvalidRawIDEncoding(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -254,7 +389,7 @@ func TestRegistrationFinish_InvalidRawIDEncoding(t *testing.T) {
 }
 
 func TestRegistrationFinish_VerificationFailure(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{finishRegErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{finishRegErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -266,7 +401,7 @@ func TestRegistrationFinish_VerificationFailure(t *testing.T) {
 }
 
 func TestRegistrationFinish_DeployError(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{deployErr: assertErr}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{deployErr: assertErr}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.RegistrationFinish)
 
@@ -281,7 +416,7 @@ func TestRegistrationFinish_DeployError(t *testing.T) {
 
 func TestAuthenticationBegin_Success(t *testing.T) {
 	stub := &stubWebauthn{beginAuthOpts: webapp.AuthenticationOptions{Challenge: "chal", RPID: "latch.finance", AllowedCredentials: []string{"cred-1"}, Timeout: 60000}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/begin", h.AuthenticationBegin)
 
@@ -299,7 +434,7 @@ func TestAuthenticationBegin_Success(t *testing.T) {
 // passkeys. Zero credentials must omit the field entirely.
 func TestAuthenticationBegin_NoCredentials_OmitsAllowCredentials(t *testing.T) {
 	stub := &stubWebauthn{beginAuthOpts: webapp.AuthenticationOptions{Challenge: "chal", RPID: "latch.finance", Timeout: 60000}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/begin", h.AuthenticationBegin)
 
@@ -337,7 +472,7 @@ func TestAuthenticationFinish_Success(t *testing.T) {
 	}
 	accountsStub := &stubAccounts{accounts: []webapp.Account{{SmartAccountAddress: "CADDRESS", CredentialID: "cred-b64", Deployed: true}}}
 	issuer := &stubSessionIssuer{}
-	h := NewWebAuthnHandler(stub, smartAccountStub, accountsStub, &stubCredentialIndex{}, issuer, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, smartAccountStub, accountsStub, &stubCredentialIndex{}, &stubAccountSigner{}, issuer, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.AuthenticationFinish)
 
@@ -362,7 +497,7 @@ func TestAuthenticationFinish_SwitchesSessionToCredentialOwner(t *testing.T) {
 	stub := &stubWebauthn{finishAuthCred: webapp.AuthenticatedCredential{CredentialID: "cred-b64", UserID: "owner-9"}}
 	smartAccountStub := &stubSmartAccount{getByCredentialIDAddress: "CADDRESS", getByCredentialIDKeyData: "aabb"}
 	issuer := &stubSessionIssuer{session: webapp.Session{ID: "new-sid-123", UserID: "owner-9"}}
-	h := NewWebAuthnHandler(stub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, issuer, &stubAudit{}, testCfg(), true)
+	h := NewWebAuthnHandler(stub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, issuer, &stubAudit{}, testCfg(), true)
 	r := gin.New()
 	r.POST("/finish", h.AuthenticationFinish)
 
@@ -383,7 +518,7 @@ func TestAuthenticationFinish_SwitchesSessionToCredentialOwner(t *testing.T) {
 func TestAuthenticationFinish_SessionIssueError(t *testing.T) {
 	stub := &stubWebauthn{finishAuthCred: webapp.AuthenticatedCredential{CredentialID: "cred-b64", UserID: "owner-9"}}
 	issuer := &stubSessionIssuer{err: assertErr}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, issuer, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, issuer, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.AuthenticationFinish)
 
@@ -397,7 +532,48 @@ func TestAuthenticationFinish_SessionIssueError(t *testing.T) {
 func TestAuthenticationFinish_SmartAccountLookupError(t *testing.T) {
 	stub := &stubWebauthn{finishAuthCred: webapp.AuthenticatedCredential{CredentialID: "cred-b64", UserID: "user-1"}}
 	smartAccountStub := &stubSmartAccount{getByCredentialIDErr: assertErr}
-	h := NewWebAuthnHandler(stub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	// Both the primary smart_accounts lookup and the account_signers
+	// fallback (R15) must miss for this to be a genuine "no mapping" case.
+	h := NewWebAuthnHandler(stub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{resolveByCredentialErr: assertErr}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/finish", h.AuthenticationFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/finish", postJSONBody(validFinishAuthenticationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestAuthenticationFinish_BackupSignerFallback(t *testing.T) {
+	stub := &stubWebauthn{
+		finishAuthCred: webapp.AuthenticatedCredential{CredentialID: "cred-b-b64", UserID: "user-1"},
+		keyDataHex:     "aabbccdd",
+	}
+	smartAccountStub := &stubSmartAccount{getByCredentialIDErr: assertErr}
+	accountSignerStub := &stubAccountSigner{resolveByCredentialAddr: "CADDRESS"}
+	h := NewWebAuthnHandler(stub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, accountSignerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	r := gin.New()
+	r.POST("/finish", h.AuthenticationFinish)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/finish", postJSONBody(validFinishAuthenticationBody())), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CADDRESS"`)
+	assert.Contains(t, w.Body.String(), `"keyDataHex":"aabbccdd"`)
+	assert.Contains(t, w.Body.String(), `"activeCredentialId":"cred-b-b64"`)
+}
+
+func TestAuthenticationFinish_BackupSignerFallbackKeyDataError(t *testing.T) {
+	stub := &stubWebauthn{
+		finishAuthCred: webapp.AuthenticatedCredential{CredentialID: "cred-b-b64", UserID: "user-1"},
+		keyDataHexErr:  assertErr,
+	}
+	smartAccountStub := &stubSmartAccount{getByCredentialIDErr: assertErr}
+	accountSignerStub := &stubAccountSigner{resolveByCredentialAddr: "CADDRESS"}
+	h := NewWebAuthnHandler(stub, smartAccountStub, &stubAccounts{}, &stubCredentialIndex{}, accountSignerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.AuthenticationFinish)
 
@@ -409,7 +585,7 @@ func TestAuthenticationFinish_SmartAccountLookupError(t *testing.T) {
 }
 
 func TestAuthenticationFinish_InvalidSignatureEncoding(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.AuthenticationFinish)
 
@@ -423,7 +599,7 @@ func TestAuthenticationFinish_InvalidSignatureEncoding(t *testing.T) {
 }
 
 func TestAuthenticationFinish_VerificationFailure(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{finishAuthErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{finishAuthErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/finish", h.AuthenticationFinish)
 
@@ -438,7 +614,7 @@ func TestAuthenticationFinish_VerificationFailure(t *testing.T) {
 
 func TestCredentials_Success(t *testing.T) {
 	stub := &stubWebauthn{credentials: []webapp.CredentialSummary{{CredentialID: "cred-1", CreatedAt: 123}}}
-	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(stub, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.GET("/credentials", h.Credentials)
 
@@ -451,7 +627,7 @@ func TestCredentials_Success(t *testing.T) {
 }
 
 func TestCredentials_ServiceError(t *testing.T) {
-	h := NewWebAuthnHandler(&stubWebauthn{credentialsErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
+	h := NewWebAuthnHandler(&stubWebauthn{credentialsErr: assertErr}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, &stubAccountSigner{}, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.GET("/credentials", h.Credentials)
 
