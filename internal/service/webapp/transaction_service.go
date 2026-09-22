@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -615,6 +616,46 @@ type PrepareSignResult struct {
 	BuildAuthTransactionResult
 }
 
+// ErrPrepareSignNoContextRule is returned when PrepareSign finds no
+// Default-variant context rule configured for the smart account — the
+// client must run setup-send-rules or setup-swap-rules before retrying.
+var ErrPrepareSignNoContextRule = errors.New("no default context rule configured for this smart account")
+
+// ErrPrepareSignSignerMismatch is returned when a Default context rule
+// exists but doesn't authorize the requested signer type/address — the
+// client must re-run setup-send-rules/setup-swap-rules to reconfigure it.
+var ErrPrepareSignSignerMismatch = errors.New("default context rule does not authorize the requested signer")
+
+// ErrPrepareSignValidation is returned for prepare-sign request validation
+// failures (invalid XDR, wrong operation shape) — distinct from missing
+// rules, signer mismatches, or unexpected failures.
+var ErrPrepareSignValidation = errors.New("prepare-sign validation error")
+
+// validatePrepareSignSignerAuthorization checks that the smart account's
+// Default context rule plausibly authorizes the requested signer type
+// before PrepareSign spends a simulation round trip on it. This is a
+// best-effort pre-check for a clearer error — the smart account contract
+// itself remains the authority that enforces this at submit time. Mirrors
+// BuildSwap's validateContextRuleForSignerType against the same Default
+// rule concept, with prepare-sign-neutral wording since this endpoint isn't
+// swap-specific.
+func validatePrepareSignSignerAuthorization(rule ContextRuleSummary, signerType, signerG, bundlerPublicKey string) error {
+	if signerG != "" && signerG == bundlerPublicKey {
+		return fmt.Errorf("%w: signerG must be the user's G-address, not the bundler fee-payer", ErrPrepareSignValidation)
+	}
+	switch signerType {
+	case "passkey", "phantom":
+		if !ruleHasExternalSigner(rule) {
+			return fmt.Errorf("%w: default context rule has no External passkey signer configured; run setup-send-rules or setup-swap-rules first", ErrPrepareSignSignerMismatch)
+		}
+	case "freighter":
+		if !ruleHasDelegatedSignerG(rule, signerG) {
+			return fmt.Errorf("%w: default context rule does not authorize signerG %s; run setup-send-rules or setup-swap-rules with your Freighter G-address", ErrPrepareSignSignerMismatch, signerG)
+		}
+	}
+	return nil
+}
+
 // PrepareSign simulates a client-built unsigned transaction (e.g. a
 // non-Aquarius swap built locally, or a dapp-supplied unsignedTxXdr) exactly
 // as BuildSend does after its own transfer-op construction: it does NOT
@@ -626,15 +667,28 @@ type PrepareSignResult struct {
 func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInput) (PrepareSignResult, error) {
 	var envelope xdr.TransactionEnvelope
 	if err := xdr.SafeUnmarshalBase64(in.UnsignedTxXdr, &envelope); err != nil {
-		return PrepareSignResult{}, fmt.Errorf("decode unsignedTxXdr: %w", err)
+		return PrepareSignResult{}, fmt.Errorf("%w: decode unsignedTxXdr: %s", ErrPrepareSignValidation, err)
 	}
 	if envelope.V1 == nil || len(envelope.V1.Tx.Operations) != 1 {
-		return PrepareSignResult{}, fmt.Errorf("expected a single-operation transaction envelope")
+		return PrepareSignResult{}, fmt.Errorf("%w: expected a single-operation transaction envelope", ErrPrepareSignValidation)
 	}
 
 	contextRuleID, discovery, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
 	if err != nil {
 		return PrepareSignResult{}, fmt.Errorf("discover context rule: %w", err)
+	}
+	if discovery == ContextRuleDiscoveryFallback {
+		return PrepareSignResult{}, fmt.Errorf("%w: no Default context rule found for this smart account", ErrPrepareSignNoContextRule)
+	}
+	rule, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, contextRuleID)
+	if err != nil {
+		return PrepareSignResult{}, fmt.Errorf("fetch context rule: %w", err)
+	}
+	if !ruleOK {
+		return PrepareSignResult{}, fmt.Errorf("%w: default context rule %d no longer exists", ErrPrepareSignNoContextRule, contextRuleID)
+	}
+	if err := validatePrepareSignSignerAuthorization(rule, in.SignerType, in.SignerG, s.bundler.PublicKey()); err != nil {
+		return PrepareSignResult{}, err
 	}
 
 	sim, err := s.soroban.SimulateTransaction(ctx, s.rpcURL, in.UnsignedTxXdr, service.RPCResourceConfig{})
@@ -714,7 +768,7 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 	}
 	op := envelope.V1.Tx.Operations[0]
 	if op.Body.Type != xdr.OperationTypeInvokeHostFunction || op.Body.InvokeHostFunctionOp == nil {
-		return PrepareSignResult{}, fmt.Errorf("expected an invoke host function operation")
+		return PrepareSignResult{}, fmt.Errorf("%w: expected an invoke host function operation", ErrPrepareSignValidation)
 	}
 	op.Body.InvokeHostFunctionOp.Auth = entries
 	envelope.V1.Tx.Ext = xdr.TransactionExt{V: 1, SorobanData: &sorobanData}

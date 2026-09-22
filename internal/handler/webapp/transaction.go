@@ -468,8 +468,7 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		SignerG:             req.SignerG,
 	})
 	if err != nil {
-		slog.Error("prepare sign transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to prepare transaction")
+		prepareSignErrorResponse(c, req.SmartAccountAddress, err)
 		return
 	}
 
@@ -886,5 +885,30 @@ func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err erro
 	default:
 		slog.Error("build swap transaction", "smartAccountAddress", smartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to build swap transaction")
+	}
+}
+
+// prepareSignErrorResponse maps a PrepareSign service-layer sentinel error
+// to the correct HTTP status and error code, same pattern as
+// buildSwapErrorResponse: a missing Default context rule or a signer
+// mismatch come back as 409s the client can act on (re-run setup-send-rules
+// or setup-swap-rules), a request/XDR validation failure comes back as 400,
+// and anything unrecognized falls back to a generic 500 with no internal
+// detail leaked, per security.md.
+func prepareSignErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	switch {
+	case errors.Is(err, webapp.ErrPrepareSignNoContextRule):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrNoContextRule, err.Error())
+	case errors.Is(err, webapp.ErrPrepareSignSignerMismatch):
+		webappx.Success(c, http.StatusConflict, gin.H{
+			"error":           err.Error(),
+			"code":            webappx.ErrSignerMismatch,
+			"suggestedAction": "reconfigure_default_rule",
+		})
+	case errors.Is(err, webapp.ErrPrepareSignValidation):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+	default:
+		slog.Error("prepare sign transaction", "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to prepare transaction")
 	}
 }

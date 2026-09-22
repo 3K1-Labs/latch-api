@@ -867,5 +867,58 @@ func TestPrepareSign_ServiceError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"internal_error"`)
+}
+
+func TestPrepareSign_NoContextRuleError(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignNoContextRule}, nil, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"NO_CONTEXT_RULE"`)
+}
+
+func TestPrepareSign_SignerMismatchError(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignSignerMismatch}, nil, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"SIGNER_MISMATCH"`)
+	assert.Contains(t, w.Body.String(), `"suggestedAction":"reconfigure_default_rule"`)
+}
+
+func TestPrepareSign_ValidationError(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignValidation}, nil, testCfg())
+	r := gin.New()
+	r.POST("/transaction/prepare-sign", h.PrepareSign)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"unsignedTxXdr":       "AAAAunsigned==",
+		"signerType":          "passkey",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"validation_error"`)
 }
