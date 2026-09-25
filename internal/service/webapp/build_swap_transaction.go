@@ -187,10 +187,13 @@ type BuildSwapInput struct {
 	SignerType          string // "passkey" | "phantom" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
 	RouterContractID    string // defaults to the well-known testnet Aquarius router
-	SwapChainXdr        string // base64 ScVal from Aquarius find-path
-	TokenInContractID   string
-	AmountInRaw         string // raw u128 minimal-unit string
-	AmountOutMinRaw     string // raw u128 minimal-unit string
+	// KeyDataHex identifies which passkey is about to sign, for accounts
+	// with a backup signer — see BuildSendInput.KeyDataHex's doc comment.
+	KeyDataHex        string
+	SwapChainXdr      string // base64 ScVal from Aquarius find-path
+	TokenInContractID string
+	AmountInRaw       string // raw u128 minimal-unit string
+	AmountOutMinRaw   string // raw u128 minimal-unit string
 }
 
 // BuildSwapResult is the outcome of BuildSwap.
@@ -226,7 +229,11 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 
 	routerID := resolveRouterContractID(in.RouterContractID)
 
-	contextRuleID, _, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+	verifierAddress := ""
+	if in.SignerType == "passkey" {
+		verifierAddress = s.webauthnVerifierAddress
+	}
+	contextRuleID, _, err := s.contextRules.DiscoverDefaultContextRuleForSigner(ctx, in.SmartAccountAddress, verifierAddress, in.KeyDataHex)
 	if err != nil {
 		return BuildSwapResult{}, fmt.Errorf("discover default context rule: %w", err)
 	}

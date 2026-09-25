@@ -59,4 +59,9 @@ const (
 	// on-chain but the passkey_credentials index write failed — the client
 	// should retry the confirm step rather than the chain call.
 	ErrSignerAddedIndexFailed ErrorCode = "signer_added_index_failed"
+	// ErrAlreadySigner is returned when add-signer is asked to configure a
+	// second backup signer on an account that already has one (solo
+	// accounts are scoped to exactly one backup passkey for now — see
+	// TransactionService.AddSigner).
+	ErrAlreadySigner ErrorCode = "already_signer"
 )

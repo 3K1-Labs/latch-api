@@ -131,6 +131,7 @@ type WebappAccountSigner struct {
 	Label               sql.NullString `json:"label"`
 	CreatedAt           int64          `json:"created_at"`
 	SignerID            sql.NullInt32  `json:"signer_id"`
+	ContextRuleID       sql.NullInt32  `json:"context_rule_id"`
 }
 
 type WebappAuditLog struct {

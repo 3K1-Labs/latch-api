@@ -128,25 +128,26 @@ func (s *AccountSignerService) signerCredentialIDs(ctx context.Context, smartAcc
 	return ids, nil
 }
 
-// MarkSignerOnChain records the signer_id add_signer returned. Not
-// best-effort (R6): the caller must retry on failure rather than proceed as
-// if the signer were indexed.
-func (s *AccountSignerService) MarkSignerOnChain(ctx context.Context, smartAccountAddress, credentialID string, signerID uint32) error {
-	if err := s.q.SetAccountSignerOnChainID(ctx, db.SetAccountSignerOnChainIDParams{
+// MarkSignerContextRule records the dedicated context rule id
+// add_context_rule returned for this backup signer (see
+// TransactionService.AddSigner). Not best-effort (R6): the caller must
+// retry on failure rather than proceed as if the signer were indexed.
+func (s *AccountSignerService) MarkSignerContextRule(ctx context.Context, smartAccountAddress, credentialID string, contextRuleID uint32) error {
+	if err := s.q.SetAccountSignerContextRuleID(ctx, db.SetAccountSignerContextRuleIDParams{
 		SmartAccountAddress: smartAccountAddress,
 		CredentialID:        sql.NullString{String: credentialID, Valid: true},
-		SignerID:            sql.NullInt32{Int32: int32(signerID), Valid: true},
+		ContextRuleID:       sql.NullInt32{Int32: int32(contextRuleID), Valid: true},
 	}); err != nil {
-		return fmt.Errorf("mark signer %s on-chain for %s: %w", credentialID, smartAccountAddress, err)
+		return fmt.Errorf("mark signer %s context rule for %s: %w", credentialID, smartAccountAddress, err)
 	}
 	return nil
 }
 
-// GetSignerID returns the recorded on-chain signer_id for credentialID on
+// GetSignerContextRuleID returns credentialID's dedicated context rule id on
 // smartAccountAddress. ok is false when the row exists but hasn't been
-// confirmed on-chain yet (signer_id NULL) — remove_signer must fail closed
-// in that case (R9) rather than guess from position.
-func (s *AccountSignerService) GetSignerID(ctx context.Context, smartAccountAddress, credentialID string) (signerID uint32, ok bool, err error) {
+// confirmed on-chain yet (context_rule_id NULL) — remove_signer must fail
+// closed in that case (R9) rather than guess from position.
+func (s *AccountSignerService) GetSignerContextRuleID(ctx context.Context, smartAccountAddress, credentialID string) (contextRuleID uint32, ok bool, err error) {
 	row, err := s.q.GetAccountSignerByCredential(ctx, db.GetAccountSignerByCredentialParams{
 		SmartAccountAddress: smartAccountAddress,
 		CredentialID:        sql.NullString{String: credentialID, Valid: true},
@@ -157,10 +158,10 @@ func (s *AccountSignerService) GetSignerID(ctx context.Context, smartAccountAddr
 	if err != nil {
 		return 0, false, fmt.Errorf("get account signer: %w", err)
 	}
-	if !row.SignerID.Valid {
+	if !row.ContextRuleID.Valid {
 		return 0, false, nil
 	}
-	return uint32(row.SignerID.Int32), true, nil
+	return uint32(row.ContextRuleID.Int32), true, nil
 }
 
 // RemoveCredential deletes the account_signers row for credentialID on

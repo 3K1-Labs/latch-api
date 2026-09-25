@@ -51,6 +51,8 @@ func failAccountSignerBuild(c *gin.Context, err error) {
 		webappx.Fail(c, http.StatusUnprocessableEntity, webappx.ErrNoDefaultRule, err.Error())
 	case errors.Is(err, webapp.ErrLastSigner):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrLastSigner, err.Error())
+	case errors.Is(err, webapp.ErrBackupSignerAlreadyConfigured):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrAlreadySigner, err.Error())
 	default:
 		slog.Error("build signer transaction", "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -82,7 +84,7 @@ type addSignerRequest struct {
 
 // AddSigner godoc
 // @Summary      Build a transaction adding a second passkey as a signer
-// @Description  Builds (but does not submit) an add_signer call on the smart account's Default rule for an already-attached backup credential. The caller must already hold a credential that's an authorized signer of the account. The owner then signs with an existing passkey and submits via POST /api/transaction/submit-webauthn, then confirms via POST /api/smart-account/add-signer/confirm.
+// @Description  Builds (but does not submit) an add_context_rule call giving an already-attached backup credential its own dedicated Default context rule (not a second signer on the existing one — see AddSigner's Go doc comment). The caller must already hold a credential that's an authorized signer of the account. The owner then signs with an existing passkey and submits via POST /api/transaction/submit-webauthn, then confirms via POST /api/smart-account/add-signer/confirm.
 // @Tags         smart-account
 // @Accept       json
 // @Produce      json
@@ -143,19 +145,18 @@ func (h *AccountSignerHandler) AddSigner(c *gin.Context) {
 }
 
 type confirmAddSignerRequest struct {
-	Network             string         `json:"network,omitempty"`
-	SmartAccountAddress string         `json:"smartAccountAddress" binding:"required"`
-	ContextRuleID       flexibleUint32 `json:"contextRuleId"`
-	KeyDataHex          string         `json:"keyDataHex" binding:"required"`
-	CredentialID        string         `json:"credentialId" binding:"required"`
-	Label               string         `json:"label,omitempty"`
-	Seq                 int32          `json:"seq,omitempty"`
-	TxHash              string         `json:"txHash" binding:"required"`
+	Network             string `json:"network,omitempty"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	KeyDataHex          string `json:"keyDataHex" binding:"required"`
+	CredentialID        string `json:"credentialId" binding:"required"`
+	Label               string `json:"label,omitempty"`
+	Seq                 int32  `json:"seq,omitempty"`
+	TxHash              string `json:"txHash" binding:"required"`
 }
 
 // ConfirmAddSigner godoc
-// @Summary      Confirm a submitted add_signer call and index the new signer
-// @Description  Independently re-fetches txHash from the network, verifies it settled successfully and actually invoked add_signer with the expected arguments, then persists the returned signer_id and indexes the backup credential in passkey_credentials so a fresh device can restore with it.
+// @Summary      Confirm a submitted add_context_rule call and index the new signer
+// @Description  Independently re-fetches txHash from the network, verifies it settled successfully and actually invoked add_context_rule with the expected arguments, then persists the new dedicated context rule id and indexes the backup credential in passkey_credentials so a fresh device can restore with it.
 // @Tags         smart-account
 // @Accept       json
 // @Produce      json
@@ -177,9 +178,8 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		return
 	}
 
-	signerID, err := txSvc.ConfirmAddSigner(c.Request.Context(), webapp.ConfirmAddSignerInput{
+	contextRuleID, err := txSvc.ConfirmAddSignerRule(c.Request.Context(), webapp.ConfirmAddSignerRuleInput{
 		SmartAccountAddress: req.SmartAccountAddress,
-		ContextRuleID:       uint32(req.ContextRuleID),
 		KeyDataHex:          req.KeyDataHex,
 		TxHash:              req.TxHash,
 	})
@@ -191,14 +191,14 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	// Not best-effort (R6): the chain call already succeeded, so a failure
 	// here must be retried rather than silently dropped, or the signer would
 	// be authorized on-chain but invisible to fresh-device restore.
-	if err := h.accountSignerSvc.MarkSignerOnChain(c.Request.Context(), req.SmartAccountAddress, req.CredentialID, signerID); err != nil {
-		slog.Error("mark signer on-chain", "smartAccountAddress", req.SmartAccountAddress, "err", err)
-		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrSignerAddedIndexFailed, "add_signer succeeded on-chain but indexing it failed; retry this confirm call")
+	if err := h.accountSignerSvc.MarkSignerContextRule(c.Request.Context(), req.SmartAccountAddress, req.CredentialID, contextRuleID); err != nil {
+		slog.Error("mark signer context rule", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrSignerAddedIndexFailed, "add_context_rule succeeded on-chain but indexing it failed; retry this confirm call")
 		return
 	}
 	if err := h.credentialSvc.Register(c.Request.Context(), req.KeyDataHex, req.SmartAccountAddress, req.Label, req.Seq); err != nil {
 		slog.Error("register backup signer in recovery index", "smartAccountAddress", req.SmartAccountAddress, "err", err)
-		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrSignerAddedIndexFailed, "add_signer succeeded on-chain but indexing it failed; retry this confirm call")
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrSignerAddedIndexFailed, "add_context_rule succeeded on-chain but indexing it failed; retry this confirm call")
 		return
 	}
 
@@ -206,12 +206,12 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	h.auditSvc.Log(c.Request.Context(), userID, string(webapp.ActionSignerAdded), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"credentialId":        req.CredentialID,
 		"smartAccountAddress": req.SmartAccountAddress,
-		"signerId":            signerID,
+		"contextRuleId":       contextRuleID,
 	})
 
 	webappx.Success(c, http.StatusOK, gin.H{
 		"confirmed":           true,
-		"signerId":            signerID,
+		"contextRuleId":       contextRuleID,
 		"smartAccountAddress": req.SmartAccountAddress,
 		"credentialId":        req.CredentialID,
 	})
@@ -225,7 +225,7 @@ type removeSignerRequest struct {
 
 // RemoveSigner godoc
 // @Summary      Build a transaction removing a signer
-// @Description  Builds (but does not submit) a remove_signer call on the smart account's Default rule. Refuses if that would leave zero signers, or if it would remove the caller's own only signer. The caller then signs with a remaining authorized passkey and submits via POST /api/transaction/submit-webauthn, then confirms via POST /api/smart-account/remove-signer/confirm.
+// @Description  Builds (but does not submit) a remove_context_rule call dropping a backup signer's entire dedicated context rule. Refuses to target the account's original rule, or if it would remove the caller's own only signer. The caller then signs with the account's original passkey and submits via POST /api/transaction/submit-webauthn, then confirms via POST /api/smart-account/remove-signer/confirm.
 // @Tags         smart-account
 // @Accept       json
 // @Produce      json
@@ -267,20 +267,20 @@ func (h *AccountSignerHandler) RemoveSigner(c *gin.Context) {
 		return
 	}
 
-	signerID, ok, err := h.accountSignerSvc.GetSignerID(c.Request.Context(), req.SmartAccountAddress, req.CredentialID)
+	contextRuleID, ok, err := h.accountSignerSvc.GetSignerContextRuleID(c.Request.Context(), req.SmartAccountAddress, req.CredentialID)
 	if err != nil {
-		slog.Error("get signer id", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		slog.Error("get signer context rule id", "smartAccountAddress", req.SmartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 	if !ok {
-		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerIDUnknown, "this signer has no recorded on-chain id; re-index it before removing")
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerIDUnknown, "this signer has no recorded on-chain context rule id; re-index it before removing")
 		return
 	}
 
 	result, err := txSvc.RemoveSigner(c.Request.Context(), webapp.RemoveSignerInput{
 		SmartAccountAddress: req.SmartAccountAddress,
-		SignerID:            signerID,
+		ContextRuleID:       contextRuleID,
 	})
 	if err != nil {
 		failAccountSignerBuild(c, err)
@@ -297,21 +297,20 @@ func (h *AccountSignerHandler) RemoveSigner(c *gin.Context) {
 		"signaturePayloadHex":        result.SignaturePayloadHex,
 		"validUntilLedger":           result.ValidUntilLedger,
 		"submitMethod":               result.SubmitMethod,
-		"signerId":                   signerID,
+		"signerContextRuleId":        contextRuleID,
 	})
 }
 
 type confirmRemoveSignerRequest struct {
-	Network             string         `json:"network,omitempty"`
-	SmartAccountAddress string         `json:"smartAccountAddress" binding:"required"`
-	CredentialID        string         `json:"credentialId" binding:"required"`
-	ContextRuleID       flexibleUint32 `json:"contextRuleId"`
-	TxHash              string         `json:"txHash" binding:"required"`
+	Network             string `json:"network,omitempty"`
+	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
+	CredentialID        string `json:"credentialId" binding:"required"`
+	TxHash              string `json:"txHash" binding:"required"`
 }
 
 // ConfirmRemoveSigner godoc
-// @Summary      Confirm a submitted remove_signer call and drop the signer's index
-// @Description  Independently re-fetches txHash, verifies it settled successfully and actually invoked remove_signer with the expected arguments, then deletes the credential's account_signers and passkey_credentials rows.
+// @Summary      Confirm a submitted remove_context_rule call and drop the signer's index
+// @Description  Independently re-fetches txHash, verifies it settled successfully and actually invoked remove_context_rule with the expected arguments, then deletes the credential's account_signers and passkey_credentials rows.
 // @Tags         smart-account
 // @Accept       json
 // @Produce      json
@@ -333,7 +332,7 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		return
 	}
 
-	signerID, ok, err := h.accountSignerSvc.GetSignerID(c.Request.Context(), req.SmartAccountAddress, req.CredentialID)
+	contextRuleID, ok, err := h.accountSignerSvc.GetSignerContextRuleID(c.Request.Context(), req.SmartAccountAddress, req.CredentialID)
 	if errors.Is(err, webapp.ErrAccountSignerNotFound) {
 		// Already removed — an idempotent retry of a confirm call that
 		// already succeeded (R14).
@@ -341,19 +340,18 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		slog.Error("get signer id", "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		slog.Error("get signer context rule id", "smartAccountAddress", req.SmartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 	if !ok {
-		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerIDUnknown, "this signer has no recorded on-chain id")
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerIDUnknown, "this signer has no recorded on-chain context rule id")
 		return
 	}
 
-	if err := txSvc.ConfirmRemoveSigner(c.Request.Context(), webapp.ConfirmRemoveSignerInput{
+	if err := txSvc.ConfirmRemoveSignerRule(c.Request.Context(), webapp.ConfirmRemoveSignerRuleInput{
 		SmartAccountAddress: req.SmartAccountAddress,
-		ContextRuleID:       uint32(req.ContextRuleID),
-		SignerID:            signerID,
+		ContextRuleID:       contextRuleID,
 		TxHash:              req.TxHash,
 	}); err != nil {
 		failChainConfirm(c, err)
@@ -381,10 +379,10 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	h.auditSvc.Log(c.Request.Context(), userID, string(webapp.ActionSignerRemoved), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"credentialId":        req.CredentialID,
 		"smartAccountAddress": req.SmartAccountAddress,
-		"signerId":            signerID,
+		"contextRuleId":       contextRuleID,
 	})
 
-	webappx.Success(c, http.StatusOK, gin.H{"confirmed": true, "signerId": signerID})
+	webappx.Success(c, http.StatusOK, gin.H{"confirmed": true, "contextRuleId": contextRuleID})
 }
 
 // requireCallerIsSigner writes a 403/404/500 response and returns false if

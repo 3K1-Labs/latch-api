@@ -133,7 +133,7 @@ func TestAccountSignerHandler_ConfirmAddSigner_Success(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"signerId":9`)
+	assert.Contains(t, w.Body.String(), `"contextRuleId":9`)
 	assert.Equal(t, uint32(9), signerStub.gotMarkSignerID)
 }
 
@@ -185,7 +185,7 @@ func TestAccountSignerHandler_RemoveSigner_Success(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"signerId":2`)
+	assert.Contains(t, w.Body.String(), `"signerContextRuleId":2`)
 }
 
 func TestAccountSignerHandler_RemoveSigner_LockedOut(t *testing.T) {

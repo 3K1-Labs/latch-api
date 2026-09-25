@@ -186,11 +186,11 @@ func (s *stubAccountSigner) CallerOwnsSignerCredential(_ context.Context, _, _ s
 func (s *stubAccountSigner) CallerHasOtherSignerCredential(_ context.Context, _, _, _ string) (bool, error) {
 	return s.callerHasOther, s.callerHasOtherErr
 }
-func (s *stubAccountSigner) MarkSignerOnChain(_ context.Context, _, _ string, signerID uint32) error {
-	s.gotMarkSignerID = signerID
+func (s *stubAccountSigner) MarkSignerContextRule(_ context.Context, _, _ string, contextRuleID uint32) error {
+	s.gotMarkSignerID = contextRuleID
 	return s.markSignerOnChainErr
 }
-func (s *stubAccountSigner) GetSignerID(_ context.Context, _, _ string) (uint32, bool, error) {
+func (s *stubAccountSigner) GetSignerContextRuleID(_ context.Context, _, _ string) (uint32, bool, error) {
 	return s.signerID, s.signerIDOK, s.getSignerIDErr
 }
 func (s *stubAccountSigner) RemoveCredential(_ context.Context, _, _ string) error {
@@ -230,8 +230,8 @@ type stubTransaction struct {
 	confirmAddSignerID  uint32
 	confirmAddSignerErr error
 	confirmRemoveErr    error
-	gotConfirmAddSigner webapp.ConfirmAddSignerInput
-	gotConfirmRemove    webapp.ConfirmRemoveSignerInput
+	gotConfirmAddSigner webapp.ConfirmAddSignerRuleInput
+	gotConfirmRemove    webapp.ConfirmRemoveSignerRuleInput
 }
 
 func (s *stubTransaction) BuildSend(_ context.Context, _ webapp.BuildSendInput, _ []webapp.CatalogAsset) (webapp.BuildSendResult, error) {
@@ -271,11 +271,11 @@ func (s *stubTransaction) AddSigner(_ context.Context, _ webapp.AddSignerInput) 
 func (s *stubTransaction) RemoveSigner(_ context.Context, _ webapp.RemoveSignerInput) (webapp.RemoveSignerResult, error) {
 	return s.removeSignerResult, s.removeSignerErr
 }
-func (s *stubTransaction) ConfirmAddSigner(_ context.Context, in webapp.ConfirmAddSignerInput) (uint32, error) {
+func (s *stubTransaction) ConfirmAddSignerRule(_ context.Context, in webapp.ConfirmAddSignerRuleInput) (uint32, error) {
 	s.gotConfirmAddSigner = in
 	return s.confirmAddSignerID, s.confirmAddSignerErr
 }
-func (s *stubTransaction) ConfirmRemoveSigner(_ context.Context, in webapp.ConfirmRemoveSignerInput) error {
+func (s *stubTransaction) ConfirmRemoveSignerRule(_ context.Context, in webapp.ConfirmRemoveSignerRuleInput) error {
 	s.gotConfirmRemove = in
 	return s.confirmRemoveErr
 }

@@ -130,6 +130,11 @@ type buildSendRequest struct {
 	Recipient           string         `json:"recipient" binding:"required"`
 	Amount              flexibleAmount `json:"amount" binding:"required"`
 	SignerG             string         `json:"signerG,omitempty"`
+	// KeyDataHex identifies which passkey will sign — required to pick the
+	// right context rule once the account has a backup signer (each gets
+	// its own dedicated rule; see webapp.TransactionService.AddSigner).
+	// Optional and ignored for accounts with no backup signer.
+	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
 func assetCatalogConfig(cfg *config.Config, network webapp.Network) webapp.AssetCatalogConfig {
@@ -186,6 +191,7 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		ContractID:          req.ContractID,
 		Recipient:           req.Recipient,
 		Amount:              string(req.Amount),
+		KeyDataHex:          req.KeyDataHex,
 	}, catalog)
 	if err != nil {
 		if errors.Is(err, webapp.ErrAssetNotFound) {
@@ -779,11 +785,14 @@ type buildSwapRequest struct {
 	SignerType          string `json:"signerType" binding:"required"`
 	SignerG             string `json:"signerG,omitempty"`
 	RouterContractID    string `json:"routerContractId,omitempty"`
-	SwapChainXdr        string `json:"swapChainXdr" binding:"required"`
-	TokenInContractID   string `json:"tokenInContractId" binding:"required"`
-	AmountInRaw         string `json:"amountInRaw" binding:"required"`
-	AmountOutMinRaw     string `json:"amountOutMinRaw" binding:"required"`
-	ProviderID          string `json:"providerId,omitempty"`
+	// KeyDataHex identifies which passkey will sign — see
+	// buildSendRequest.KeyDataHex's doc comment.
+	KeyDataHex        string `json:"keyDataHex,omitempty"`
+	SwapChainXdr      string `json:"swapChainXdr" binding:"required"`
+	TokenInContractID string `json:"tokenInContractId" binding:"required"`
+	AmountInRaw       string `json:"amountInRaw" binding:"required"`
+	AmountOutMinRaw   string `json:"amountOutMinRaw" binding:"required"`
+	ProviderID        string `json:"providerId,omitempty"`
 }
 
 // BuildSwap godoc
@@ -828,6 +837,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
 		RouterContractID:    req.RouterContractID,
+		KeyDataHex:          req.KeyDataHex,
 		SwapChainXdr:        req.SwapChainXdr,
 		TokenInContractID:   req.TokenInContractID,
 		AmountInRaw:         req.AmountInRaw,

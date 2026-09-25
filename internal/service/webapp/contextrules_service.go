@@ -141,6 +141,60 @@ func (s *ContextRulesService) RuleAtID(ctx context.Context, smartAccountAddress 
 	return s.getRule(ctx, smartAccountAddress, id)
 }
 
+// DiscoverDefaultContextRuleForSigner finds the Default-variant context rule
+// that authorizes the given passkey (an exact External-signer match on
+// verifierAddress + keyDataHex). When keyDataHex is empty, this is
+// identical to DiscoverDefaultContextRule — every call site that doesn't
+// know (or doesn't need to distinguish) which signer is about to sign keeps
+// its exact pre-backup-signer behavior.
+//
+// A solo account with a backup signer (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md)
+// has *two* Default rules, one per passkey (see AddSigner's doc comment for
+// why they aren't shared) — DiscoverDefaultContextRule's plain "first
+// Default rule found" scan would always return the original owner's rule,
+// so a transaction signed with the backup passkey would be bound to a rule
+// it doesn't belong to and fail __check_auth with UnvalidatedContext.
+func (s *ContextRulesService) DiscoverDefaultContextRuleForSigner(ctx context.Context, smartAccountAddress, verifierAddress, keyDataHex string) (uint32, ContextRuleDiscovery, error) {
+	if keyDataHex == "" {
+		return s.DiscoverDefaultContextRule(ctx, smartAccountAddress)
+	}
+
+	count, err := s.rulesCount(ctx, smartAccountAddress)
+	if err != nil {
+		return 0, "", err
+	}
+
+	var fallbackID uint32
+	haveFallback := false
+	limit := min(count, maxContextRuleScan)
+	for id := uint32(0); id < limit; id++ {
+		rule, ok, err := s.getRule(ctx, smartAccountAddress, id)
+		if err != nil {
+			return 0, "", err
+		}
+		if !ok || !rule.IsDefault {
+			continue
+		}
+		if !haveFallback {
+			fallbackID, haveFallback = id, true
+		}
+		if ruleHasExactExternalSigner(rule, verifierAddress, keyDataHex) {
+			return id, ContextRuleDiscoveryDefault, nil
+		}
+	}
+
+	// No Default rule matches this exact passkey — fall back to the first
+	// Default rule found (today's behavior) rather than erroring, so a
+	// caller with a stale/wrong hint degrades to the pre-backup-signer
+	// behavior instead of hard-failing at build time. The contract's
+	// __check_auth remains the authority: if the fallback rule genuinely
+	// doesn't authorize this signer, submit-webauthn fails there instead.
+	if haveFallback {
+		return fallbackID, ContextRuleDiscoveryDefault, nil
+	}
+	return 0, ContextRuleDiscoveryFallback, nil
+}
+
 // ListContextRules returns every context rule configured on the smart
 // account, for GET /api/smart-account/context-rules.
 func (s *ContextRulesService) ListContextRules(ctx context.Context, smartAccountAddress string) ([]ContextRuleSummary, error) {

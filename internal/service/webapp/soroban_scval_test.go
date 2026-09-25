@@ -162,23 +162,6 @@ func TestExtractReturnU32_Success(t *testing.T) {
 	assert.Equal(t, uint32(7), got)
 }
 
-func TestExtractReturnU32_V4Success(t *testing.T) {
-	u := xdr.Uint32(3)
-	returnValue := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: &u}
-	meta := xdr.TransactionMeta{
-		V: 4,
-		V4: &xdr.TransactionMetaV4{
-			SorobanMeta: &xdr.SorobanTransactionMetaV2{ReturnValue: &returnValue},
-		},
-	}
-	metaB64, err := xdr.MarshalBase64(meta)
-	require.NoError(t, err)
-
-	got, err := extractReturnU32(metaB64)
-	require.NoError(t, err)
-	assert.Equal(t, uint32(3), got)
-}
-
 func TestExtractReturnU32_WrongType(t *testing.T) {
 	contractAddr := testContractAddress(t)
 	contractID, err := contractIDFromAddress(contractAddr)
@@ -195,6 +178,64 @@ func TestExtractReturnU32_WrongType(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = extractReturnU32(metaB64)
+	require.Error(t, err)
+}
+
+// ── extractReturnContextRuleID ───────────────────────────────────────────────
+
+func contextRuleReturnValue(id uint32) xdr.ScVal {
+	return scMap(scMapEntry("id", scU32(id)))
+}
+
+func TestExtractReturnContextRuleID_Success(t *testing.T) {
+	meta := xdr.TransactionMeta{
+		V: 3,
+		V3: &xdr.TransactionMetaV3{
+			SorobanMeta: &xdr.SorobanTransactionMeta{
+				ReturnValue: contextRuleReturnValue(7),
+			},
+		},
+	}
+	metaB64, err := xdr.MarshalBase64(meta)
+	require.NoError(t, err)
+
+	got, err := extractReturnContextRuleID(metaB64)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(7), got)
+}
+
+func TestExtractReturnContextRuleID_V4Success(t *testing.T) {
+	returnValue := contextRuleReturnValue(3)
+	meta := xdr.TransactionMeta{
+		V: 4,
+		V4: &xdr.TransactionMetaV4{
+			SorobanMeta: &xdr.SorobanTransactionMetaV2{ReturnValue: &returnValue},
+		},
+	}
+	metaB64, err := xdr.MarshalBase64(meta)
+	require.NoError(t, err)
+
+	got, err := extractReturnContextRuleID(metaB64)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(3), got)
+}
+
+func TestExtractReturnContextRuleID_WrongType(t *testing.T) {
+	contractAddr := testContractAddress(t)
+	contractID, err := contractIDFromAddress(contractAddr)
+	require.NoError(t, err)
+	meta := xdr.TransactionMeta{
+		V: 3,
+		V3: &xdr.TransactionMetaV3{
+			SorobanMeta: &xdr.SorobanTransactionMeta{
+				ReturnValue: xdr.ScVal{Type: xdr.ScValTypeScvAddress, Address: &xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: &contractID}},
+			},
+		},
+	}
+	metaB64, err := xdr.MarshalBase64(meta)
+	require.NoError(t, err)
+
+	_, err = extractReturnContextRuleID(metaB64)
 	require.Error(t, err)
 }
 

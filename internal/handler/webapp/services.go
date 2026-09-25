@@ -68,8 +68,8 @@ type transactionService interface {
 	BuildSwap(ctx context.Context, in webapp.BuildSwapInput) (webapp.BuildSwapResult, error)
 	AddSigner(ctx context.Context, in webapp.AddSignerInput) (webapp.AddSignerResult, error)
 	RemoveSigner(ctx context.Context, in webapp.RemoveSignerInput) (webapp.RemoveSignerResult, error)
-	ConfirmAddSigner(ctx context.Context, in webapp.ConfirmAddSignerInput) (signerID uint32, err error)
-	ConfirmRemoveSigner(ctx context.Context, in webapp.ConfirmRemoveSignerInput) error
+	ConfirmAddSignerRule(ctx context.Context, in webapp.ConfirmAddSignerRuleInput) (contextRuleID uint32, err error)
+	ConfirmRemoveSignerRule(ctx context.Context, in webapp.ConfirmRemoveSignerRuleInput) error
 }
 
 type contextRulesService interface {
@@ -136,8 +136,8 @@ type accountSignerService interface {
 	AttachCredential(ctx context.Context, smartAccountAddress, credentialID, label string) error
 	CallerOwnsSignerCredential(ctx context.Context, userID, smartAccountAddress string) (bool, error)
 	CallerHasOtherSignerCredential(ctx context.Context, userID, smartAccountAddress, excludingCredentialID string) (bool, error)
-	MarkSignerOnChain(ctx context.Context, smartAccountAddress, credentialID string, signerID uint32) error
-	GetSignerID(ctx context.Context, smartAccountAddress, credentialID string) (signerID uint32, ok bool, err error)
+	MarkSignerContextRule(ctx context.Context, smartAccountAddress, credentialID string, contextRuleID uint32) error
+	GetSignerContextRuleID(ctx context.Context, smartAccountAddress, credentialID string) (contextRuleID uint32, ok bool, err error)
 	RemoveCredential(ctx context.Context, smartAccountAddress, credentialID string) error
 	ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress string, err error)
 }
