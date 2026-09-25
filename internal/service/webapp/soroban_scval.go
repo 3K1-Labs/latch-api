@@ -185,8 +185,9 @@ func extractReturnAddress(resultMetaXdrB64 string) (string, error) {
 
 // extractReturnU32 decodes a base64 TransactionMeta XDR and extracts the
 // invoked contract's return value as a u32 — used to read back add_signer's
-// returned signer_id. See extractReturnAddress for the V3/V4 fallback this
-// mirrors.
+// returned signer_id (the shared-rule shape latch-mobile's backup-signer
+// feature still submits; see ConfirmAddSigner's doc comment). See
+// extractReturnAddress for the V3/V4 fallback this mirrors.
 func extractReturnU32(resultMetaXdrB64 string) (uint32, error) {
 	var meta xdr.TransactionMeta
 	if err := xdr.SafeUnmarshalBase64(resultMetaXdrB64, &meta); err != nil {
@@ -203,6 +204,33 @@ func extractReturnU32(resultMetaXdrB64 string) (uint32, error) {
 		return 0, fmt.Errorf("transaction meta missing soroban u32 return value")
 	}
 	return uint32(*retVal.U32), nil
+}
+
+// extractReturnContextRuleID decodes a base64 TransactionMeta XDR and
+// extracts the invoked contract's return value's "id" field — used to read
+// back add_context_rule's returned ContextRule struct (unlike add_signer,
+// which returned a bare u32 signer_id, add_context_rule returns the whole
+// new rule). See extractReturnAddress for the V3/V4 fallback this mirrors.
+func extractReturnContextRuleID(resultMetaXdrB64 string) (uint32, error) {
+	var meta xdr.TransactionMeta
+	if err := xdr.SafeUnmarshalBase64(resultMetaXdrB64, &meta); err != nil {
+		return 0, fmt.Errorf("decode transaction meta: %w", err)
+	}
+	var retVal *xdr.ScVal
+	switch {
+	case meta.V4 != nil && meta.V4.SorobanMeta != nil:
+		retVal = meta.V4.SorobanMeta.ReturnValue
+	case meta.V3 != nil && meta.V3.SorobanMeta != nil:
+		retVal = &meta.V3.SorobanMeta.ReturnValue
+	}
+	if retVal == nil {
+		return 0, fmt.Errorf("transaction meta missing soroban return value")
+	}
+	idVal, ok := scMapGet(*retVal, "id")
+	if !ok || idVal.Type != xdr.ScValTypeScvU32 || idVal.U32 == nil {
+		return 0, fmt.Errorf("transaction meta return value missing context rule id")
+	}
+	return uint32(*idVal.U32), nil
 }
 
 // scValEqual compares two ScVals by their encoded bytes, sidestepping the

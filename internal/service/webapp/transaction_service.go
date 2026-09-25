@@ -99,6 +99,14 @@ type BuildSendInput struct {
 	ContractID          string
 	Recipient           string
 	Amount              string // human-readable decimal
+	// KeyDataHex identifies which passkey is about to sign, for accounts
+	// with a backup signer (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md) — each
+	// backup gets its own dedicated Default context rule (see AddSigner),
+	// so the plain "first Default rule" discovery would bind the
+	// transaction to the wrong rule if the backup passkey signs. Empty
+	// (the common case: no backup signer configured, or SignerType isn't
+	// "passkey") keeps today's exact behavior.
+	KeyDataHex string
 }
 
 type BuildSendResult struct {
@@ -127,6 +135,17 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 	contextRuleID, discovery, err := s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
 	if err != nil {
 		return BuildSendResult{}, fmt.Errorf("discover context rule: %w", err)
+	}
+	// No per-asset rule matched this contract — re-resolve the Default rule
+	// for the specific passkey about to sign, so a backup signer's send
+	// binds to its own rule rather than always the original owner's (see
+	// BuildSendInput.KeyDataHex).
+	if discovery != ContextRuleDiscoveryMatched && in.SignerType == "passkey" && in.KeyDataHex != "" {
+		signerRuleID, signerDiscovery, err := s.contextRules.DiscoverDefaultContextRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex)
+		if err != nil {
+			return BuildSendResult{}, fmt.Errorf("discover default context rule for signer: %w", err)
+		}
+		contextRuleID, discovery = signerRuleID, signerDiscovery
 	}
 
 	fromVal, err := scAddress(in.SmartAccountAddress)
