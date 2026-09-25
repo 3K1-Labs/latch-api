@@ -27,6 +27,17 @@ var ErrChainCallMismatch = errors.New("transaction did not invoke the expected c
 
 // ConfirmAddSignerInput identifies the add_signer call to verify and the
 // signer it's expected to have added.
+//
+// NOTE: this verifies the OLD shared-rule add_signer(ContextRuleID, Signer)
+// shape. latch-mobile's own backup-signer feature (src/lib/backup-signer-tx.ts)
+// builds and submits that exact call client-side and reuses this method
+// as-is via internal/handler/backup_signer.go — do not change what this
+// verifies without a corresponding mobile-app change, or mobile's confirm
+// step starts rejecting its own successful on-chain calls. It carries the
+// same "all rule signers must co-sign" bug ConfirmAddSignerRule fixes for
+// the web extension (see that method's doc comment); fixing it for mobile
+// needs a client-side change in latch-mobile to build add_context_rule
+// instead, tracked separately.
 type ConfirmAddSignerInput struct {
 	SmartAccountAddress string
 	ContextRuleID       uint32
@@ -69,6 +80,10 @@ func (s *TransactionService) ConfirmAddSigner(ctx context.Context, in ConfirmAdd
 }
 
 // ConfirmRemoveSignerInput identifies the remove_signer call to verify.
+//
+// NOTE: verifies the OLD shared-rule remove_signer(ContextRuleID, SignerID)
+// shape — see ConfirmAddSignerInput's doc comment; latch-mobile depends on
+// this exact signature.
 type ConfirmRemoveSignerInput struct {
 	SmartAccountAddress string
 	ContextRuleID       uint32
@@ -85,6 +100,73 @@ func (s *TransactionService) ConfirmRemoveSigner(ctx context.Context, in Confirm
 		return err
 	}
 	return s.verifyInvocation(invocation, in.SmartAccountAddress, "remove_signer", scU32(in.ContextRuleID), scU32(in.SignerID))
+}
+
+// ConfirmAddSignerRuleInput identifies the add_context_rule call to verify
+// and the signer it's expected to have created a dedicated rule for. Used
+// by the web extension's backup-signer flow
+// (internal/handler/webapp/account_signer.go) — see AddSigner's doc comment
+// for why a dedicated rule is used instead of add_signer on the existing
+// one.
+type ConfirmAddSignerRuleInput struct {
+	SmartAccountAddress string
+	KeyDataHex          string
+	TxHash              string
+}
+
+// ConfirmAddSignerRule independently re-fetches TxHash from the network,
+// confirms it settled successfully and actually invoked
+// add_context_rule(Default, "backup", None, [Signer::External(verifier,
+// KeyDataHex)], {}) on SmartAccountAddress's contract, and returns the id of
+// the new context rule. This never trusts a client-supplied result — only
+// the transaction hash, which the client can't forge a fake success for.
+func (s *TransactionService) ConfirmAddSignerRule(ctx context.Context, in ConfirmAddSignerRuleInput) (contextRuleID uint32, err error) {
+	if s.webauthnVerifierAddress == "" {
+		return 0, fmt.Errorf("webauthn verifier address not configured")
+	}
+	keyBytes, err := hex.DecodeString(in.KeyDataHex)
+	if err != nil {
+		return 0, fmt.Errorf("decode keyDataHex: %w", err)
+	}
+	expectedSigner, err := buildExternalSignerScVal(s.webauthnVerifierAddress, keyBytes)
+	if err != nil {
+		return 0, err
+	}
+
+	invocation, resultMetaXdr, err := s.fetchSettledInvocation(ctx, in.TxHash)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.verifyInvocation(invocation, in.SmartAccountAddress, "add_context_rule",
+		buildDefaultContextType(), scString(backupSignerRuleName), scVoid(), scVec(expectedSigner), scMap()); err != nil {
+		return 0, err
+	}
+
+	contextRuleID, err = extractReturnContextRuleID(resultMetaXdr)
+	if err != nil {
+		return 0, fmt.Errorf("extract context rule id: %w", err)
+	}
+	return contextRuleID, nil
+}
+
+// ConfirmRemoveSignerRuleInput identifies the remove_context_rule call to
+// verify: ContextRuleID is the backup signer's dedicated rule being removed.
+// Used by the web extension's backup-signer flow.
+type ConfirmRemoveSignerRuleInput struct {
+	SmartAccountAddress string
+	ContextRuleID       uint32
+	TxHash              string
+}
+
+// ConfirmRemoveSignerRule independently re-fetches TxHash and confirms it
+// settled successfully and actually invoked
+// remove_context_rule(ContextRuleID) on SmartAccountAddress's contract.
+func (s *TransactionService) ConfirmRemoveSignerRule(ctx context.Context, in ConfirmRemoveSignerRuleInput) error {
+	invocation, _, err := s.fetchSettledInvocation(ctx, in.TxHash)
+	if err != nil {
+		return err
+	}
+	return s.verifyInvocation(invocation, in.SmartAccountAddress, "remove_context_rule", scU32(in.ContextRuleID))
 }
 
 // fetchSettledInvocation fetches txHash from the network and decodes what it

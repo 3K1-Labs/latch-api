@@ -111,7 +111,7 @@ type Querier interface {
 	RelinkMultisigMembersByCredential(ctx context.Context, arg RelinkMultisigMembersByCredentialParams) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
-	SetAccountSignerOnChainID(ctx context.Context, arg SetAccountSignerOnChainIDParams) error
+	SetAccountSignerContextRuleID(ctx context.Context, arg SetAccountSignerContextRuleIDParams) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error
 	UpdateMultisigApprovalDelegatedFinish(ctx context.Context, arg UpdateMultisigApprovalDelegatedFinishParams) error
@@ -140,9 +140,9 @@ type Querier interface {
 	UpsertMultisigMemberByGAddress(ctx context.Context, arg UpsertMultisigMemberByGAddressParams) (uuid.UUID, error)
 	UpsertPasskeyCredential(ctx context.Context, arg UpsertPasskeyCredentialParams) (PasskeyCredential, error)
 	// Attaches a real WebAuthn credential to an account before it's an on-chain
-	// signer (signer_id is set later, once add_signer succeeds — see
-	// SetAccountSignerOnChainID). Retried attaches overwrite the label rather
-	// than duplicating the row.
+	// signer (context_rule_id is set later, once add_context_rule succeeds —
+	// see SetAccountSignerContextRuleID). Retried attaches overwrite the label
+	// rather than duplicating the row.
 	UpsertPendingCredentialSigner(ctx context.Context, arg UpsertPendingCredentialSignerParams) (UpsertPendingCredentialSignerRow, error)
 	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertSmartAccountRegistration(ctx context.Context, arg UpsertSmartAccountRegistrationParams) (SmartAccountRegistration, error)

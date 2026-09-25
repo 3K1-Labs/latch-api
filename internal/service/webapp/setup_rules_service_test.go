@@ -399,19 +399,20 @@ func TestAddSigner_MissingKeyDataHex(t *testing.T) {
 
 // ── RemoveSigner ─────────────────────────────────────────────────────────────
 
-func TestRemoveSigner_LastSigner(t *testing.T) {
+func TestRemoveSigner_CannotRemoveOriginalRule(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	verifierAddr := testContractAddress(t)
 
 	contextRules := newContextRulesService(t,
 		scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})),
-		buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})),
 	)
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 
+	// Rule 0 is the account's original rule (discovered as the authorizer);
+	// asking to remove that same rule must be refused.
 	_, err := svc.RemoveSigner(context.Background(), RemoveSignerInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerID:            1,
+		ContextRuleID:       0,
 	})
 	assert.ErrorIs(t, err, ErrLastSigner)
 }
@@ -420,15 +421,12 @@ func TestRemoveSigner_Success(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	verifierAddr := testContractAddress(t)
 
-	authEntry := sampleAuthEntry(t, smartAccountAddr, 6, 0, "remove_signer")
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 6, 0, "remove_context_rule")
 	authEntryB64, err := xdr.MarshalBase64(authEntry)
 	require.NoError(t, err)
 
-	twoSigners := buildTestRuleScVal("default", true, "",
-		externalSignerScVal(t, verifierAddr, []byte{0xaa}),
-		externalSignerScVal(t, verifierAddr, []byte{0xbb}),
-	)
-	contextRules := newContextRulesService(t, scU32(1), twoSigners, twoSigners)
+	originalRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	contextRules := newContextRulesService(t, scU32(2), originalRule, originalRule)
 	rpc := &fakeSorobanRPC{
 		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
@@ -442,9 +440,11 @@ func TestRemoveSigner_Success(t *testing.T) {
 	}
 	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
 
+	// Removing rule 1 (a backup signer's dedicated rule), authorized via
+	// rule 0 (the original, discovered as the account's Default rule).
 	result, err := svc.RemoveSigner(context.Background(), RemoveSignerInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerID:            2,
+		ContextRuleID:       1,
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, result.TxXdr)
@@ -457,7 +457,7 @@ func TestRemoveSigner_NoDefaultRule(t *testing.T) {
 
 	_, err := svc.RemoveSigner(context.Background(), RemoveSignerInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerID:            1,
+		ContextRuleID:       1,
 	})
 	assert.ErrorIs(t, err, ErrNoDefaultRule)
 }
