@@ -229,13 +229,24 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 
 	routerID := resolveRouterContractID(in.RouterContractID)
 
-	verifierAddress := ""
-	if in.SignerType == "passkey" {
-		verifierAddress = s.webauthnVerifierAddress
-	}
-	contextRuleID, _, err := s.contextRules.DiscoverDefaultContextRuleForSigner(ctx, in.SmartAccountAddress, verifierAddress, in.KeyDataHex)
-	if err != nil {
-		return BuildSwapResult{}, fmt.Errorf("discover default context rule: %w", err)
+	// See BuildSend's identical branch: a passkey that identifies its key
+	// resolves via FindRuleForSigner, which never returns a rule that
+	// doesn't list it — no silent fallback to rule 0 for a backup signer.
+	var contextRuleID uint32
+	if in.SignerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, _, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex, "")
+		if err != nil {
+			return BuildSwapResult{}, fmt.Errorf("find rule for signer: %w", err)
+		}
+		if !ok {
+			return BuildSwapResult{}, ErrSignerRuleNotFound
+		}
+		contextRuleID = ruleID
+	} else {
+		contextRuleID, _, err = s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+		if err != nil {
+			return BuildSwapResult{}, fmt.Errorf("discover default context rule: %w", err)
+		}
 	}
 	swapRule, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, contextRuleID)
 	if err != nil {

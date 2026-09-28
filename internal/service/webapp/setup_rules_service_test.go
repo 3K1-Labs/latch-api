@@ -112,35 +112,21 @@ func TestSetupSendRules_MatchedRuleWrongSignerStillMissing(t *testing.T) {
 	assert.NotEmpty(t, result.TxXdr)
 }
 
+// A registered passkey's Default rule already authorizes sending any asset
+// (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R5 — a Default rule covers any
+// context, so a signer never needs a per-asset CallContract rule too).
+// setup-send-rules for a passkey therefore always reports alreadyConfigured
+// via FindRuleForSigner's exact-key match, never builds a new rule.
 func TestSetupSendRules_PasskeySuccess(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
 
-	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 0, "add_context_rule")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	// DiscoverContextRule(asset): count=1, getRule(0)=default (no match) →
-	// missing. DiscoverDefaultContextRule: count=1, getRule(0)=default.
-	// resolveAdminBundlerDelegatedAuth: RuleAtID(0)=default (no signers).
 	contextRules := newContextRulesService(t,
-		scU32(1), buildTestRuleScVal("default", true, ""),
-		scU32(1), buildTestRuleScVal("default", true, ""),
-		buildTestRuleScVal("default", true, ""),
+		scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb, 0xcc})),
 	)
-
-	rpc := &fakeSorobanRPC{
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			return &service.SimulateResult{
-				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
-				TransactionData: minimalSorobanTransactionDataXDR(t),
-				MinResourceFee:  "100",
-				LatestLedger:    1000,
-			}, nil
-		},
-	}
-	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
 	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
 
 	result, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
@@ -150,12 +136,31 @@ func TestSetupSendRules_PasskeySuccess(t *testing.T) {
 		KeyDataHex:          "aabbcc",
 	}, catalog)
 	require.NoError(t, err)
-	assert.False(t, result.AlreadyConfigured)
-	assert.Equal(t, "USDC", result.ConfiguredAsset.AssetID)
-	assert.Equal(t, 0, result.RemainingSetupCount)
-	assert.NotEmpty(t, result.TxXdr)
-	assert.Equal(t, "webauthn", result.SubmitMethod)
-	assert.Equal(t, 0, result.SmartAccountAuthEntryIndex)
+	assert.True(t, result.AlreadyConfigured)
+	assert.Empty(t, result.TxXdr)
+}
+
+// A passkey whose exact keyDataHex matches no rule at all is not a known
+// signer of this account — setup-send-rules must refuse rather than build
+// an add_context_rule authorized via a rule this key can't sign for
+// (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R5).
+func TestSetupSendRules_PasskeyUnknownSigner(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	assetContractAddr := testContractAddress(t)
+
+	contextRules := newContextRulesService(t,
+		scU32(1), buildTestRuleScVal("default", true, ""),
+	)
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
+
+	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		AssetID:             "USDC",
+		KeyDataHex:          "aabbcc",
+	}, catalog)
+	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
 func TestSetupSendRules_UnknownAsset(t *testing.T) {
@@ -177,9 +182,11 @@ func TestSetupSwapRules_AlreadyConfigured(t *testing.T) {
 	verifierAddr := testContractAddress(t)
 
 	// DiscoverDefaultContextRule: count=1, getRule(0). RuleAtID(0) refetch.
+	// FindRuleForSigner (exact-key check): count=1, getRule(0) again.
+	rule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb, 0xcc}))
 	contextRules := newContextRulesService(t,
-		scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb})),
-		buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb})),
+		scU32(1), rule, rule,
+		scU32(1), rule,
 	)
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 	// Force the configured webauthn verifier to match the on-chain signer's.
@@ -202,9 +209,14 @@ func TestSetupSwapRules_PasskeySuccess(t *testing.T) {
 	authEntryB64, err := xdr.MarshalBase64(authEntry)
 	require.NoError(t, err)
 
+	// A fresh solo account: rule 0 has no External signer yet, so the
+	// exact-key check (FindRuleForSigner) finds nothing but falls through to
+	// build add_signer exactly as before backup signers existed — see
+	// SetupSwapRules's doc comment.
+	rule := buildTestRuleScVal("default", true, "")
 	contextRules := newContextRulesService(t,
-		scU32(1), buildTestRuleScVal("default", true, ""), // DiscoverDefaultContextRule
-		buildTestRuleScVal("default", true, ""), // RuleAtID refetch
+		scU32(1), rule, rule, // DiscoverDefaultContextRule + RuleAtID refetch
+		scU32(1), rule, // FindRuleForSigner
 	)
 
 	rpc := &fakeSorobanRPC{
@@ -242,9 +254,12 @@ func TestSetupSwapRules_BundlerDelegatedAdmin(t *testing.T) {
 
 	// Default rule authorizes only Delegated(bundlerG) — the bundler is the
 	// account's admin signer and can co-sign this setup transaction itself.
+	// No External signer means the exact-key check falls through to build,
+	// same as TestSetupSwapRules_PasskeySuccess.
+	rule := buildTestRuleScVal("default", true, "", delegatedSignerScVal(t, bundlerKp.Address()))
 	contextRules := newContextRulesService(t,
-		scU32(1), buildTestRuleScVal("default", true, "", delegatedSignerScVal(t, bundlerKp.Address())),
-		buildTestRuleScVal("default", true, "", delegatedSignerScVal(t, bundlerKp.Address())),
+		scU32(1), rule, rule, // DiscoverDefaultContextRule + RuleAtID refetch
+		scU32(1), rule, // FindRuleForSigner
 	)
 
 	rpc := &fakeSorobanRPC{
