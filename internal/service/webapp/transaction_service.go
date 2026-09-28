@@ -132,20 +132,29 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 		return BuildSendResult{}, fmt.Errorf("parse amount: %w", err)
 	}
 
-	contextRuleID, discovery, err := s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
-	if err != nil {
-		return BuildSendResult{}, fmt.Errorf("discover context rule: %w", err)
-	}
-	// No per-asset rule matched this contract — re-resolve the Default rule
-	// for the specific passkey about to sign, so a backup signer's send
-	// binds to its own rule rather than always the original owner's (see
-	// BuildSendInput.KeyDataHex).
-	if discovery != ContextRuleDiscoveryMatched && in.SignerType == "passkey" && in.KeyDataHex != "" {
-		signerRuleID, signerDiscovery, err := s.contextRules.DiscoverDefaultContextRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex)
+	// A passkey that identifies which key is signing always resolves via
+	// FindRuleForSigner, which never returns a rule that doesn't list this
+	// exact key — this is what lets a backup signer's send bind to its own
+	// dedicated rule instead of the original owner's CallContract/Default
+	// rule (see BuildSendInput.KeyDataHex and LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md).
+	// Every other case (no keyDataHex, or a non-passkey signer) keeps
+	// today's exact behavior.
+	var contextRuleID uint32
+	var discovery ContextRuleDiscovery
+	if in.SignerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, ruleDiscovery, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex, asset.ContractID)
 		if err != nil {
-			return BuildSendResult{}, fmt.Errorf("discover default context rule for signer: %w", err)
+			return BuildSendResult{}, fmt.Errorf("find rule for signer: %w", err)
 		}
-		contextRuleID, discovery = signerRuleID, signerDiscovery
+		if !ok {
+			return BuildSendResult{}, ErrSignerRuleNotFound
+		}
+		contextRuleID, discovery = ruleID, ruleDiscovery
+	} else {
+		contextRuleID, discovery, err = s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
+		if err != nil {
+			return BuildSendResult{}, fmt.Errorf("discover context rule: %w", err)
+		}
 	}
 
 	fromVal, err := scAddress(in.SmartAccountAddress)
@@ -629,6 +638,9 @@ type PrepareSignInput struct {
 	UnsignedTxXdr       string
 	SignerType          string // "passkey" | "phantom" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
+	// KeyDataHex identifies which passkey is about to sign — see
+	// BuildSendInput.KeyDataHex's doc comment.
+	KeyDataHex string
 }
 
 type PrepareSignResult struct {
@@ -692,19 +704,44 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 		return PrepareSignResult{}, fmt.Errorf("%w: expected a single-operation transaction envelope", ErrPrepareSignValidation)
 	}
 
-	contextRuleID, discovery, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
-	if err != nil {
-		return PrepareSignResult{}, fmt.Errorf("discover context rule: %w", err)
-	}
-	if discovery == ContextRuleDiscoveryFallback {
-		return PrepareSignResult{}, fmt.Errorf("%w: no Default context rule found for this smart account", ErrPrepareSignNoContextRule)
-	}
-	rule, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, contextRuleID)
-	if err != nil {
-		return PrepareSignResult{}, fmt.Errorf("fetch context rule: %w", err)
-	}
-	if !ruleOK {
-		return PrepareSignResult{}, fmt.Errorf("%w: default context rule %d no longer exists", ErrPrepareSignNoContextRule, contextRuleID)
+	// See BuildSend's identical branch: a passkey that identifies its key
+	// resolves via FindRuleForSigner, which never returns a rule that
+	// doesn't list it — no silent fallback to rule 0 for a backup signer.
+	var contextRuleID uint32
+	var discovery ContextRuleDiscovery
+	var rule ContextRuleSummary
+	if in.SignerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, ruleDiscovery, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex, "")
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("find rule for signer: %w", err)
+		}
+		if !ok {
+			return PrepareSignResult{}, ErrSignerRuleNotFound
+		}
+		r, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, ruleID)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("fetch context rule: %w", err)
+		}
+		if !ruleOK {
+			return PrepareSignResult{}, fmt.Errorf("%w: context rule %d no longer exists", ErrPrepareSignNoContextRule, ruleID)
+		}
+		contextRuleID, discovery, rule = ruleID, ruleDiscovery, r
+	} else {
+		id, d, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("discover context rule: %w", err)
+		}
+		if d == ContextRuleDiscoveryFallback {
+			return PrepareSignResult{}, fmt.Errorf("%w: no Default context rule found for this smart account", ErrPrepareSignNoContextRule)
+		}
+		r, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, id)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("fetch context rule: %w", err)
+		}
+		if !ruleOK {
+			return PrepareSignResult{}, fmt.Errorf("%w: default context rule %d no longer exists", ErrPrepareSignNoContextRule, id)
+		}
+		contextRuleID, discovery, rule = id, d, r
 	}
 	if err := validatePrepareSignSignerAuthorization(rule, in.SignerType, in.SignerG, s.bundler.PublicKey()); err != nil {
 		return PrepareSignResult{}, err

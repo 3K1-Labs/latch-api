@@ -87,6 +87,71 @@ func TestBuildSwap_PasskeySuccess(t *testing.T) {
 	assert.Equal(t, "webauthn", result.SubmitMethod)
 }
 
+// See TestBuildSend_BackupSignerBindsToOwnRule — same requirement for swaps.
+func TestBuildSwap_BackupSignerBindsToOwnRule(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	tokenInAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 11, 0, "swap_chained")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+
+	originalRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	backupRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xbb}))
+	contextRules := newContextRulesService(t, scU32(2), originalRule, backupRule, backupRule)
+
+	rpc := &balanceThenAuthFakeRPC{
+		t: t, balHi: 0, balLo: 1_000_000_000,
+		fakeSorobanRPC: fakeSorobanRPC{
+			sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
+			simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+				return &service.SimulateResult{
+					Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+					TransactionData: minimalSorobanTransactionDataXDR(t),
+					LatestLedger:    1000,
+				}, nil
+			},
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	result, err := svc.BuildSwap(context.Background(), BuildSwapInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		KeyDataHex:          "bb",
+		SwapChainXdr:        sampleSwapChainXdr(t),
+		TokenInContractID:   tokenInAddr,
+		AmountInRaw:         "100",
+		AmountOutMinRaw:     "90",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.TxXdr)
+}
+
+// See TestBuildSend_UnknownSignerKeyRejected — same requirement for swaps.
+func TestBuildSwap_UnknownSignerKeyRejected(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	tokenInAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	contextRules := newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})))
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	_, err := svc.BuildSwap(context.Background(), BuildSwapInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		KeyDataHex:          "cc",
+		SwapChainXdr:        sampleSwapChainXdr(t),
+		TokenInContractID:   tokenInAddr,
+		AmountInRaw:         "100",
+		AmountOutMinRaw:     "90",
+	})
+	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
+}
+
 func TestBuildSwap_FreighterDelegatedAdminRequiresExternalSign(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	tokenInAddr := testContractAddress(t)
