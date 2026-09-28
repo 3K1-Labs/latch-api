@@ -199,6 +199,10 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
 			return
 		}
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
+			return
+		}
 		slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build transaction")
 		return
@@ -438,6 +442,9 @@ type prepareSignRequest struct {
 	SignerType          string `json:"signerType,omitempty"`
 	SignerG             string `json:"signerG,omitempty"`
 	FeePayerG           string `json:"feePayerG,omitempty"`
+	// KeyDataHex identifies which passkey will sign — see
+	// buildSendRequest.KeyDataHex's doc comment.
+	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
 // PrepareSign godoc
@@ -472,6 +479,7 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		UnsignedTxXdr:       req.UnsignedTxXdr,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
+		KeyDataHex:          req.KeyDataHex,
 	})
 	if err != nil {
 		prepareSignErrorResponse(c, req.SmartAccountAddress, err)
@@ -557,6 +565,10 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
+			return
+		}
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
 		}
 		slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
@@ -647,6 +659,10 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		GAddress:            req.GAddress,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
+			return
+		}
 		slog.Error("build setup-swap-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build swap setup transaction")
 		return
@@ -884,6 +900,8 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSignerRuleNotFound):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 	case errors.Is(err, webapp.ErrSwapSignerMismatch):
 		webappx.Success(c, http.StatusConflict, gin.H{
 			"error":           err.Error(),
@@ -907,6 +925,8 @@ func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err erro
 // detail leaked, per security.md.
 func prepareSignErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSignerRuleNotFound):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 	case errors.Is(err, webapp.ErrPrepareSignNoContextRule):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrNoContextRule, err.Error())
 	case errors.Is(err, webapp.ErrPrepareSignSignerMismatch):

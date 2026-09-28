@@ -172,6 +172,23 @@ func (s *TransactionService) SetupSendRules(ctx context.Context, in SetupSendRul
 	// this endpoint is retried.
 	var missingAssets []CatalogAsset
 	for _, asset := range assetsToConfigure {
+		// A passkey that identifies its key is checked by an exact-key
+		// match, not "any signer with this verifier" — ruleAuthorizesSigner
+		// would wrongly call a backup passkey "configured" off the original
+		// owner's rule, or vice versa (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md
+		// R5). A Default rule listing this key already covers any asset, so
+		// a backup signer needs no per-asset rule at all.
+		if in.SignerType == "passkey" && in.KeyDataHex != "" {
+			_, _, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, verifierAddress, in.KeyDataHex, asset.ContractID)
+			if err != nil {
+				return SetupSendRulesResult{}, fmt.Errorf("find rule for signer for %s: %w", asset.AssetID, err)
+			}
+			if !ok {
+				return SetupSendRulesResult{}, ErrSignerRuleNotFound
+			}
+			continue
+		}
+
 		id, discovery, err := s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
 		if err != nil {
 			return SetupSendRulesResult{}, fmt.Errorf("discover context rule for %s: %w", asset.AssetID, err)
@@ -347,6 +364,14 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 		return SetupSwapRulesResult{}, fmt.Errorf("keyDataHex is required for passkey setup")
 	}
 
+	verifierAddress := s.ed25519VerifierAddress
+	if signerType == "passkey" {
+		verifierAddress = s.webauthnVerifierAddress
+	}
+	if verifierAddress == "" && signerType != "freighter" {
+		return SetupSwapRulesResult{}, fmt.Errorf("verifier address not configured for this signer type")
+	}
+
 	contextRuleID, _, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
 	if err != nil {
 		return SetupSwapRulesResult{}, fmt.Errorf("discover default context rule: %w", err)
@@ -356,9 +381,34 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 		return SetupSwapRulesResult{}, fmt.Errorf("fetch default context rule: %w", err)
 	}
 
-	verifierAddress := s.ed25519VerifierAddress
-	if signerType == "passkey" {
-		verifierAddress = s.webauthnVerifierAddress
+	// A passkey that identifies its key is checked by an exact-key match
+	// against every rule on the account, not just rule 0 — a backup signer's
+	// own dedicated rule (see AddSigner) already authorizes swaps and must
+	// be recognized here, or this endpoint would try to add_signer the
+	// backup key onto rule 0 too (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6).
+	if signerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, _, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, verifierAddress, in.KeyDataHex, "")
+		if err != nil {
+			return SetupSwapRulesResult{}, fmt.Errorf("find rule for signer: %w", err)
+		}
+		if ok {
+			return SetupSwapRulesResult{
+				AlreadyConfigured: true,
+				Message:           "Default context rule already has your signer for swaps.",
+				RouterContractID:  routerID,
+				ContextRuleID:     ruleID,
+			}, nil
+		}
+		// No rule lists this exact key. Refuse if rule 0 already has a
+		// *different* passkey signer — never add_signer this key alongside
+		// it (the shared-rule 2-of-2 bug AddSigner's own dedicated-rule
+		// design exists to avoid). A rule with no External signer at all yet
+		// (a fresh solo account, or a bundler-delegated-admin-only account
+		// gaining its first real passkey) is safe to fall through to the
+		// build below, exactly as before backup signers existed.
+		if ruleOK && ruleHasExternalSigner(defaultRule) {
+			return SetupSwapRulesResult{}, ErrSignerRuleNotFound
+		}
 	}
 
 	if ruleOK && ruleAuthorizesSigner(defaultRule, signerType, verifierAddress, in.GAddress) {
@@ -368,10 +418,6 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 			RouterContractID:  routerID,
 			ContextRuleID:     contextRuleID,
 		}, nil
-	}
-
-	if verifierAddress == "" && signerType != "freighter" {
-		return SetupSwapRulesResult{}, fmt.Errorf("verifier address not configured for this signer type")
 	}
 
 	var signerScVal xdr.ScVal

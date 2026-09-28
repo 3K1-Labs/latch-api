@@ -64,4 +64,8 @@ const (
 	// accounts are scoped to exactly one backup passkey for now — see
 	// TransactionService.AddSigner).
 	ErrAlreadySigner ErrorCode = "already_signer"
+	// ErrSignerRuleNotFound is returned when a passkey's exact keyDataHex
+	// matches no context rule on the account at all — the client should
+	// tell the user this passkey isn't a signer of this wallet, not retry.
+	ErrSignerRuleNotFound ErrorCode = "signer_rule_not_found"
 )
