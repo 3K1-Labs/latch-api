@@ -24,16 +24,18 @@ type AccountSignerHandler struct {
 	accountSignerSvc accountSignerService
 	credentialSvc    passkeyCredentialIndexService
 	webauthnSvc      webauthnService
+	sessionSvc       sessionService
 	auditSvc         auditService
 }
 
-func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSignerSvc accountSignerService, credentialSvc passkeyCredentialIndexService, webauthnSvc webauthnService, auditSvc auditService) *AccountSignerHandler {
+func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSignerSvc accountSignerService, credentialSvc passkeyCredentialIndexService, webauthnSvc webauthnService, sessionSvc sessionService, auditSvc auditService) *AccountSignerHandler {
 	return &AccountSignerHandler{
 		txSvc:            txSvc,
 		txSvcMainnet:     txSvcMainnet,
 		accountSignerSvc: accountSignerSvc,
 		credentialSvc:    credentialSvc,
 		webauthnSvc:      webauthnSvc,
+		sessionSvc:       sessionSvc,
 		auditSvc:         auditSvc,
 	}
 }
@@ -80,6 +82,13 @@ type addSignerRequest struct {
 	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
 	KeyDataHex          string `json:"keyDataHex" binding:"required"`
 	CredentialID        string `json:"credentialId,omitempty"`
+	// CallerCredentialID is the passkey active in the extension right now —
+	// must have been proved by this session's own WebAuthn ceremony and be
+	// an authorized signer of SmartAccountAddress
+	// (LATCH_BACKEND_SIGNER_IDENTITY.md §3). Deliberately not
+	// binding:"required" — a missing value must produce requireProvedSigner's
+	// 401 signer_not_proved, not ShouldBindJSON's generic 400.
+	CallerCredentialID string `json:"callerCredentialId,omitempty"`
 }
 
 // AddSigner godoc
@@ -94,8 +103,6 @@ type addSignerRequest struct {
 // @Failure      403 {object} webappErrorResponse
 // @Router       /api/smart-account/add-signer [post]
 func (h *AccountSignerHandler) AddSigner(c *gin.Context) {
-	userID := middleware.SessionUserIDFromContext(c.Request.Context())
-
 	var req addSignerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
@@ -108,7 +115,7 @@ func (h *AccountSignerHandler) AddSigner(c *gin.Context) {
 		return
 	}
 
-	if !h.requireCallerIsSigner(c, userID, req.SmartAccountAddress) {
+	if !h.requireProvedSigner(c, req.CallerCredentialID, req.SmartAccountAddress) {
 		return
 	}
 
@@ -152,6 +159,12 @@ type confirmAddSignerRequest struct {
 	Label               string `json:"label,omitempty"`
 	Seq                 int32  `json:"seq,omitempty"`
 	TxHash              string `json:"txHash" binding:"required"`
+	// CallerCredentialID — see addSignerRequest.CallerCredentialID. Checked
+	// against the account's *existing* signers, since CredentialID (the new
+	// backup being confirmed) isn't one yet
+	// (LATCH_BACKEND_SIGNER_IDENTITY.md §3: a valid chain result is not
+	// authorization to index an account the caller hasn't proved).
+	CallerCredentialID string `json:"callerCredentialId,omitempty"`
 }
 
 // ConfirmAddSigner godoc
@@ -175,6 +188,10 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	txSvc, _, err := h.resolveNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
+		return
+	}
+
+	if !h.requireProvedSigner(c, req.CallerCredentialID, req.SmartAccountAddress) {
 		return
 	}
 
@@ -221,6 +238,8 @@ type removeSignerRequest struct {
 	Network             string `json:"network,omitempty"`
 	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
 	CredentialID        string `json:"credentialId" binding:"required"`
+	// CallerCredentialID — see addSignerRequest.CallerCredentialID.
+	CallerCredentialID string `json:"callerCredentialId,omitempty"`
 }
 
 // RemoveSigner godoc
@@ -236,8 +255,6 @@ type removeSignerRequest struct {
 // @Failure      409 {object} webappErrorResponse
 // @Router       /api/smart-account/remove-signer [post]
 func (h *AccountSignerHandler) RemoveSigner(c *gin.Context) {
-	userID := middleware.SessionUserIDFromContext(c.Request.Context())
-
 	var req removeSignerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
@@ -250,15 +267,16 @@ func (h *AccountSignerHandler) RemoveSigner(c *gin.Context) {
 		return
 	}
 
-	if !h.requireCallerIsSigner(c, userID, req.SmartAccountAddress) {
+	if !h.requireProvedSigner(c, req.CallerCredentialID, req.SmartAccountAddress) {
 		return
 	}
 
 	// R8: the caller must retain a signer on this account after the removal
-	// — checked server-side, never inferred from the UI.
-	hasOther, err := h.accountSignerSvc.CallerHasOtherSignerCredential(c.Request.Context(), userID, req.SmartAccountAddress, req.CredentialID)
+	// — checked server-side, never inferred from the UI. Keyed on the
+	// credential being removed, not the cookie user.
+	hasOther, err := h.accountSignerSvc.HasOtherSignerCredential(c.Request.Context(), req.SmartAccountAddress, req.CredentialID)
 	if err != nil {
-		slog.Error("check remaining signer for caller", "userID", userID, "smartAccountAddress", req.SmartAccountAddress, "err", err)
+		slog.Error("check remaining signer for caller", "smartAccountAddress", req.SmartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
@@ -306,6 +324,8 @@ type confirmRemoveSignerRequest struct {
 	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
 	CredentialID        string `json:"credentialId" binding:"required"`
 	TxHash              string `json:"txHash" binding:"required"`
+	// CallerCredentialID — see confirmAddSignerRequest.CallerCredentialID.
+	CallerCredentialID string `json:"callerCredentialId,omitempty"`
 }
 
 // ConfirmRemoveSigner godoc
@@ -329,6 +349,10 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	txSvc, _, err := h.resolveNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
+		return
+	}
+
+	if !h.requireProvedSigner(c, req.CallerCredentialID, req.SmartAccountAddress) {
 		return
 	}
 
@@ -385,21 +409,50 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, gin.H{"confirmed": true, "contextRuleId": contextRuleID})
 }
 
-// requireCallerIsSigner writes a 403/404/500 response and returns false if
-// the session doesn't already hold a credential that's an authorized
-// signer of smartAccountAddress (R12).
-func (h *AccountSignerHandler) requireCallerIsSigner(c *gin.Context, userID, smartAccountAddress string) bool {
-	owns, err := h.accountSignerSvc.CallerOwnsSignerCredential(c.Request.Context(), userID, smartAccountAddress)
+// requireProvedSigner is a thin wrapper around the package-level
+// requireProvedSigner for AccountSignerHandler's routes.
+func (h *AccountSignerHandler) requireProvedSigner(c *gin.Context, callerCredentialID, smartAccountAddress string) bool {
+	return requireProvedSigner(c, h.sessionSvc, h.accountSignerSvc, callerCredentialID, smartAccountAddress)
+}
+
+// requireProvedSigner writes a 401/403/404/500 response and returns false
+// unless callerCredentialID was both (a) proved by this session's own
+// WebAuthn ceremony and (b) is itself an authorized signer of
+// smartAccountAddress (LATCH_BACKEND_SIGNER_IDENTITY.md §3). Replaces the
+// cookie-user-id-based requireCallerIsSigner/CallerOwnsSignerCredential:
+// "some credential under this cookie's user row signs this account" is not
+// proof that *this session* holds that credential. Shared by
+// AccountSignerHandler (add/remove-signer, their confirm routes) and
+// WebAuthnHandler.AttachSignerFinish.
+func requireProvedSigner(c *gin.Context, sessionSvc sessionService, accountSignerSvc accountSignerService, callerCredentialID, smartAccountAddress string) bool {
+	if callerCredentialID == "" {
+		webappx.Fail(c, http.StatusUnauthorized, webappx.ErrSignerNotProved, "prove this passkey in this session before changing signers")
+		return false
+	}
+
+	sessionID := middleware.SessionIDFromContext(c.Request.Context())
+	proved, err := sessionSvc.HasProvedCredential(c.Request.Context(), sessionID, callerCredentialID)
+	if err != nil {
+		slog.Error("check session proved credential", "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return false
+	}
+	if !proved {
+		webappx.Fail(c, http.StatusForbidden, webappx.ErrSignerNotProved, "prove this passkey in this session before changing signers")
+		return false
+	}
+
+	isSigner, err := accountSignerSvc.IsSignerOfAccount(c.Request.Context(), callerCredentialID, smartAccountAddress)
 	if err != nil {
 		if errors.Is(err, webapp.ErrAccountSignerUnknownAccount) {
 			webappx.Fail(c, http.StatusNotFound, webappx.ErrUnknownAccount, "unknown smart account")
 			return false
 		}
-		slog.Error("check signer ownership", "userID", userID, "smartAccountAddress", smartAccountAddress, "err", err)
+		slog.Error("check signer ownership", "smartAccountAddress", smartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return false
 	}
-	if !owns {
+	if !isSigner {
 		webappx.Fail(c, http.StatusForbidden, webappx.ErrNotASigner, "you are not an authorized signer of this account")
 		return false
 	}

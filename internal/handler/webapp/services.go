@@ -28,15 +28,21 @@ type smartAccountService interface {
 }
 
 type accountsService interface {
-	ListAccounts(ctx context.Context, userID string) ([]webapp.Account, error)
-	ListAccountsForCredential(ctx context.Context, userID, credentialID string) ([]webapp.Account, error)
+	ListAccountsForProvedCredentials(ctx context.Context, credentialIDs []string) ([]webapp.Account, error)
 }
 
-// sessionIssuer mints a fresh webapp session bound to an existing user. Used
+// sessionService mints a fresh webapp session bound to an existing user (used
 // by the WebAuthn login handler when a verified assertion resolves to a
-// different user than the caller's "sid" cookie names.
-type sessionIssuer interface {
+// different user than the caller's "sid" cookie names) and records/reads
+// which credentials the current session has actually proved via a WebAuthn
+// ceremony (LATCH_BACKEND_SIGNER_IDENTITY.md) — the authorization source for
+// signer-changing and account-listing routes, not the cookie's user id.
+type sessionService interface {
 	IssueForUser(ctx context.Context, userID string) (webapp.Session, error)
+	ReplaceProvedCredential(ctx context.Context, sessionID, credentialID string) error
+	AddProvedCredential(ctx context.Context, sessionID, credentialID string) error
+	ProvedCredentials(ctx context.Context, sessionID string) ([]string, error)
+	HasProvedCredential(ctx context.Context, sessionID, credentialID string) (bool, error)
 }
 
 // passkeyCredentialIndexService records which smart account a passkey
@@ -134,8 +140,8 @@ type backupPasskeyService interface {
 // and persisting the on-chain signer_id once add_signer succeeds.
 type accountSignerService interface {
 	AttachCredential(ctx context.Context, smartAccountAddress, credentialID, label string) error
-	CallerOwnsSignerCredential(ctx context.Context, userID, smartAccountAddress string) (bool, error)
-	CallerHasOtherSignerCredential(ctx context.Context, userID, smartAccountAddress, excludingCredentialID string) (bool, error)
+	IsSignerOfAccount(ctx context.Context, credentialID, smartAccountAddress string) (bool, error)
+	HasOtherSignerCredential(ctx context.Context, smartAccountAddress, excludingCredentialID string) (bool, error)
 	MarkSignerContextRule(ctx context.Context, smartAccountAddress, credentialID string, contextRuleID uint32) error
 	GetSignerContextRuleID(ctx context.Context, smartAccountAddress, credentialID string) (contextRuleID uint32, ok bool, err error)
 	RemoveCredential(ctx context.Context, smartAccountAddress, credentialID string) error

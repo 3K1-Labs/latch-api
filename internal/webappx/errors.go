@@ -68,4 +68,10 @@ const (
 	// matches no context rule on the account at all — the client should
 	// tell the user this passkey isn't a signer of this wallet, not retry.
 	ErrSignerRuleNotFound ErrorCode = "signer_rule_not_found"
+	// ErrSignerNotProved is returned when a signer-changing request's
+	// callerCredentialId is missing or hasn't been proved by this session's
+	// own WebAuthn ceremony (LATCH_BACKEND_SIGNER_IDENTITY.md §3) — the
+	// client must complete authentication/registration/attach for that
+	// credential before retrying, not just resend the same request.
+	ErrSignerNotProved ErrorCode = "signer_not_proved"
 )

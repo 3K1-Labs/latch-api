@@ -31,13 +31,13 @@ type WebAuthnHandler struct {
 	accountsSvc      accountsService
 	credentialSvc    passkeyCredentialIndexService
 	accountSignerSvc accountSignerService
-	sessionSvc       sessionIssuer
+	sessionSvc       sessionService
 	auditSvc         auditService
 	cfg              *config.Config
 	crossSiteCookies bool
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionIssuer, auditSvc auditService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionService, auditSvc auditService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
 	return &WebAuthnHandler{
 		webauthnSvc:      webauthnSvc,
 		smartAccountSvc:  smartAccountSvc,
@@ -179,6 +179,10 @@ type finishRegistrationRequest struct {
 	// gets today's behavior (label "", seq 0) rather than a hard error.
 	DisplayName string `json:"displayName,omitempty"`
 	Seq         int32  `json:"seq,omitempty"`
+	// CallerCredentialID — see addSignerRequest.CallerCredentialID
+	// (account_signer.go). Only read by AttachSignerFinish; RegistrationFinish
+	// ignores it (a brand-new registration has no existing signer to prove).
+	CallerCredentialID string `json:"callerCredentialId,omitempty"`
 }
 
 // finishRegistrationLabelMaxLen bounds the client-supplied label persisted to
@@ -257,6 +261,14 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 		slog.Error("register passkey credential index", "userID", userID, "err", err)
 	}
 
+	// §2/§5: the ceremony proves only this new credential — add it to
+	// whatever this session already proved rather than replacing it (a
+	// fresh anonymous session has nothing to replace anyway).
+	sessionID := middleware.SessionIDFromContext(c.Request.Context())
+	if err := h.sessionSvc.AddProvedCredential(c.Request.Context(), sessionID, cred.CredentialID); err != nil {
+		slog.Error("record proved credential for registration", "userID", userID, "err", err)
+	}
+
 	h.auditSvc.Log(c.Request.Context(), userID, "webauthn_registered", c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"credentialId":        cred.CredentialID,
 		"smartAccountAddress": smartAccountAddress,
@@ -293,27 +305,17 @@ func (h *WebAuthnHandler) AttachSignerFinish(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 	smartAccountAddress := c.Param("smartAccountAddress")
 
-	// R12: only a caller who already proves a signer credential on this
-	// account may attach a new one — otherwise any authenticated session
-	// could seed someone else's account_signers with a pending attach row.
-	owns, err := h.accountSignerSvc.CallerOwnsSignerCredential(c.Request.Context(), userID, smartAccountAddress)
-	if err != nil {
-		if errors.Is(err, webapp.ErrAccountSignerUnknownAccount) {
-			webappx.Fail(c, http.StatusNotFound, webappx.ErrUnknownAccount, "unknown smart account")
-			return
-		}
-		slog.Error("check signer ownership for attach", "userID", userID, "smartAccountAddress", smartAccountAddress, "err", err)
-		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
-		return
-	}
-	if !owns {
-		webappx.Fail(c, http.StatusForbidden, webappx.ErrNotASigner, "you are not an authorized signer of this account")
-		return
-	}
-
 	var req finishRegistrationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
+		return
+	}
+
+	// R12 / LATCH_BACKEND_SIGNER_IDENTITY.md §3: only a caller who has proved
+	// (this session) a credential that's already an authorized signer of this
+	// account may attach a new one — otherwise any authenticated session
+	// could seed someone else's account_signers with a pending attach row.
+	if !requireProvedSigner(c, h.sessionSvc, h.accountSignerSvc, req.CallerCredentialID, smartAccountAddress) {
 		return
 	}
 
@@ -368,6 +370,14 @@ func (h *WebAuthnHandler) AttachSignerFinish(c *gin.Context) {
 		slog.Error("attach signer credential", "userID", userID, "smartAccountAddress", smartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
+	}
+
+	// §2: the newly attached credential is added to this session's proved
+	// set, not replacing it — the caller's already-proved credential (used
+	// above to authorize the attach) stays valid too.
+	sessionID := middleware.SessionIDFromContext(c.Request.Context())
+	if err := h.sessionSvc.AddProvedCredential(c.Request.Context(), sessionID, cred.CredentialID); err != nil {
+		slog.Error("record proved credential for attach", "smartAccountAddress", smartAccountAddress, "err", err)
 	}
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(webapp.ActionSignerAttached), c.ClientIP(), c.Request.UserAgent(), map[string]any{
@@ -506,6 +516,7 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 	// the credential's owner. Re-issue the cookie rather than relocating the
 	// credential onto the stale session, so signing in with one passkey never
 	// widens the account list with accounts proven by a different passkey.
+	sessionID := middleware.SessionIDFromContext(c.Request.Context())
 	if cred.UserID != userID {
 		sess, issueErr := h.sessionSvc.IssueForUser(c.Request.Context(), cred.UserID)
 		if issueErr != nil {
@@ -514,6 +525,16 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 			return
 		}
 		middleware.SetSessionCookie(c, sess.ID, h.crossSiteCookies)
+		sessionID = sess.ID
+	}
+
+	// §2: authenticating replaces whatever this session proved before — a
+	// login with a different passkey is a change of identity, not an
+	// addition (see AddProvedCredential's doc comment for the contrast).
+	if err := h.sessionSvc.ReplaceProvedCredential(c.Request.Context(), sessionID, cred.CredentialID); err != nil {
+		slog.Error("replace proved credential", "userID", userID, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+		return
 	}
 
 	smartAccountAddress, keyDataHex, deployed, err := h.smartAccountSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID)
@@ -542,7 +563,10 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		smartAccountAddress, keyDataHex, deployed = fallbackAddress, fallbackKeyDataHex, true
 	}
 
-	accounts, err := h.accountsSvc.ListAccounts(c.Request.Context(), cred.UserID)
+	// §2: only the credential that just verified — this session's proved set
+	// was just replaced with exactly it, so this is equivalent to (and
+	// cheaper than) re-reading the set back from storage.
+	accounts, err := h.accountsSvc.ListAccountsForProvedCredentials(c.Request.Context(), []string{cred.CredentialID})
 	if err != nil {
 		slog.Error("list accounts after webauthn authentication", "userID", userID, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")

@@ -246,6 +246,12 @@ type WebappSession struct {
 	ExpiresAt int64     `json:"expires_at"`
 }
 
+type WebappSessionProvedCredential struct {
+	SessionID    uuid.UUID `json:"session_id"`
+	CredentialID string    `json:"credential_id"`
+	ProvedAt     int64     `json:"proved_at"`
+}
+
 type WebappSignPayload struct {
 	ID         string          `json:"id"`
 	Payload    json.RawMessage `json:"payload"`

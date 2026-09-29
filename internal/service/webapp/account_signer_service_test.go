@@ -26,13 +26,6 @@ func acctSignerSmartAccountRow(userID uuid.UUID, credentialID, address string) *
 		AddRow(uuid.New(), userID, credentialID, "keyhex", "salthex", address, int32(1), int64(1000))
 }
 
-func acctSignerWebauthnCredRow(userID uuid.UUID, credentialID string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{
-		"id", "user_id", "credential_id", "credential_id_bytes", "cose_public_key",
-		"p256_raw_public_key", "sign_count", "transports", "device_type", "backed_up", "created_at",
-	}).AddRow(uuid.New(), userID, credentialID, []byte("raw-id"), []byte("cose"), []byte("pubkey"), int64(0), sql.NullString{}, sql.NullString{}, int32(0), int64(1000))
-}
-
 func TestAccountSignerService_AttachCredential(t *testing.T) {
 	t.Run("unknown account", func(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
@@ -58,47 +51,42 @@ func TestAccountSignerService_AttachCredential(t *testing.T) {
 	})
 }
 
-func TestAccountSignerService_CallerOwnsSignerCredential(t *testing.T) {
-	t.Run("owns the account's original credential", func(t *testing.T) {
+func TestAccountSignerService_IsSignerOfAccount(t *testing.T) {
+	t.Run("is the account's original credential", func(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		userID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(acctSignerSmartAccountRow(userID, "cred-a", "CADDR"))
 		mock.ExpectQuery("SELECT credential_id FROM webapp.account_signers").WithArgs("CADDR").WillReturnRows(sqlmock.NewRows([]string{"credential_id"}))
-		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").WithArgs("cred-a").WillReturnRows(acctSignerWebauthnCredRow(userID, "cred-a"))
 
-		owns, err := svc.CallerOwnsSignerCredential(context.Background(), userID.String(), "CADDR")
+		isSigner, err := svc.IsSignerOfAccount(context.Background(), "cred-a", "CADDR")
 		require.NoError(t, err)
-		assert.True(t, owns)
+		assert.True(t, isSigner)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("owns a backup signer credential", func(t *testing.T) {
+	t.Run("is a backup signer credential", func(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		originalOwnerID := uuid.New()
-		backupOwnerID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(acctSignerSmartAccountRow(originalOwnerID, "cred-a", "CADDR"))
 		mock.ExpectQuery("SELECT credential_id FROM webapp.account_signers").WithArgs("CADDR").WillReturnRows(
 			sqlmock.NewRows([]string{"credential_id"}).AddRow(sql.NullString{String: "cred-b", Valid: true}),
 		)
-		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").WithArgs("cred-a").WillReturnRows(acctSignerWebauthnCredRow(originalOwnerID, "cred-a"))
-		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").WithArgs("cred-b").WillReturnRows(acctSignerWebauthnCredRow(backupOwnerID, "cred-b"))
 
-		owns, err := svc.CallerOwnsSignerCredential(context.Background(), backupOwnerID.String(), "CADDR")
+		isSigner, err := svc.IsSignerOfAccount(context.Background(), "cred-b", "CADDR")
 		require.NoError(t, err)
-		assert.True(t, owns)
+		assert.True(t, isSigner)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("does not own any signer credential", func(t *testing.T) {
+	t.Run("is not a signer of this account", func(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		ownerID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(acctSignerSmartAccountRow(ownerID, "cred-a", "CADDR"))
 		mock.ExpectQuery("SELECT credential_id FROM webapp.account_signers").WithArgs("CADDR").WillReturnRows(sqlmock.NewRows([]string{"credential_id"}))
-		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").WithArgs("cred-a").WillReturnRows(acctSignerWebauthnCredRow(ownerID, "cred-a"))
 
-		owns, err := svc.CallerOwnsSignerCredential(context.Background(), uuid.New().String(), "CADDR")
+		isSigner, err := svc.IsSignerOfAccount(context.Background(), "cred-unknown", "CADDR")
 		require.NoError(t, err)
-		assert.False(t, owns)
+		assert.False(t, isSigner)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -106,35 +94,34 @@ func TestAccountSignerService_CallerOwnsSignerCredential(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnError(sql.ErrNoRows)
 
-		_, err := svc.CallerOwnsSignerCredential(context.Background(), uuid.New().String(), "CADDR")
+		_, err := svc.IsSignerOfAccount(context.Background(), "cred-a", "CADDR")
 		assert.ErrorIs(t, err, ErrAccountSignerUnknownAccount)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }
 
-func TestAccountSignerService_CallerHasOtherSignerCredential(t *testing.T) {
-	t.Run("only holds the credential being excluded", func(t *testing.T) {
+func TestAccountSignerService_HasOtherSignerCredential(t *testing.T) {
+	t.Run("only the credential being excluded exists", func(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		ownerID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(acctSignerSmartAccountRow(ownerID, "cred-a", "CADDR"))
 		mock.ExpectQuery("SELECT credential_id FROM webapp.account_signers").WithArgs("CADDR").WillReturnRows(sqlmock.NewRows([]string{"credential_id"}))
 
-		hasOther, err := svc.CallerHasOtherSignerCredential(context.Background(), ownerID.String(), "CADDR", "cred-a")
+		hasOther, err := svc.HasOtherSignerCredential(context.Background(), "CADDR", "cred-a")
 		require.NoError(t, err)
 		assert.False(t, hasOther)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
-	t.Run("holds a second signer credential", func(t *testing.T) {
+	t.Run("a second signer credential exists", func(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		ownerID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(acctSignerSmartAccountRow(ownerID, "cred-a", "CADDR"))
 		mock.ExpectQuery("SELECT credential_id FROM webapp.account_signers").WithArgs("CADDR").WillReturnRows(
 			sqlmock.NewRows([]string{"credential_id"}).AddRow(sql.NullString{String: "cred-b", Valid: true}),
 		)
-		mock.ExpectQuery("SELECT (.+) FROM webapp.webauthn_credentials").WithArgs("cred-b").WillReturnRows(acctSignerWebauthnCredRow(ownerID, "cred-b"))
 
-		hasOther, err := svc.CallerHasOtherSignerCredential(context.Background(), ownerID.String(), "CADDR", "cred-a")
+		hasOther, err := svc.HasOtherSignerCredential(context.Background(), "CADDR", "cred-a")
 		require.NoError(t, err)
 		assert.True(t, hasOther)
 		assert.NoError(t, mock.ExpectationsWereMet())
