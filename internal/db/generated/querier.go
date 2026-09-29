@@ -30,6 +30,10 @@ type Querier interface {
 	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
 	DeletePasskeyCredential(ctx context.Context, credentialID string) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
+	// Used by "replace" semantics (authentication finish): drops every proved
+	// credential for this session except the one that just verified, so an
+	// earlier login's proof doesn't linger after switching identities.
+	DeleteSessionProvedCredentialsExcept(ctx context.Context, arg DeleteSessionProvedCredentialsExceptParams) error
 	DeleteStaleWCKBundles(ctx context.Context, before time.Time) (int64, error)
 	DeleteStaleWalletMemberships(ctx context.Context, before time.Time) (int64, error)
 	DeleteWebauthnChallenge(ctx context.Context, id uuid.UUID) error
@@ -74,6 +78,10 @@ type Querier interface {
 	InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntentParams) (uuid.UUID, error)
 	InsertPushTokenRegistration(ctx context.Context, arg InsertPushTokenRegistrationParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
+	// Records that sessionID's holder has proved credentialID via a WebAuthn
+	// ceremony. Idempotent: re-proving the same credential just refreshes
+	// proved_at.
+	InsertSessionProvedCredential(ctx context.Context, arg InsertSessionProvedCredentialParams) error
 	InsertSignPayload(ctx context.Context, arg InsertSignPayloadParams) error
 	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
 	InsertWebappAuditLog(ctx context.Context, arg InsertWebappAuditLogParams) error
@@ -97,6 +105,7 @@ type Querier interface {
 	ListMultisigProposalsWithApprovalCountForAccount(ctx context.Context, multisigAccountID uuid.UUID) ([]ListMultisigProposalsWithApprovalCountForAccountRow, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListSessionProvedCredentials(ctx context.Context, sessionID uuid.UUID) ([]string, error)
 	ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsByUserIDRow, error)
 	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
@@ -111,6 +120,7 @@ type Querier interface {
 	RelinkMultisigMembersByCredential(ctx context.Context, arg RelinkMultisigMembersByCredentialParams) error
 	ReplacePushTokenRegistrations(ctx context.Context, pushToken string) error
 	RevokeRefreshToken(ctx context.Context, tokenHash string) error
+	SessionHasProvedCredential(ctx context.Context, arg SessionHasProvedCredentialParams) (bool, error)
 	SetAccountSignerContextRuleID(ctx context.Context, arg SetAccountSignerContextRuleIDParams) error
 	SlideWebappSessionExpiry(ctx context.Context, arg SlideWebappSessionExpiryParams) error
 	UpdateAccountSignerIntentLabel(ctx context.Context, arg UpdateAccountSignerIntentLabelParams) error

@@ -30,6 +30,7 @@ sql:
       - "migrations/000025_passkey_credentials.up.sql"
       - "migrations/000028_account_signers_signer_id.up.sql"
       - "migrations/000029_account_signers_context_rule_id.up.sql"
+      - "migrations/000030_webapp_session_proved_credentials.up.sql"
     gen:
       go:
         package: "db"

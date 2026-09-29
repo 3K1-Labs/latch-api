@@ -56,47 +56,37 @@ func (s *AccountSignerService) AttachCredential(ctx context.Context, smartAccoun
 	return nil
 }
 
-// CallerOwnsSignerCredential reports whether userID owns a WebAuthn
-// credential already recorded as a signer of smartAccountAddress — the
-// account's original credential or a previously attached backup signer.
-// Gates add-signer/remove-signer build so an unauthenticated party can't
-// shape a transaction against someone else's account
-// (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R12).
-func (s *AccountSignerService) CallerOwnsSignerCredential(ctx context.Context, userID, smartAccountAddress string) (bool, error) {
+// IsSignerOfAccount reports whether credentialID is itself recorded as a
+// signer of smartAccountAddress — the account's original credential or a
+// previously attached backup signer. Gates add-signer/remove-signer build so
+// a session that hasn't proved a signer credential on this account can't
+// shape a transaction against it (LATCH_BACKEND_SIGNER_IDENTITY.md §3,
+// superseding the cookie-user-id check LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md
+// R12 originally specified).
+func (s *AccountSignerService) IsSignerOfAccount(ctx context.Context, credentialID, smartAccountAddress string) (bool, error) {
 	credentialIDs, err := s.signerCredentialIDs(ctx, smartAccountAddress)
 	if err != nil {
 		return false, err
 	}
-	return s.anyOwnedByUser(ctx, userID, credentialIDs)
+	for _, id := range credentialIDs {
+		if id == credentialID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
-// CallerHasOtherSignerCredential reports whether userID owns a signer
-// credential on smartAccountAddress other than excludingCredentialID —
-// used to block removing the caller's own last signer (R8).
-func (s *AccountSignerService) CallerHasOtherSignerCredential(ctx context.Context, userID, smartAccountAddress, excludingCredentialID string) (bool, error) {
+// HasOtherSignerCredential reports whether smartAccountAddress has a signer
+// other than excludingCredentialID — used to block removing the caller's own
+// last signer (R8), keyed on the specific credential the caller proved this
+// request with, not every credential a cookie user happens to own.
+func (s *AccountSignerService) HasOtherSignerCredential(ctx context.Context, smartAccountAddress, excludingCredentialID string) (bool, error) {
 	credentialIDs, err := s.signerCredentialIDs(ctx, smartAccountAddress)
 	if err != nil {
 		return false, err
 	}
-	remaining := make([]string, 0, len(credentialIDs))
 	for _, id := range credentialIDs {
 		if id != excludingCredentialID {
-			remaining = append(remaining, id)
-		}
-	}
-	return s.anyOwnedByUser(ctx, userID, remaining)
-}
-
-func (s *AccountSignerService) anyOwnedByUser(ctx context.Context, userID string, credentialIDs []string) (bool, error) {
-	for _, credID := range credentialIDs {
-		cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credID)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return false, fmt.Errorf("get webauthn credential %s: %w", credID, err)
-		}
-		if cred.UserID.String() == userID {
 			return true, nil
 		}
 	}

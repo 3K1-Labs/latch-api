@@ -102,21 +102,14 @@ func (s *stubSmartAccount) ConnectPhantom(_ context.Context, _, _, _ string) (we
 }
 
 type stubAccounts struct {
-	accounts []webapp.Account
-	err      error
-
-	forCredentialAccounts []webapp.Account
-	forCredentialErr      error
-	gotCredentialID       string
+	accounts         []webapp.Account
+	err              error
+	gotCredentialIDs []string
 }
 
-func (s *stubAccounts) ListAccounts(_ context.Context, _ string) ([]webapp.Account, error) {
+func (s *stubAccounts) ListAccountsForProvedCredentials(_ context.Context, credentialIDs []string) ([]webapp.Account, error) {
+	s.gotCredentialIDs = credentialIDs
 	return s.accounts, s.err
-}
-
-func (s *stubAccounts) ListAccountsForCredential(_ context.Context, _, credentialID string) ([]webapp.Account, error) {
-	s.gotCredentialID = credentialID
-	return s.forCredentialAccounts, s.forCredentialErr
 }
 
 type stubSessionIssuer struct {
@@ -124,12 +117,57 @@ type stubSessionIssuer struct {
 	err     error
 	gotUser string
 	calls   int
+
+	// proved, when non-nil, is consulted by HasProvedCredential; nil means
+	// "every credential is proved" so existing tests that predate
+	// LATCH_BACKEND_SIGNER_IDENTITY.md don't need to opt in individually.
+	proved             map[string]bool
+	provedErr          error
+	gotReplacedSession string
+	gotReplacedCred    string
+	replaceErr         error
+	gotAddedSession    string
+	gotAddedCred       string
+	addErr             error
 }
 
 func (s *stubSessionIssuer) IssueForUser(_ context.Context, userID string) (webapp.Session, error) {
 	s.calls++
 	s.gotUser = userID
 	return s.session, s.err
+}
+
+func (s *stubSessionIssuer) ReplaceProvedCredential(_ context.Context, sessionID, credentialID string) error {
+	s.gotReplacedSession, s.gotReplacedCred = sessionID, credentialID
+	return s.replaceErr
+}
+
+func (s *stubSessionIssuer) AddProvedCredential(_ context.Context, sessionID, credentialID string) error {
+	s.gotAddedSession, s.gotAddedCred = sessionID, credentialID
+	return s.addErr
+}
+
+func (s *stubSessionIssuer) ProvedCredentials(_ context.Context, _ string) ([]string, error) {
+	if s.proved == nil {
+		return nil, s.provedErr
+	}
+	ids := make([]string, 0, len(s.proved))
+	for id, ok := range s.proved {
+		if ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids, s.provedErr
+}
+
+func (s *stubSessionIssuer) HasProvedCredential(_ context.Context, _, credentialID string) (bool, error) {
+	if s.provedErr != nil {
+		return false, s.provedErr
+	}
+	if s.proved == nil {
+		return true, nil
+	}
+	return s.proved[credentialID], nil
 }
 
 type stubAudit struct{}
@@ -180,10 +218,10 @@ func (s *stubAccountSigner) AttachCredential(_ context.Context, smartAccountAddr
 	s.gotAttachAddress, s.gotAttachCredentialID, s.gotAttachLabel = smartAccountAddress, credentialID, label
 	return s.attachErr
 }
-func (s *stubAccountSigner) CallerOwnsSignerCredential(_ context.Context, _, _ string) (bool, error) {
+func (s *stubAccountSigner) IsSignerOfAccount(_ context.Context, _, _ string) (bool, error) {
 	return s.callerOwns, s.callerOwnsErr
 }
-func (s *stubAccountSigner) CallerHasOtherSignerCredential(_ context.Context, _, _, _ string) (bool, error) {
+func (s *stubAccountSigner) HasOtherSignerCredential(_ context.Context, _, _ string) (bool, error) {
 	return s.callerHasOther, s.callerHasOtherErr
 }
 func (s *stubAccountSigner) MarkSignerContextRule(_ context.Context, _, _ string, contextRuleID uint32) error {
