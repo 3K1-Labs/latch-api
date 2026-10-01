@@ -3,6 +3,7 @@ package webapp
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -42,6 +43,13 @@ type ContextRuleSummary struct {
 }
 
 var ErrNoContextRule = fmt.Errorf("no context rule found for this smart account")
+
+// ErrSignerRuleNotFound is returned when a passkey's exact keyDataHex
+// matches no context rule on the account at all — distinct from
+// ErrNoContextRule (no rule of the needed type exists yet): this passkey
+// simply isn't an authorized signer of this smart account, so no fallback
+// rule should ever be used for it.
+var ErrSignerRuleNotFound = errors.New("this passkey is not an authorized signer of this smart account")
 
 type ContextRulesService struct {
 	soroban sorobanRPC
@@ -139,6 +147,46 @@ func (s *ContextRulesService) DiscoverDefaultContextRule(ctx context.Context, sm
 // fetchContextRuleAtId()/getContextRule().
 func (s *ContextRulesService) RuleAtID(ctx context.Context, smartAccountAddress string, id uint32) (ContextRuleSummary, bool, error) {
 	return s.getRule(ctx, smartAccountAddress, id)
+}
+
+// FindRuleForSigner returns the rule a passkey should sign under for a call
+// to targetContractID ("" when the call is not contract-specific, e.g. a
+// swap or an arbitrary prepare-sign payload).
+//
+// Prefers a CallContract(targetContractID) rule that lists this exact key;
+// otherwise a Default rule that lists this exact key. ok is false when no
+// rule lists the key at all — unlike DiscoverDefaultContextRuleForSigner,
+// this never falls back to the first Default rule found, since a caller
+// using this must be certain the returned rule actually authorizes the
+// passkey it's about to bind a signature to (see LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md).
+func (s *ContextRulesService) FindRuleForSigner(ctx context.Context, smartAccountAddress, verifierAddress, keyDataHex, targetContractID string) (id uint32, discovery ContextRuleDiscovery, ok bool, err error) {
+	count, err := s.rulesCount(ctx, smartAccountAddress)
+	if err != nil {
+		return 0, "", false, err
+	}
+
+	var defaultID uint32
+	haveDefault := false
+	limit := min(count, maxContextRuleScan)
+	for i := uint32(0); i < limit; i++ {
+		rule, exists, err := s.getRule(ctx, smartAccountAddress, i)
+		if err != nil {
+			return 0, "", false, err
+		}
+		if !exists || !ruleHasExactExternalSigner(rule, verifierAddress, keyDataHex) {
+			continue
+		}
+		if targetContractID != "" && rule.CallContractAddress == targetContractID {
+			return i, ContextRuleDiscoveryMatched, true, nil
+		}
+		if rule.IsDefault && !haveDefault {
+			defaultID, haveDefault = i, true
+		}
+	}
+	if haveDefault {
+		return defaultID, ContextRuleDiscoveryDefault, true, nil
+	}
+	return 0, "", false, nil
 }
 
 // ListContextRules returns every context rule configured on the smart

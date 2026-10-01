@@ -509,7 +509,7 @@ func main() {
 	webappGroup := r.Group("/api")
 	webappGroup.Use(middleware.EnsureSession(webappSessionSvc, crossSiteWebAppCookies))
 
-	webappAccountsHandler := webapphandler.NewAccountsHandler(webappAccountsSvc, crossSiteWebAppCookies)
+	webappAccountsHandler := webapphandler.NewAccountsHandler(webappAccountsSvc, webappSessionSvc, crossSiteWebAppCookies)
 	accountsGroup := webappGroup.Group("/accounts")
 	{
 		accountsGroup.GET("", webappAccountsHandler.List)
@@ -590,7 +590,7 @@ func main() {
 		// TransactionService setup-send-rules/setup-swap-rules use above).
 		webappAccountSignerHandler := webapphandler.NewAccountSignerHandler(
 			webappTransactionSvc, webapphandler.TransactionServiceOrNil(webappTransactionSvcMainnet),
-			webappAccountSignerSvc, passkeyCredentialSvc, webappWebauthnSvc, webappAuditSvc,
+			webappAccountSignerSvc, passkeyCredentialSvc, webappWebauthnSvc, webappSessionSvc, webappAuditSvc,
 		)
 		smartAccountGroup.POST("/add-signer", webappAccountSignerHandler.AddSigner)
 		smartAccountGroup.POST("/add-signer/confirm", webappAccountSignerHandler.ConfirmAddSigner)

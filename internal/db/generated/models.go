@@ -131,6 +131,7 @@ type WebappAccountSigner struct {
 	Label               sql.NullString `json:"label"`
 	CreatedAt           int64          `json:"created_at"`
 	SignerID            sql.NullInt32  `json:"signer_id"`
+	ContextRuleID       sql.NullInt32  `json:"context_rule_id"`
 }
 
 type WebappAuditLog struct {
@@ -243,6 +244,12 @@ type WebappSession struct {
 	UserID    uuid.UUID `json:"user_id"`
 	CreatedAt int64     `json:"created_at"`
 	ExpiresAt int64     `json:"expires_at"`
+}
+
+type WebappSessionProvedCredential struct {
+	SessionID    uuid.UUID `json:"session_id"`
+	CredentialID string    `json:"credential_id"`
+	ProvedAt     int64     `json:"proved_at"`
 }
 
 type WebappSignPayload struct {

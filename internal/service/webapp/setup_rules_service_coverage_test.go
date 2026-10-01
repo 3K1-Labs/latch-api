@@ -54,6 +54,10 @@ func TestBuildSignersVecForSetup_FreighterBadGAddress(t *testing.T) {
 // ── SetupSendRules ───────────────────────────────────────────────────────────
 
 func TestSetupSendRules_DiscoverContextRuleErr(t *testing.T) {
+	// freighter (not passkey): a passkey with a non-empty keyDataHex now
+	// resolves via FindRuleForSigner instead of DiscoverContextRule (see
+	// LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R5) — freighter still exercises
+	// DiscoverContextRule's own error propagation unchanged.
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
 			return nil, errors.New("rpc down")
@@ -64,9 +68,9 @@ func TestSetupSendRules_DiscoverContextRuleErr(t *testing.T) {
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "USDC",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: testContractAddress(t)}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discover context rule for")
@@ -105,6 +109,10 @@ func TestSetupSendRules_BuildSignersVecErr(t *testing.T) {
 }
 
 func TestSetupSendRules_ContextRuleNameTooLong(t *testing.T) {
+	// freighter (not passkey): a passkey with a non-empty keyDataHex now
+	// resolves "missing" via FindRuleForSigner, which never reaches the
+	// build phase this test targets — see
+	// TestSetupSendRules_DiscoverContextRuleErr.
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, ""))
@@ -112,23 +120,24 @@ func TestSetupSendRules_ContextRuleNameTooLong(t *testing.T) {
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "a-very-long-asset-identifier",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "a-very-long-asset-identifier", ContractID: assetContractAddr}})
 	require.Error(t, err)
 }
 
 func TestSetupSendRules_InvalidAssetContractID(t *testing.T) {
+	// freighter (not passkey — see TestSetupSendRules_ContextRuleNameTooLong).
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, ""))
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "USDC",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: "not-a-valid-contract"}})
 	require.Error(t, err)
 }
@@ -140,6 +149,7 @@ func TestSetupSendRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 	_, err := xdr.MarshalBase64(authEntry)
 	require.NoError(t, err)
 
+	// freighter (not passkey — see TestSetupSendRules_DiscoverContextRuleErr):
 	// DiscoverContextRule(asset) succeeds (count+getRule=default, no match),
 	// but the next call (rulesCount inside DiscoverDefaultContextRule) fails.
 	rpc := &errAfterNFakeRPC{
@@ -154,9 +164,9 @@ func TestSetupSendRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 
 	_, err = svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "USDC",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discover default context rule")
@@ -166,6 +176,7 @@ func TestSetupSendRules_ResolveAdminBundlerDelegatedAuthErr(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
 
+	// freighter (not passkey — see TestSetupSendRules_DiscoverContextRuleErr):
 	// DiscoverContextRule(asset): count+getRule (2 calls). DiscoverDefaultContextRule:
 	// count+getRule (2 more calls). resolveAdminBundlerDelegatedAuth's RuleAtID
 	// (5th call) then fails.
@@ -182,9 +193,9 @@ func TestSetupSendRules_ResolveAdminBundlerDelegatedAuthErr(t *testing.T) {
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "USDC",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch admin context rule")
@@ -203,11 +214,12 @@ func TestSetupSendRules_BuildSetupAuthTransactionErr(t *testing.T) {
 	}
 	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
 
+	// freighter (not passkey — see TestSetupSendRules_DiscoverContextRuleErr).
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
+		SignerType:          "freighter",
 		AssetID:             "USDC",
-		KeyDataHex:          "aabbcc",
+		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch bundler sequence")
@@ -267,6 +279,10 @@ func TestSetupSwapRules_PhantomMissingPublicKeyHex(t *testing.T) {
 }
 
 func TestSetupSwapRules_DiscoverDefaultContextRuleErr(t *testing.T) {
+	// freighter (not passkey): a passkey with a non-empty keyDataHex now
+	// resolves via FindRuleForSigner instead of DiscoverDefaultContextRule
+	// (see LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6) — freighter still
+	// exercises DiscoverDefaultContextRule's own error propagation unchanged.
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
 			return nil, errors.New("rpc down")
@@ -277,14 +293,15 @@ func TestSetupSwapRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "passkey",
-		KeyDataHex:          "aabbcc",
+		SignerType:          "freighter",
+		GAddress:            testGAddress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "discover default context rule")
 }
 
 func TestSetupSwapRules_RuleAtIDErr(t *testing.T) {
+	// freighter (not passkey — see TestSetupSwapRules_DiscoverDefaultContextRuleErr).
 	rpc := &errAfterNFakeRPC{
 		t:         t,
 		responses: []*xdr.ScVal{scValPtr(scU32(1)), scValPtr(buildTestRuleScVal("default", true, ""))},
@@ -295,8 +312,8 @@ func TestSetupSwapRules_RuleAtIDErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "passkey",
-		KeyDataHex:          "aabbcc",
+		SignerType:          "freighter",
+		GAddress:            testGAddress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch default context rule")
@@ -339,6 +356,11 @@ func TestSetupSwapRules_VerifierNotConfigured(t *testing.T) {
 }
 
 func TestSetupSwapRules_DecodeKeyDataErr(t *testing.T) {
+	// phantom (not passkey): a passkey with a non-empty keyDataHex now
+	// resolves via FindRuleForSigner *before* ever hex-decoding it (see
+	// LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6), so a garbage passkey
+	// keyDataHex now surfaces as ErrSignerRuleNotFound, not a decode error —
+	// phantom's PublicKeyHex still exercises the same hex.DecodeString call.
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t,
 		scU32(1), buildTestRuleScVal("default", true, ""),
@@ -348,18 +370,43 @@ func TestSetupSwapRules_DecodeKeyDataErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
-		KeyDataHex:          "not-hex!!",
+		SignerType:          "phantom",
+		PublicKeyHex:        "not-hex!!",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode key data")
 }
 
+func TestSetupSwapRules_PasskeyGarbageKeyDataNotAuthorized(t *testing.T) {
+	// A rule that already has a *different* real passkey signer: an
+	// unmatched keyDataHex must refuse rather than add_signer alongside it
+	// (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6) — see
+	// TestSetupSwapRules_DecodeKeyDataErr for the "no signer at all yet"
+	// case, which still falls through to a decode error instead.
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+	rule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa, 0xbb}))
+	contextRules := newContextRulesService(t,
+		scU32(1), rule, rule, // DiscoverDefaultContextRule + RuleAtID refetch
+		scU32(1), rule, // FindRuleForSigner
+	)
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		KeyDataHex:          "not-hex!!",
+	})
+	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
+}
+
 func TestSetupSwapRules_ExternalSignerBadVerifier(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
+	rule := buildTestRuleScVal("default", true, "")
 	contextRules := newContextRulesService(t,
-		scU32(1), buildTestRuleScVal("default", true, ""),
-		buildTestRuleScVal("default", true, ""),
+		scU32(1), rule, rule, // DiscoverDefaultContextRule + RuleAtID refetch
+		scU32(1), rule, // FindRuleForSigner
 	)
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 	svc.webauthnVerifierAddress = "not-a-valid-address"
@@ -408,6 +455,9 @@ func TestSetupSwapRules_UnsupportedSignerType(t *testing.T) {
 }
 
 func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
+	// phantom (not passkey — see TestSetupSwapRules_DecodeKeyDataErr): a
+	// passkey now short-circuits to alreadyConfigured/ErrSignerRuleNotFound
+	// before ever reaching buildSetupAuthTransaction.
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t,
 		scU32(1), buildTestRuleScVal("default", true, ""),
@@ -420,8 +470,8 @@ func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "passkey",
-		KeyDataHex:          "aabbcc",
+		SignerType:          "phantom",
+		PublicKeyHex:        strings.Repeat("ab", 32),
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch bundler sequence")

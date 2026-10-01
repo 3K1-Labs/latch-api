@@ -281,6 +281,7 @@ func TestAttachSignerFinish_Success(t *testing.T) {
 
 	body := validFinishRegistrationBody()
 	body["displayName"] = "Backup (Latch 2)"
+	body["callerCredentialId"] = "cred-caller"
 	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(body)), "user-1")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -294,13 +295,22 @@ func TestAttachSignerFinish_Success(t *testing.T) {
 	assert.Equal(t, "Backup (Latch 2)", signerStub.gotAttachLabel)
 }
 
+// validAttachSignerBody is validFinishRegistrationBody plus the proved
+// caller credential AttachSignerFinish now requires
+// (LATCH_BACKEND_SIGNER_IDENTITY.md §3).
+func validAttachSignerBody() map[string]any {
+	body := validFinishRegistrationBody()
+	body["callerCredentialId"] = "cred-caller"
+	return body
+}
+
 func TestAttachSignerFinish_NotASigner(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwns: false}
 	h := NewWebAuthnHandler(&stubWebauthn{}, &stubSmartAccount{}, &stubAccounts{}, &stubCredentialIndex{}, signerStub, &stubSessionIssuer{}, &stubAudit{}, testCfg(), false)
 	r := gin.New()
 	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
 
-	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validAttachSignerBody())), "user-1")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -313,7 +323,7 @@ func TestAttachSignerFinish_UnknownAccount(t *testing.T) {
 	r := gin.New()
 	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
 
-	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validAttachSignerBody())), "user-1")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -327,7 +337,7 @@ func TestAttachSignerFinish_VerificationFailure(t *testing.T) {
 	r := gin.New()
 	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
 
-	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validAttachSignerBody())), "user-1")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -341,7 +351,7 @@ func TestAttachSignerFinish_AttachError(t *testing.T) {
 	r := gin.New()
 	r.POST("/accounts/:smartAccountAddress/signers/passkey/register", h.AttachSignerFinish)
 
-	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validFinishRegistrationBody())), "user-1")
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/accounts/CADDR/signers/passkey/register", postJSONBody(validAttachSignerBody())), "user-1")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

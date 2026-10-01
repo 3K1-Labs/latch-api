@@ -182,3 +182,90 @@ func TestGetOrCreate_CommitError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "commit")
 }
+
+// ── proved credentials (LATCH_BACKEND_SIGNER_IDENTITY.md §2) ────────────────
+
+func TestReplaceProvedCredential_ClearsThenInserts(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	sid := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM webapp.session_proved_credentials").
+		WithArgs(sid, "cred-b").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO webapp.session_proved_credentials").
+		WithArgs(sid, "cred-b", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := svc.ReplaceProvedCredential(context.Background(), sid.String(), "cred-b")
+	require.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestReplaceProvedCredential_InvalidSessionID(t *testing.T) {
+	svc, _ := newMockSessionService(t)
+	err := svc.ReplaceProvedCredential(context.Background(), "not-a-uuid", "cred-b")
+	require.Error(t, err)
+}
+
+func TestReplaceProvedCredential_DeleteError(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	sid := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM webapp.session_proved_credentials").WillReturnError(errors.New("db down"))
+	mock.ExpectRollback()
+
+	err := svc.ReplaceProvedCredential(context.Background(), sid.String(), "cred-b")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "clear prior proved credentials")
+}
+
+func TestAddProvedCredential_Success(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	sid := uuid.New()
+	mock.ExpectExec("INSERT INTO webapp.session_proved_credentials").
+		WithArgs(sid, "cred-b", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := svc.AddProvedCredential(context.Background(), sid.String(), "cred-b")
+	require.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestProvedCredentials_ReturnsSet(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	sid := uuid.New()
+	mock.ExpectQuery("SELECT credential_id FROM webapp.session_proved_credentials").
+		WithArgs(sid).WillReturnRows(sqlmock.NewRows([]string{"credential_id"}).AddRow("cred-a").AddRow("cred-b"))
+
+	ids, err := svc.ProvedCredentials(context.Background(), sid.String())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"cred-a", "cred-b"}, ids)
+}
+
+func TestHasProvedCredential_True(t *testing.T) {
+	svc, mock := newMockSessionService(t)
+	sid := uuid.New()
+	mock.ExpectQuery("SELECT EXISTS").WithArgs(sid, "cred-a").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	ok, err := svc.HasProvedCredential(context.Background(), sid.String(), "cred-a")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestHasProvedCredential_EmptyInputsAreNeverProved(t *testing.T) {
+	svc, _ := newMockSessionService(t)
+
+	ok, err := svc.HasProvedCredential(context.Background(), "", "cred-a")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	ok, err = svc.HasProvedCredential(context.Background(), uuid.New().String(), "")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestHasProvedCredential_MalformedSessionID(t *testing.T) {
+	svc, _ := newMockSessionService(t)
+	ok, err := svc.HasProvedCredential(context.Background(), "not-a-uuid", "cred-a")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}

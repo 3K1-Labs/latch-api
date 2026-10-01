@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -98,6 +99,14 @@ type BuildSendInput struct {
 	ContractID          string
 	Recipient           string
 	Amount              string // human-readable decimal
+	// KeyDataHex identifies which passkey is about to sign, for accounts
+	// with a backup signer (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md) — each
+	// backup gets its own dedicated Default context rule (see AddSigner),
+	// so the plain "first Default rule" discovery would bind the
+	// transaction to the wrong rule if the backup passkey signs. Empty
+	// (the common case: no backup signer configured, or SignerType isn't
+	// "passkey") keeps today's exact behavior.
+	KeyDataHex string
 }
 
 type BuildSendResult struct {
@@ -123,9 +132,29 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 		return BuildSendResult{}, fmt.Errorf("parse amount: %w", err)
 	}
 
-	contextRuleID, discovery, err := s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
-	if err != nil {
-		return BuildSendResult{}, fmt.Errorf("discover context rule: %w", err)
+	// A passkey that identifies which key is signing always resolves via
+	// FindRuleForSigner, which never returns a rule that doesn't list this
+	// exact key — this is what lets a backup signer's send bind to its own
+	// dedicated rule instead of the original owner's CallContract/Default
+	// rule (see BuildSendInput.KeyDataHex and LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md).
+	// Every other case (no keyDataHex, or a non-passkey signer) keeps
+	// today's exact behavior.
+	var contextRuleID uint32
+	var discovery ContextRuleDiscovery
+	if in.SignerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, ruleDiscovery, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex, asset.ContractID)
+		if err != nil {
+			return BuildSendResult{}, fmt.Errorf("find rule for signer: %w", err)
+		}
+		if !ok {
+			return BuildSendResult{}, ErrSignerRuleNotFound
+		}
+		contextRuleID, discovery = ruleID, ruleDiscovery
+	} else {
+		contextRuleID, discovery, err = s.contextRules.DiscoverContextRule(ctx, in.SmartAccountAddress, asset.ContractID)
+		if err != nil {
+			return BuildSendResult{}, fmt.Errorf("discover context rule: %w", err)
+		}
 	}
 
 	fromVal, err := scAddress(in.SmartAccountAddress)
@@ -609,10 +638,53 @@ type PrepareSignInput struct {
 	UnsignedTxXdr       string
 	SignerType          string // "passkey" | "phantom" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
+	// KeyDataHex identifies which passkey is about to sign — see
+	// BuildSendInput.KeyDataHex's doc comment.
+	KeyDataHex string
 }
 
 type PrepareSignResult struct {
 	BuildAuthTransactionResult
+}
+
+// ErrPrepareSignNoContextRule is returned when PrepareSign finds no
+// Default-variant context rule configured for the smart account — the
+// client must run setup-send-rules or setup-swap-rules before retrying.
+var ErrPrepareSignNoContextRule = errors.New("no default context rule configured for this smart account")
+
+// ErrPrepareSignSignerMismatch is returned when a Default context rule
+// exists but doesn't authorize the requested signer type/address — the
+// client must re-run setup-send-rules/setup-swap-rules to reconfigure it.
+var ErrPrepareSignSignerMismatch = errors.New("default context rule does not authorize the requested signer")
+
+// ErrPrepareSignValidation is returned for prepare-sign request validation
+// failures (invalid XDR, wrong operation shape) — distinct from missing
+// rules, signer mismatches, or unexpected failures.
+var ErrPrepareSignValidation = errors.New("prepare-sign validation error")
+
+// validatePrepareSignSignerAuthorization checks that the smart account's
+// Default context rule plausibly authorizes the requested signer type
+// before PrepareSign spends a simulation round trip on it. This is a
+// best-effort pre-check for a clearer error — the smart account contract
+// itself remains the authority that enforces this at submit time. Mirrors
+// BuildSwap's validateContextRuleForSignerType against the same Default
+// rule concept, with prepare-sign-neutral wording since this endpoint isn't
+// swap-specific.
+func validatePrepareSignSignerAuthorization(rule ContextRuleSummary, signerType, signerG, bundlerPublicKey string) error {
+	if signerG != "" && signerG == bundlerPublicKey {
+		return fmt.Errorf("%w: signerG must be the user's G-address, not the bundler fee-payer", ErrPrepareSignValidation)
+	}
+	switch signerType {
+	case "passkey", "phantom":
+		if !ruleHasExternalSigner(rule) {
+			return fmt.Errorf("%w: default context rule has no External passkey signer configured; run setup-send-rules or setup-swap-rules first", ErrPrepareSignSignerMismatch)
+		}
+	case "freighter":
+		if !ruleHasDelegatedSignerG(rule, signerG) {
+			return fmt.Errorf("%w: default context rule does not authorize signerG %s; run setup-send-rules or setup-swap-rules with your Freighter G-address", ErrPrepareSignSignerMismatch, signerG)
+		}
+	}
+	return nil
 }
 
 // PrepareSign simulates a client-built unsigned transaction (e.g. a
@@ -626,15 +698,53 @@ type PrepareSignResult struct {
 func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInput) (PrepareSignResult, error) {
 	var envelope xdr.TransactionEnvelope
 	if err := xdr.SafeUnmarshalBase64(in.UnsignedTxXdr, &envelope); err != nil {
-		return PrepareSignResult{}, fmt.Errorf("decode unsignedTxXdr: %w", err)
+		return PrepareSignResult{}, fmt.Errorf("%w: decode unsignedTxXdr: %s", ErrPrepareSignValidation, err)
 	}
 	if envelope.V1 == nil || len(envelope.V1.Tx.Operations) != 1 {
-		return PrepareSignResult{}, fmt.Errorf("expected a single-operation transaction envelope")
+		return PrepareSignResult{}, fmt.Errorf("%w: expected a single-operation transaction envelope", ErrPrepareSignValidation)
 	}
 
-	contextRuleID, discovery, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
-	if err != nil {
-		return PrepareSignResult{}, fmt.Errorf("discover context rule: %w", err)
+	// See BuildSend's identical branch: a passkey that identifies its key
+	// resolves via FindRuleForSigner, which never returns a rule that
+	// doesn't list it — no silent fallback to rule 0 for a backup signer.
+	var contextRuleID uint32
+	var discovery ContextRuleDiscovery
+	var rule ContextRuleSummary
+	if in.SignerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, ruleDiscovery, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex, "")
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("find rule for signer: %w", err)
+		}
+		if !ok {
+			return PrepareSignResult{}, ErrSignerRuleNotFound
+		}
+		r, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, ruleID)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("fetch context rule: %w", err)
+		}
+		if !ruleOK {
+			return PrepareSignResult{}, fmt.Errorf("%w: context rule %d no longer exists", ErrPrepareSignNoContextRule, ruleID)
+		}
+		contextRuleID, discovery, rule = ruleID, ruleDiscovery, r
+	} else {
+		id, d, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("discover context rule: %w", err)
+		}
+		if d == ContextRuleDiscoveryFallback {
+			return PrepareSignResult{}, fmt.Errorf("%w: no Default context rule found for this smart account", ErrPrepareSignNoContextRule)
+		}
+		r, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, id)
+		if err != nil {
+			return PrepareSignResult{}, fmt.Errorf("fetch context rule: %w", err)
+		}
+		if !ruleOK {
+			return PrepareSignResult{}, fmt.Errorf("%w: default context rule %d no longer exists", ErrPrepareSignNoContextRule, id)
+		}
+		contextRuleID, discovery, rule = id, d, r
+	}
+	if err := validatePrepareSignSignerAuthorization(rule, in.SignerType, in.SignerG, s.bundler.PublicKey()); err != nil {
+		return PrepareSignResult{}, err
 	}
 
 	sim, err := s.soroban.SimulateTransaction(ctx, s.rpcURL, in.UnsignedTxXdr, service.RPCResourceConfig{})
@@ -714,7 +824,7 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 	}
 	op := envelope.V1.Tx.Operations[0]
 	if op.Body.Type != xdr.OperationTypeInvokeHostFunction || op.Body.InvokeHostFunctionOp == nil {
-		return PrepareSignResult{}, fmt.Errorf("expected an invoke host function operation")
+		return PrepareSignResult{}, fmt.Errorf("%w: expected an invoke host function operation", ErrPrepareSignValidation)
 	}
 	op.Body.InvokeHostFunctionOp.Auth = entries
 	envelope.V1.Tx.Ext = xdr.TransactionExt{V: 1, SorobanData: &sorobanData}

@@ -187,10 +187,13 @@ type BuildSwapInput struct {
 	SignerType          string // "passkey" | "phantom" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
 	RouterContractID    string // defaults to the well-known testnet Aquarius router
-	SwapChainXdr        string // base64 ScVal from Aquarius find-path
-	TokenInContractID   string
-	AmountInRaw         string // raw u128 minimal-unit string
-	AmountOutMinRaw     string // raw u128 minimal-unit string
+	// KeyDataHex identifies which passkey is about to sign, for accounts
+	// with a backup signer — see BuildSendInput.KeyDataHex's doc comment.
+	KeyDataHex        string
+	SwapChainXdr      string // base64 ScVal from Aquarius find-path
+	TokenInContractID string
+	AmountInRaw       string // raw u128 minimal-unit string
+	AmountOutMinRaw   string // raw u128 minimal-unit string
 }
 
 // BuildSwapResult is the outcome of BuildSwap.
@@ -226,9 +229,24 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 
 	routerID := resolveRouterContractID(in.RouterContractID)
 
-	contextRuleID, _, err := s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
-	if err != nil {
-		return BuildSwapResult{}, fmt.Errorf("discover default context rule: %w", err)
+	// See BuildSend's identical branch: a passkey that identifies its key
+	// resolves via FindRuleForSigner, which never returns a rule that
+	// doesn't list it — no silent fallback to rule 0 for a backup signer.
+	var contextRuleID uint32
+	if in.SignerType == "passkey" && in.KeyDataHex != "" {
+		ruleID, _, ok, err := s.contextRules.FindRuleForSigner(ctx, in.SmartAccountAddress, s.webauthnVerifierAddress, in.KeyDataHex, "")
+		if err != nil {
+			return BuildSwapResult{}, fmt.Errorf("find rule for signer: %w", err)
+		}
+		if !ok {
+			return BuildSwapResult{}, ErrSignerRuleNotFound
+		}
+		contextRuleID = ruleID
+	} else {
+		contextRuleID, _, err = s.contextRules.DiscoverDefaultContextRule(ctx, in.SmartAccountAddress)
+		if err != nil {
+			return BuildSwapResult{}, fmt.Errorf("discover default context rule: %w", err)
+		}
 	}
 	swapRule, ruleOK, err := s.contextRules.RuleAtID(ctx, in.SmartAccountAddress, contextRuleID)
 	if err != nil {

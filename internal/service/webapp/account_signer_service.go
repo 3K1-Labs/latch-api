@@ -56,47 +56,37 @@ func (s *AccountSignerService) AttachCredential(ctx context.Context, smartAccoun
 	return nil
 }
 
-// CallerOwnsSignerCredential reports whether userID owns a WebAuthn
-// credential already recorded as a signer of smartAccountAddress — the
-// account's original credential or a previously attached backup signer.
-// Gates add-signer/remove-signer build so an unauthenticated party can't
-// shape a transaction against someone else's account
-// (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R12).
-func (s *AccountSignerService) CallerOwnsSignerCredential(ctx context.Context, userID, smartAccountAddress string) (bool, error) {
+// IsSignerOfAccount reports whether credentialID is itself recorded as a
+// signer of smartAccountAddress — the account's original credential or a
+// previously attached backup signer. Gates add-signer/remove-signer build so
+// a session that hasn't proved a signer credential on this account can't
+// shape a transaction against it (LATCH_BACKEND_SIGNER_IDENTITY.md §3,
+// superseding the cookie-user-id check LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md
+// R12 originally specified).
+func (s *AccountSignerService) IsSignerOfAccount(ctx context.Context, credentialID, smartAccountAddress string) (bool, error) {
 	credentialIDs, err := s.signerCredentialIDs(ctx, smartAccountAddress)
 	if err != nil {
 		return false, err
 	}
-	return s.anyOwnedByUser(ctx, userID, credentialIDs)
+	for _, id := range credentialIDs {
+		if id == credentialID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
-// CallerHasOtherSignerCredential reports whether userID owns a signer
-// credential on smartAccountAddress other than excludingCredentialID —
-// used to block removing the caller's own last signer (R8).
-func (s *AccountSignerService) CallerHasOtherSignerCredential(ctx context.Context, userID, smartAccountAddress, excludingCredentialID string) (bool, error) {
+// HasOtherSignerCredential reports whether smartAccountAddress has a signer
+// other than excludingCredentialID — used to block removing the caller's own
+// last signer (R8), keyed on the specific credential the caller proved this
+// request with, not every credential a cookie user happens to own.
+func (s *AccountSignerService) HasOtherSignerCredential(ctx context.Context, smartAccountAddress, excludingCredentialID string) (bool, error) {
 	credentialIDs, err := s.signerCredentialIDs(ctx, smartAccountAddress)
 	if err != nil {
 		return false, err
 	}
-	remaining := make([]string, 0, len(credentialIDs))
 	for _, id := range credentialIDs {
 		if id != excludingCredentialID {
-			remaining = append(remaining, id)
-		}
-	}
-	return s.anyOwnedByUser(ctx, userID, remaining)
-}
-
-func (s *AccountSignerService) anyOwnedByUser(ctx context.Context, userID string, credentialIDs []string) (bool, error) {
-	for _, credID := range credentialIDs {
-		cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credID)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return false, fmt.Errorf("get webauthn credential %s: %w", credID, err)
-		}
-		if cred.UserID.String() == userID {
 			return true, nil
 		}
 	}
@@ -128,25 +118,26 @@ func (s *AccountSignerService) signerCredentialIDs(ctx context.Context, smartAcc
 	return ids, nil
 }
 
-// MarkSignerOnChain records the signer_id add_signer returned. Not
-// best-effort (R6): the caller must retry on failure rather than proceed as
-// if the signer were indexed.
-func (s *AccountSignerService) MarkSignerOnChain(ctx context.Context, smartAccountAddress, credentialID string, signerID uint32) error {
-	if err := s.q.SetAccountSignerOnChainID(ctx, db.SetAccountSignerOnChainIDParams{
+// MarkSignerContextRule records the dedicated context rule id
+// add_context_rule returned for this backup signer (see
+// TransactionService.AddSigner). Not best-effort (R6): the caller must
+// retry on failure rather than proceed as if the signer were indexed.
+func (s *AccountSignerService) MarkSignerContextRule(ctx context.Context, smartAccountAddress, credentialID string, contextRuleID uint32) error {
+	if err := s.q.SetAccountSignerContextRuleID(ctx, db.SetAccountSignerContextRuleIDParams{
 		SmartAccountAddress: smartAccountAddress,
 		CredentialID:        sql.NullString{String: credentialID, Valid: true},
-		SignerID:            sql.NullInt32{Int32: int32(signerID), Valid: true},
+		ContextRuleID:       sql.NullInt32{Int32: int32(contextRuleID), Valid: true},
 	}); err != nil {
-		return fmt.Errorf("mark signer %s on-chain for %s: %w", credentialID, smartAccountAddress, err)
+		return fmt.Errorf("mark signer %s context rule for %s: %w", credentialID, smartAccountAddress, err)
 	}
 	return nil
 }
 
-// GetSignerID returns the recorded on-chain signer_id for credentialID on
+// GetSignerContextRuleID returns credentialID's dedicated context rule id on
 // smartAccountAddress. ok is false when the row exists but hasn't been
-// confirmed on-chain yet (signer_id NULL) — remove_signer must fail closed
-// in that case (R9) rather than guess from position.
-func (s *AccountSignerService) GetSignerID(ctx context.Context, smartAccountAddress, credentialID string) (signerID uint32, ok bool, err error) {
+// confirmed on-chain yet (context_rule_id NULL) — remove_signer must fail
+// closed in that case (R9) rather than guess from position.
+func (s *AccountSignerService) GetSignerContextRuleID(ctx context.Context, smartAccountAddress, credentialID string) (contextRuleID uint32, ok bool, err error) {
 	row, err := s.q.GetAccountSignerByCredential(ctx, db.GetAccountSignerByCredentialParams{
 		SmartAccountAddress: smartAccountAddress,
 		CredentialID:        sql.NullString{String: credentialID, Valid: true},
@@ -157,10 +148,10 @@ func (s *AccountSignerService) GetSignerID(ctx context.Context, smartAccountAddr
 	if err != nil {
 		return 0, false, fmt.Errorf("get account signer: %w", err)
 	}
-	if !row.SignerID.Valid {
+	if !row.ContextRuleID.Valid {
 		return 0, false, nil
 	}
-	return uint32(row.SignerID.Int32), true, nil
+	return uint32(row.ContextRuleID.Int32), true, nil
 }
 
 // RemoveCredential deletes the account_signers row for credentialID on

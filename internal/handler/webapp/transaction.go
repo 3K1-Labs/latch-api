@@ -130,6 +130,11 @@ type buildSendRequest struct {
 	Recipient           string         `json:"recipient" binding:"required"`
 	Amount              flexibleAmount `json:"amount" binding:"required"`
 	SignerG             string         `json:"signerG,omitempty"`
+	// KeyDataHex identifies which passkey will sign — required to pick the
+	// right context rule once the account has a backup signer (each gets
+	// its own dedicated rule; see webapp.TransactionService.AddSigner).
+	// Optional and ignored for accounts with no backup signer.
+	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
 func assetCatalogConfig(cfg *config.Config, network webapp.Network) webapp.AssetCatalogConfig {
@@ -186,11 +191,16 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		ContractID:          req.ContractID,
 		Recipient:           req.Recipient,
 		Amount:              string(req.Amount),
+		KeyDataHex:          req.KeyDataHex,
 	}, catalog)
 	if err != nil {
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
+			return
+		}
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
 		}
 		slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
@@ -432,6 +442,9 @@ type prepareSignRequest struct {
 	SignerType          string `json:"signerType,omitempty"`
 	SignerG             string `json:"signerG,omitempty"`
 	FeePayerG           string `json:"feePayerG,omitempty"`
+	// KeyDataHex identifies which passkey will sign — see
+	// buildSendRequest.KeyDataHex's doc comment.
+	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
 // PrepareSign godoc
@@ -466,10 +479,10 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		UnsignedTxXdr:       req.UnsignedTxXdr,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
+		KeyDataHex:          req.KeyDataHex,
 	})
 	if err != nil {
-		slog.Error("prepare sign transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to prepare transaction")
+		prepareSignErrorResponse(c, req.SmartAccountAddress, err)
 		return
 	}
 
@@ -552,6 +565,10 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
+			return
+		}
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
 		}
 		slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
@@ -642,6 +659,10 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		GAddress:            req.GAddress,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
+			return
+		}
 		slog.Error("build setup-swap-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build swap setup transaction")
 		return
@@ -780,11 +801,14 @@ type buildSwapRequest struct {
 	SignerType          string `json:"signerType" binding:"required"`
 	SignerG             string `json:"signerG,omitempty"`
 	RouterContractID    string `json:"routerContractId,omitempty"`
-	SwapChainXdr        string `json:"swapChainXdr" binding:"required"`
-	TokenInContractID   string `json:"tokenInContractId" binding:"required"`
-	AmountInRaw         string `json:"amountInRaw" binding:"required"`
-	AmountOutMinRaw     string `json:"amountOutMinRaw" binding:"required"`
-	ProviderID          string `json:"providerId,omitempty"`
+	// KeyDataHex identifies which passkey will sign — see
+	// buildSendRequest.KeyDataHex's doc comment.
+	KeyDataHex        string `json:"keyDataHex,omitempty"`
+	SwapChainXdr      string `json:"swapChainXdr" binding:"required"`
+	TokenInContractID string `json:"tokenInContractId" binding:"required"`
+	AmountInRaw       string `json:"amountInRaw" binding:"required"`
+	AmountOutMinRaw   string `json:"amountOutMinRaw" binding:"required"`
+	ProviderID        string `json:"providerId,omitempty"`
 }
 
 // BuildSwap godoc
@@ -829,6 +853,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
 		RouterContractID:    req.RouterContractID,
+		KeyDataHex:          req.KeyDataHex,
 		SwapChainXdr:        req.SwapChainXdr,
 		TokenInContractID:   req.TokenInContractID,
 		AmountInRaw:         req.AmountInRaw,
@@ -875,6 +900,8 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSignerRuleNotFound):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 	case errors.Is(err, webapp.ErrSwapSignerMismatch):
 		webappx.Success(c, http.StatusConflict, gin.H{
 			"error":           err.Error(),
@@ -886,5 +913,32 @@ func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err erro
 	default:
 		slog.Error("build swap transaction", "smartAccountAddress", smartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to build swap transaction")
+	}
+}
+
+// prepareSignErrorResponse maps a PrepareSign service-layer sentinel error
+// to the correct HTTP status and error code, same pattern as
+// buildSwapErrorResponse: a missing Default context rule or a signer
+// mismatch come back as 409s the client can act on (re-run setup-send-rules
+// or setup-swap-rules), a request/XDR validation failure comes back as 400,
+// and anything unrecognized falls back to a generic 500 with no internal
+// detail leaked, per security.md.
+func prepareSignErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	switch {
+	case errors.Is(err, webapp.ErrSignerRuleNotFound):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
+	case errors.Is(err, webapp.ErrPrepareSignNoContextRule):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrNoContextRule, err.Error())
+	case errors.Is(err, webapp.ErrPrepareSignSignerMismatch):
+		webappx.Success(c, http.StatusConflict, gin.H{
+			"error":           err.Error(),
+			"code":            webappx.ErrSignerMismatch,
+			"suggestedAction": "reconfigure_default_rule",
+		})
+	case errors.Is(err, webapp.ErrPrepareSignValidation):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+	default:
+		slog.Error("prepare sign transaction", "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to prepare transaction")
 	}
 }

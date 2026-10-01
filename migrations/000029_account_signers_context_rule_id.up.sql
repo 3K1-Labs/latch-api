@@ -1,0 +1,12 @@
+-- Backup passkey signers now get their own dedicated Default context rule
+-- (see setup_rules_service.go's AddSigner) instead of being added as a
+-- second signer on the account's existing rule via add_signer: a rule with
+-- more than one signer and no policy requires ALL of them to co-sign
+-- (do_check_auth's get_validated_context_by_id), which silently turned a
+-- 1-of-1 wallet into a 2-of-2 one instead of the intended "either passkey
+-- works alone".
+--
+-- context_rule_id is the id add_context_rule returns for that dedicated
+-- rule. signer_id (000028) is superseded and no longer written; left in
+-- place rather than dropped.
+ALTER TABLE webapp.account_signers ADD COLUMN context_rule_id INTEGER;
