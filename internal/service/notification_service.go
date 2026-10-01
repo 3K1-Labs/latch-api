@@ -93,7 +93,7 @@ func (s *NotificationService) Notify(ctx context.Context, userID string, rec Not
 		slog.Error("list push tokens for notification", "notificationID", id, "err", err)
 		return nil
 	}
-	s.dispatchPush(tokens, rec.Title, rec.Body, rec.Type, id.String())
+	s.dispatchPush(tokens, rec.Title, rec.Body, rec.Type, id.String()) //nolint:contextcheck // deliberately detached: the push must outlive and survive cancellation of the request context that triggered it, exactly like CosignHandler.notifyQueue
 	return nil
 }
 
