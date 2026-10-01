@@ -80,7 +80,7 @@ func newRelayRouter(t *testing.T, testnet, mainnet transactionRelayService) *gin
 
 func newRelayRouterWithPolicy(t *testing.T, testnet, mainnet transactionRelayService, policy bundlerPolicyService) *gin.Engine {
 	t.Helper()
-	h := NewTransactionRelayHandler(testnet, mainnet, policy, &stubAudit{})
+	h := NewTransactionRelayHandler(testnet, mainnet, policy, &stubAudit{}, &stubNotification{})
 	r := gin.New()
 	r.POST("/transaction/submit", h.Submit)
 	return r
@@ -208,7 +208,7 @@ func TestTransactionRelay_RoutesToMainnetService(t *testing.T) {
 
 func TestTransactionRelay_BundlerAddress(t *testing.T) {
 	svc := &stubTransactionRelay{bundlerAddress: "GBUNDLER"}
-	h := NewTransactionRelayHandler(svc, nil, &stubBundlerPolicy{}, &stubAudit{})
+	h := NewTransactionRelayHandler(svc, nil, &stubBundlerPolicy{}, &stubAudit{}, &stubNotification{})
 	r := gin.New()
 	r.GET("/transaction/bundler", h.Bundler)
 
@@ -263,4 +263,20 @@ func TestTransactionRelay_PolicyChecksRequestedNetwork(t *testing.T) {
 	assert.Equal(t, 1, policy.calls)
 	assert.Equal(t, "mainnet", policy.gotNet)
 	assert.Equal(t, "AAAA", policy.gotTx)
+}
+
+func TestTransactionRelay_RecordsNotification(t *testing.T) {
+	svc := &stubTransactionRelay{result: webapp.SubmitResult{Hash: "abc123", Status: "SUCCESS"}}
+	notif := &stubNotification{}
+	h := NewTransactionRelayHandler(svc, nil, &stubBundlerPolicy{}, &stubAudit{}, notif)
+	r := gin.New()
+	r.POST("/transaction/submit", h.Submit)
+	entry := validAuthEntryB64(t)
+
+	body := `{"tx_xdr":"AAAA","auth_entries":["` + entry + `"],"network":"testnet"}`
+	w := postRawJSON(t, r, "/transaction/submit", body)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "transaction_relayed", notif.gotRecord.Type)
 }

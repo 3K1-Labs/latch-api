@@ -19,7 +19,7 @@ func newTestAccountSignerHandler(txSvc, txSvcMainnet *stubTransaction, accountSi
 	// proved == nil means every callerCredentialId is treated as proved —
 	// these tests exercise IsSignerOfAccount/HasOtherSignerCredential, not
 	// session-proof itself (see webauthn_test.go for that).
-	return NewAccountSignerHandler(txSvc, mainnet, accountSignerSvc, credentialSvc, webauthnSvc, &stubSessionIssuer{}, &stubAudit{})
+	return NewAccountSignerHandler(txSvc, mainnet, accountSignerSvc, credentialSvc, webauthnSvc, &stubSessionIssuer{}, &stubAudit{}, &stubNotification{})
 }
 
 // ── AddSigner ────────────────────────────────────────────────────────────────
@@ -292,4 +292,44 @@ func TestAccountSignerHandler_ConfirmRemoveSigner_Mismatch(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ── notifications ────────────────────────────────────────────────────────────
+
+func TestAccountSignerHandler_ConfirmAddSigner_RecordsNotification(t *testing.T) {
+	txStub := &stubTransaction{confirmAddSignerID: 9}
+	signerStub := &stubAccountSigner{callerOwns: true}
+	notif := &stubNotification{}
+	h := NewAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{}, &stubSessionIssuer{}, &stubAudit{}, notif)
+	r := gin.New()
+	r.POST("/confirm", h.ConfirmAddSigner)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/confirm", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDR", "callerCredentialId": "cred-caller", "keyDataHex": "aabbcc", "credentialId": "cred-b", "txHash": "deadbeef",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "signer_added", notif.gotRecord.Type)
+}
+
+func TestAccountSignerHandler_ConfirmRemoveSigner_RecordsNotification(t *testing.T) {
+	txStub := &stubTransaction{}
+	signerStub := &stubAccountSigner{callerOwns: true, signerID: 2, signerIDOK: true}
+	notif := &stubNotification{}
+	h := NewAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{keyDataHex: "aabbcc"}, &stubSessionIssuer{}, &stubAudit{}, notif)
+	r := gin.New()
+	r.POST("/confirm", h.ConfirmRemoveSigner)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/confirm", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDR", "callerCredentialId": "cred-caller", "credentialId": "cred-b", "txHash": "deadbeef",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "signer_removed", notif.gotRecord.Type)
 }

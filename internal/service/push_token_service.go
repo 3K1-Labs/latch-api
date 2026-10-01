@@ -78,6 +78,7 @@ func (s *PushTokenService) Delete(ctx context.Context, token string) error {
 
 type PushNotifier interface {
 	NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error
+	Notify(ctx context.Context, tokens []string, title, body string, data map[string]string) error
 }
 
 type ExpoPushNotifier struct {
@@ -89,6 +90,16 @@ func NewExpoPushNotifier() *ExpoPushNotifier {
 }
 
 func (n *ExpoPushNotifier) NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error {
+	return n.Notify(ctx, tokens, "Approval updated", "A shared wallet approval was updated.", map[string]string{
+		"route":      "pending-approval",
+		"queueIndex": queueIndex,
+	})
+}
+
+// Notify sends an arbitrary title/body/data push to every token given, via
+// Expo's push API. Used both by NotifyCosignUpdated above and by the general
+// activity-notification channel (NotificationService).
+func (n *ExpoPushNotifier) Notify(ctx context.Context, tokens []string, title, body string, data map[string]string) error {
 	if len(tokens) == 0 {
 		return nil
 	}
@@ -96,19 +107,16 @@ func (n *ExpoPushNotifier) NotifyCosignUpdated(ctx context.Context, tokens []str
 	for _, tok := range tokens {
 		messages = append(messages, map[string]any{
 			"to":    tok,
-			"title": "Approval updated",
-			"body":  "A shared wallet approval was updated.",
-			"data": map[string]string{
-				"route":      "pending-approval",
-				"queueIndex": queueIndex,
-			},
+			"title": title,
+			"body":  body,
+			"data":  data,
 		})
 	}
-	body, err := json.Marshal(messages)
+	msgBody, err := json.Marshal(messages)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://exp.host/--/api/v2/push/send", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://exp.host/--/api/v2/push/send", bytes.NewReader(msgBody))
 	if err != nil {
 		return err
 	}

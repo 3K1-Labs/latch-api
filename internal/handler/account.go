@@ -20,10 +20,11 @@ import (
 type AccountHandler struct {
 	accountSvc accountService
 	auditSvc   auditService
+	notifSvc   notificationService
 }
 
-func NewAccountHandler(accountSvc accountService, auditSvc auditService) *AccountHandler {
-	return &AccountHandler{accountSvc: accountSvc, auditSvc: auditSvc}
+func NewAccountHandler(accountSvc accountService, auditSvc auditService, notifSvc notificationService) *AccountHandler {
+	return &AccountHandler{accountSvc: accountSvc, auditSvc: auditSvc, notifSvc: notifSvc}
 }
 
 type registerAccountRequest struct {
@@ -235,6 +236,22 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		}
 		return
+	}
+
+	// Funding completion has no dedicated event/webhook — this poll endpoint
+	// is the only place the server observes the transition. dedupe_key =
+	// memoID makes the write (and therefore the push) idempotent, so repeated
+	// polls after completion are free no-ops.
+	if status.Status == "completed" {
+		h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionFundingCompleted), c.ClientIP(), c.Request.UserAgent(), map[string]any{
+			"memo_id": memoID,
+		})
+		if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+			Type: "funding_completed", Title: "Deposit received", Body: "Your deposit has been credited.",
+			DedupeKey: memoID,
+		}); err != nil {
+			slog.Error("record funding completed notification", "userID", userID, "err", err)
+		}
 	}
 
 	forwards := make([]gin.H, 0, len(status.Forwards))

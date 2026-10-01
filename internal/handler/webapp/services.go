@@ -151,3 +151,13 @@ type accountSignerService interface {
 type counterService interface {
 	GetValue(ctx context.Context) (uint32, error)
 }
+
+// notificationService records curated activity events for webapp users
+// in-app only (no push — see internal/service/webapp/notification_service.go).
+type notificationService interface {
+	Notify(ctx context.Context, userID string, rec webapp.NotificationRecord) error
+	List(ctx context.Context, userID, cursor string, limit int) ([]webapp.Notification, string, error)
+	UnreadCount(ctx context.Context, userID string) (int, error)
+	MarkRead(ctx context.Context, userID, notificationID string) error
+	MarkAllRead(ctx context.Context, userID string) error
+}

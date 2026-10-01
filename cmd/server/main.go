@@ -101,6 +101,8 @@ func main() {
 	membershipSvc := service.NewMembershipService(queries)
 	cleanupSvc := service.NewCleanupService(queries, cfg.CosignRetention, cfg.WCKBundleRetention, cfg.WalletMembershipRetention)
 	expoNotifier := service.NewExpoPushNotifier()
+	pushDeviceSvc := service.NewPushDeviceService(queries)
+	notificationSvc := service.NewNotificationService(queries, expoNotifier)
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
@@ -126,6 +128,9 @@ func main() {
 	// rows) — no bundler dependency, unlike AddSigner/RemoveSigner's chain
 	// calls on webappTransactionSvc below, so this is always constructed.
 	webappAccountSignerSvc := webapp.NewAccountSignerService(queries)
+	// In-app only for v1 — no push sender for the webapp/extension (Expo
+	// doesn't serve a browser frontend; see activity-notifications plan).
+	webappNotificationSvc := webapp.NewNotificationService(queries)
 	// latch-relayer is the on-ramp's sole memo allocator, and a relayer is bound
 	// to one Stellar network watching one pool address on it. Pick the
 	// deployment that watches this pool, exactly as AccountService.relayerFor
@@ -235,8 +240,8 @@ func main() {
 	// Handlers
 	authHandler := handler.NewAuthHandler(authSvc, otpSvc, emailSvc, auditSvc)
 	walletAuthHandler := handler.NewWalletAuthHandler(walletAuthSvc, auditSvc)
-	backupHandler := handler.NewBackupHandler(backupSvc, accountSvc, auditSvc)
-	accountHandler := handler.NewAccountHandler(accountSvc, auditSvc)
+	backupHandler := handler.NewBackupHandler(backupSvc, accountSvc, auditSvc, notificationSvc)
+	accountHandler := handler.NewAccountHandler(accountSvc, auditSvc, notificationSvc)
 	// Mobile's smart-account deploy routes. Shares the webapp smart-account
 	// services (which own the bundler keypair) but responds in the /v1
 	// envelope — internal/httpx and internal/webappx must stay independent.
@@ -254,6 +259,7 @@ func main() {
 		handler.TransactionRelayServiceOrNil(webappTransactionSvcMainnet),
 		bundlerPolicy,
 		auditSvc,
+		notificationSvc,
 	)
 	smartAccountHandler := handler.NewSmartAccountHandler(
 		handler.SmartAccountDeployServiceOrNil(webappSmartAccountSvc),
@@ -263,11 +269,13 @@ func main() {
 		passkeyCredentialSvc,
 	)
 	passkeyCredentialHandler := handler.NewPasskeyCredentialHandler(passkeyCredentialSvc, auditSvc)
-	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier)
+	cosignHandler := handler.NewCosignHandler(cosignSvc, auditSvc, pushTokenSvc, expoNotifier, notificationSvc)
 	wckBundleHandler := handler.NewWCKBundleHandler(wckBundleSvc, auditSvc)
 	pushTokenHandler := handler.NewPushTokenHandler(pushTokenSvc, auditSvc)
+	pushDeviceHandler := handler.NewPushDeviceHandler(pushDeviceSvc, auditSvc)
+	notificationHandler := handler.NewNotificationHandler(notificationSvc)
 	membershipHandler := handler.NewMembershipHandler(membershipSvc, auditSvc)
-	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc,
+	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc, notificationSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
 	historyHandler := handler.NewHistoryHandler(historySvc, cfg)
@@ -413,6 +421,22 @@ func main() {
 			push.DELETE("/:token", pushTokenHandler.Delete)
 		}
 
+		devices := v1.Group("/devices")
+		devices.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			devices.POST("", pushDeviceHandler.Register)
+			devices.DELETE("/:token", pushDeviceHandler.Delete)
+		}
+
+		notifications := v1.Group("/notifications")
+		notifications.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
+		{
+			notifications.GET("", notificationHandler.List)
+			notifications.GET("/unread-count", notificationHandler.UnreadCount)
+			notifications.POST("/read-all", notificationHandler.MarkAllRead)
+			notifications.POST("/:id/read", notificationHandler.MarkRead)
+		}
+
 		memberships := v1.Group("/memberships")
 		memberships.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
 		{
@@ -449,7 +473,7 @@ func main() {
 			// session, same reasoning as the transaction group.
 			backupSignerHandler := handler.NewBackupSignerHandler(
 				handler.BackupSignerServiceOrNil(webappTransactionSvc), handler.BackupSignerServiceOrNil(webappTransactionSvcMainnet),
-				passkeyCredentialSvc, auditSvc,
+				passkeyCredentialSvc, auditSvc, notificationSvc,
 			)
 			backupSigner := v1.Group("/smart-account/backup-signer")
 			backupSigner.Use(middleware.RequireAuth(cfg.JWTSecret), authedLimiter)
@@ -539,7 +563,7 @@ func main() {
 		if cfg.WebAppWebAuthnRPID == "" || cfg.WebAppWebAuthnOrigin == "" {
 			slog.Warn("WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN not configured — webapp /webapp/webauthn ceremony routes disabled")
 		} else {
-			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAccountSignerSvc, webappSessionSvc, webappAuditSvc, cfg, crossSiteWebAppCookies)
+			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAccountSignerSvc, webappSessionSvc, webappAuditSvc, webappNotificationSvc, cfg, crossSiteWebAppCookies)
 			webauthnGroup := webappGroup.Group("/webauthn")
 			{
 				webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
@@ -590,7 +614,7 @@ func main() {
 		// TransactionService setup-send-rules/setup-swap-rules use above).
 		webappAccountSignerHandler := webapphandler.NewAccountSignerHandler(
 			webappTransactionSvc, webapphandler.TransactionServiceOrNil(webappTransactionSvcMainnet),
-			webappAccountSignerSvc, passkeyCredentialSvc, webappWebauthnSvc, webappSessionSvc, webappAuditSvc,
+			webappAccountSignerSvc, passkeyCredentialSvc, webappWebauthnSvc, webappSessionSvc, webappAuditSvc, webappNotificationSvc,
 		)
 		smartAccountGroup.POST("/add-signer", webappAccountSignerHandler.AddSigner)
 		smartAccountGroup.POST("/add-signer/confirm", webappAccountSignerHandler.ConfirmAddSigner)
@@ -667,7 +691,7 @@ func main() {
 	webappGroup.POST("/sign-payload", webappSignPayloadHandler.Create)
 	webappGroup.GET("/sign-payload/:payloadRef", webappSignPayloadHandler.Get)
 
-	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, webappAuditSvc, cfg)
+	webappOnRampHandler := webapphandler.NewOnRampHandler(webappOnRampSvc, webappAuditSvc, webappNotificationSvc, cfg)
 	// The on-ramp moves customer money, so session creation gets its own budget.
 	// The global 300/min per-IP limiter is a DoS backstop, not a control for a
 	// money path — and being per-IP it pools everyone behind one NAT together.
@@ -685,6 +709,15 @@ func main() {
 
 	webappCounterHandler := webapphandler.NewCounterHandler(webappCounterSvc)
 	webappGroup.GET("/counter", webappCounterHandler.Get)
+
+	webappNotificationHandler := webapphandler.NewNotificationHandler(webappNotificationSvc)
+	webappNotificationsGroup := webappGroup.Group("/notifications")
+	{
+		webappNotificationsGroup.GET("", webappNotificationHandler.List)
+		webappNotificationsGroup.GET("/unread-count", webappNotificationHandler.UnreadCount)
+		webappNotificationsGroup.POST("/read-all", webappNotificationHandler.MarkAllRead)
+		webappNotificationsGroup.POST("/:id/read", webappNotificationHandler.MarkRead)
+	}
 
 	// Background retention sweep. Stops when ctx is cancelled on shutdown.
 	if cfg.CleanupEnabled {

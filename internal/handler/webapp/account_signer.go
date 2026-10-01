@@ -26,9 +26,10 @@ type AccountSignerHandler struct {
 	webauthnSvc      webauthnService
 	sessionSvc       sessionService
 	auditSvc         auditService
+	notifSvc         notificationService
 }
 
-func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSignerSvc accountSignerService, credentialSvc passkeyCredentialIndexService, webauthnSvc webauthnService, sessionSvc sessionService, auditSvc auditService) *AccountSignerHandler {
+func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSignerSvc accountSignerService, credentialSvc passkeyCredentialIndexService, webauthnSvc webauthnService, sessionSvc sessionService, auditSvc auditService, notifSvc notificationService) *AccountSignerHandler {
 	return &AccountSignerHandler{
 		txSvc:            txSvc,
 		txSvcMainnet:     txSvcMainnet,
@@ -37,6 +38,7 @@ func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSign
 		webauthnSvc:      webauthnSvc,
 		sessionSvc:       sessionSvc,
 		auditSvc:         auditSvc,
+		notifSvc:         notifSvc,
 	}
 }
 
@@ -225,6 +227,11 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		"smartAccountAddress": req.SmartAccountAddress,
 		"contextRuleId":       contextRuleID,
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, webapp.NotificationRecord{
+		Type: "signer_added", Title: "Backup signer added", Body: "A backup passkey signer was added to your wallet.",
+	}); err != nil {
+		slog.Error("record signer added notification", "err", err)
+	}
 
 	webappx.Success(c, http.StatusOK, gin.H{
 		"confirmed":           true,
@@ -405,6 +412,11 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		"smartAccountAddress": req.SmartAccountAddress,
 		"contextRuleId":       contextRuleID,
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, webapp.NotificationRecord{
+		Type: "signer_removed", Title: "Backup signer removed", Body: "A backup passkey signer was removed from your wallet.",
+	}); err != nil {
+		slog.Error("record signer removed notification", "err", err)
+	}
 
 	webappx.Success(c, http.StatusOK, gin.H{"confirmed": true, "contextRuleId": contextRuleID})
 }

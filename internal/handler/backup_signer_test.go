@@ -25,7 +25,7 @@ func newBackupSignerHandler(txSvc *stubBackupSignerConfirm, cred *stubPasskeyCre
 	if audit == nil {
 		audit = &stubAudit{}
 	}
-	return NewBackupSignerHandler(txSvc, nil, cred, audit)
+	return NewBackupSignerHandler(txSvc, nil, cred, audit, &stubNotification{})
 }
 
 func TestBackupSignerHandler_ConfirmAddSigner_Success(t *testing.T) {
@@ -179,4 +179,46 @@ func TestBackupSignerHandler_ConfirmRemoveSigner_DeregisterFailureIsBestEffort(t
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// ── notifications ────────────────────────────────────────────────────────────
+
+func TestBackupSignerHandler_ConfirmAddSigner_RecordsNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewBackupSignerHandler(&stubBackupSignerConfirm{confirmAddSignerID: 7}, nil, &stubPasskeyCredentialRegister{}, &stubAudit{}, notif)
+	r := gin.New()
+	r.POST("/confirm-add", h.ConfirmAddSigner)
+
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/confirm-add", postJSONBody(map[string]any{
+		"smart_account_address": testContractAddr,
+		"key_data_hex":          "aabbcc",
+		"tx_hash":               "deadbeef",
+	})), "uid")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "signer_added", notif.gotRecord.Type)
+	assert.Equal(t, "uid", notif.gotUserID)
+}
+
+func TestBackupSignerHandler_ConfirmRemoveSigner_RecordsNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewBackupSignerHandler(&stubBackupSignerConfirm{}, nil, &stubPasskeyCredentialRegister{}, &stubAudit{}, notif)
+	r := gin.New()
+	r.POST("/confirm-remove", h.ConfirmRemoveSigner)
+
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/confirm-remove", postJSONBody(map[string]any{
+		"smart_account_address": testContractAddr,
+		"signer_id":             2,
+		"key_data_hex":          "aabbcc",
+		"tx_hash":               "deadbeef",
+	})), "uid")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "signer_removed", notif.gotRecord.Type)
 }

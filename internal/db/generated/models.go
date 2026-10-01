@@ -64,6 +64,18 @@ type CredentialBackup struct {
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
 }
 
+type Notification struct {
+	ID        uuid.UUID             `json:"id"`
+	UserID    uuid.UUID             `json:"user_id"`
+	Type      string                `json:"type"`
+	Title     string                `json:"title"`
+	Body      string                `json:"body"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	DedupeKey sql.NullString        `json:"dedupe_key"`
+	ReadAt    sql.NullTime          `json:"read_at"`
+	CreatedAt time.Time             `json:"created_at"`
+}
+
 type PasskeyCredential struct {
 	ID                  uuid.UUID `json:"id"`
 	CredentialID        string    `json:"credential_id"`
@@ -73,6 +85,15 @@ type PasskeyCredential struct {
 	Seq                 int32     `json:"seq"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type PushDevice struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	PushToken string    `json:"push_token"`
+	Platform  string    `json:"platform"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type RefreshToken struct {
@@ -221,6 +242,18 @@ type WebappMultisigProposal struct {
 	Status                     string         `json:"status"`
 	ExecutedTxHash             sql.NullString `json:"executed_tx_hash"`
 	CreatedAt                  int64          `json:"created_at"`
+}
+
+type WebappNotification struct {
+	ID        uuid.UUID             `json:"id"`
+	UserID    uuid.UUID             `json:"user_id"`
+	Type      string                `json:"type"`
+	Title     string                `json:"title"`
+	Body      string                `json:"body"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	DedupeKey sql.NullString        `json:"dedupe_key"`
+	ReadAt    sql.NullTime          `json:"read_at"`
+	CreatedAt time.Time             `json:"created_at"`
 }
 
 type WebappOnRampIntent struct {

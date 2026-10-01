@@ -74,4 +74,8 @@ const (
 	// client must complete authentication/registration/attach for that
 	// credential before retrying, not just resend the same request.
 	ErrSignerNotProved ErrorCode = "signer_not_proved"
+	// ErrNotificationNotFound is returned by the mark-read notification route
+	// when the notification doesn't exist, is already read, or doesn't
+	// belong to the caller.
+	ErrNotificationNotFound ErrorCode = "notification_not_found"
 )

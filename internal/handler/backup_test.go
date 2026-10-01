@@ -31,7 +31,7 @@ func newBackupHandler(backup *stubBackup, account *stubAccount, audit *stubAudit
 	if audit == nil {
 		audit = &stubAudit{}
 	}
-	return NewBackupHandler(backup, account, audit)
+	return NewBackupHandler(backup, account, audit, &stubNotification{})
 }
 
 // validStoreBody returns a well-formed store request body.
@@ -194,6 +194,31 @@ func TestExists_False(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	data := resp["data"].(map[string]any)
 	assert.Equal(t, false, data["exists"])
+}
+
+// ── notifications ────────────────────────────────────────────────────────────
+
+func TestStore_RecordsNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewBackupHandler(&stubBackup{}, &stubAccount{}, &stubAudit{}, notif)
+	r := gin.New()
+	r.POST("/backup", h.Store)
+	r.PUT("/backup", h.Store)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/backup", validStoreBody(testContractAddr)), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "backup_stored", notif.gotRecord.Type)
+
+	w2 := httptest.NewRecorder()
+	req2 := withUserID(httptest.NewRequest(http.MethodPut, "/backup", validStoreBody(testContractAddr)), "uid")
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	require.Equal(t, http.StatusCreated, w2.Code)
+	assert.Equal(t, 2, notif.notifyN)
 }
 
 // ── helper ────────────────────────────────────────────────────────────────────

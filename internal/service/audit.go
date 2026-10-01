@@ -39,6 +39,9 @@ const (
 	ActionPasskeyCredentialLookup AuditAction = "passkey_credential_lookup" //nolint:gosec // G101 false positive: audit action name, not a credential
 	ActionBackupSignerAdded       AuditAction = "backup_signer_added"
 	ActionBackupSignerRemoved     AuditAction = "backup_signer_removed"
+	ActionDeviceRegistered        AuditAction = "device_registered"
+	ActionDeviceUnregistered      AuditAction = "device_unregistered"
+	ActionFundingCompleted        AuditAction = "funding_completed"
 )
 
 type AuditService struct {

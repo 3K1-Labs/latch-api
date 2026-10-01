@@ -152,6 +152,19 @@ type pushNotifier interface {
 	NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error
 }
 
+type notificationService interface {
+	Notify(ctx context.Context, userID string, rec service.NotificationRecord) error
+	List(ctx context.Context, userID, cursor string, limit int) ([]service.Notification, string, error)
+	UnreadCount(ctx context.Context, userID string) (int, error)
+	MarkRead(ctx context.Context, userID, notificationID string) error
+	MarkAllRead(ctx context.Context, userID string) error
+}
+
+type pushDeviceService interface {
+	Register(ctx context.Context, userID, token, platform string) error
+	Delete(ctx context.Context, userID, token string) error
+}
+
 type priceService interface {
 	GetPrices(ctx context.Context, tokens []string, currency string) map[string]*service.PriceData
 }

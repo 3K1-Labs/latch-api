@@ -33,11 +33,12 @@ type WebAuthnHandler struct {
 	accountSignerSvc accountSignerService
 	sessionSvc       sessionService
 	auditSvc         auditService
+	notifSvc         notificationService
 	cfg              *config.Config
 	crossSiteCookies bool
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionService, auditSvc auditService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionService, auditSvc auditService, notifSvc notificationService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
 	return &WebAuthnHandler{
 		webauthnSvc:      webauthnSvc,
 		smartAccountSvc:  smartAccountSvc,
@@ -46,6 +47,7 @@ func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccoun
 		accountSignerSvc: accountSignerSvc,
 		sessionSvc:       sessionSvc,
 		auditSvc:         auditSvc,
+		notifSvc:         notifSvc,
 		cfg:              cfg,
 		crossSiteCookies: crossSiteCookies,
 	}
@@ -384,6 +386,11 @@ func (h *WebAuthnHandler) AttachSignerFinish(c *gin.Context) {
 		"credentialId":        cred.CredentialID,
 		"smartAccountAddress": smartAccountAddress,
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, webapp.NotificationRecord{
+		Type: "signer_attached", Title: "Backup signer attached", Body: "A backup passkey was attached to your wallet.",
+	}); err != nil {
+		slog.Error("record signer attached notification", "err", err)
+	}
 
 	webappx.Success(c, http.StatusOK, gin.H{
 		"credentialId":        cred.CredentialID,
