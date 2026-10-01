@@ -16,6 +16,8 @@ type Querier interface {
 	BackupExists(ctx context.Context, userID uuid.UUID) (bool, error)
 	CancelCosignRequest(ctx context.Context, id uuid.UUID) error
 	ConsumeSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
+	CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int64, error)
+	CountUnreadWebappNotifications(ctx context.Context, userID uuid.UUID) (int64, error)
 	DeleteAccountSignerByCredential(ctx context.Context, arg DeleteAccountSignerByCredentialParams) error
 	// Retention / garbage collection. Background sweeps that bound table growth.
 	// The cosign queue is high-churn (every multisig tx creates a request with a
@@ -29,6 +31,7 @@ type Querier interface {
 	DeleteMultisigDraftMember(ctx context.Context, arg DeleteMultisigDraftMemberParams) error
 	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
 	DeletePasskeyCredential(ctx context.Context, credentialID string) error
+	DeletePushDevice(ctx context.Context, arg DeletePushDeviceParams) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
 	// Used by "replace" semantics (authentication finish): drops every proved
 	// credential for this session except the one that just verified, so an
@@ -75,6 +78,10 @@ type Querier interface {
 	InsertMultisigDraftMember(ctx context.Context, arg InsertMultisigDraftMemberParams) (uuid.UUID, error)
 	InsertMultisigMember(ctx context.Context, arg InsertMultisigMemberParams) error
 	InsertMultisigProposal(ctx context.Context, arg InsertMultisigProposalParams) (uuid.UUID, error)
+	// Returns no rows when dedupe_key collides with an existing (user_id, type,
+	// dedupe_key) row — the caller treats a zero-row result as "already
+	// recorded, skip the push" rather than an error.
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) (uuid.UUID, error)
 	InsertOnRampIntent(ctx context.Context, arg InsertOnRampIntentParams) (uuid.UUID, error)
 	InsertPushTokenRegistration(ctx context.Context, arg InsertPushTokenRegistrationParams) error
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) error
@@ -85,6 +92,10 @@ type Querier interface {
 	InsertSignPayload(ctx context.Context, arg InsertSignPayloadParams) error
 	InsertWalletRefreshToken(ctx context.Context, arg InsertWalletRefreshTokenParams) error
 	InsertWebappAuditLog(ctx context.Context, arg InsertWebappAuditLogParams) error
+	// Returns no rows when dedupe_key collides with an existing (user_id, type,
+	// dedupe_key) row — the caller treats a zero-row result as "already
+	// recorded, skip" rather than an error.
+	InsertWebappNotification(ctx context.Context, arg InsertWebappNotificationParams) (uuid.UUID, error)
 	InsertWebappSession(ctx context.Context, arg InsertWebappSessionParams) error
 	InsertWebappUser(ctx context.Context, arg InsertWebappUserParams) error
 	InsertWebauthnChallenge(ctx context.Context, arg InsertWebauthnChallengeParams) error
@@ -103,15 +114,27 @@ type Querier interface {
 	ListMultisigDraftMembersForDraft(ctx context.Context, draftID uuid.UUID) ([]WebappMultisigDraftMember, error)
 	ListMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) ([]WebappMultisigMember, error)
 	ListMultisigProposalsWithApprovalCountForAccount(ctx context.Context, multisigAccountID uuid.UUID) ([]ListMultisigProposalsWithApprovalCountForAccountRow, error)
+	// cursor is the created_at of the last row the caller already has; pass NULL
+	// for the first page. Keyset pagination, not OFFSET, so paging stays cheap as
+	// a user's history grows.
+	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error)
 	ListPendingCosignRequests(ctx context.Context, queueIndex string) ([]CosignRequest, error)
 	ListPushTokensForQueueExceptSigner(ctx context.Context, arg ListPushTokensForQueueExceptSignerParams) ([]string, error)
+	ListPushTokensForUser(ctx context.Context, userID uuid.UUID) ([]string, error)
 	ListSessionProvedCredentials(ctx context.Context, sessionID uuid.UUID) ([]string, error)
 	ListSmartAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsByUserIDRow, error)
 	ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error)
 	ListWalletMembershipsForMember(ctx context.Context, memberBlindID string) ([]ListWalletMembershipsForMemberRow, error)
+	// cursor is the created_at of the last row the caller already has; pass NULL
+	// for the first page.
+	ListWebappNotificationsForUser(ctx context.Context, arg ListWebappNotificationsForUserParams) ([]ListWebappNotificationsForUserRow, error)
 	ListWebauthnCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]ListWebauthnCredentialsForUserRow, error)
+	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) error
+	MarkAllWebappNotificationsRead(ctx context.Context, userID uuid.UUID) error
 	MarkCosignSubmitted(ctx context.Context, arg MarkCosignSubmittedParams) error
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
 	MarkSmartAccountDeployed(ctx context.Context, smartAccountAddress string) error
+	MarkWebappNotificationRead(ctx context.Context, arg MarkWebappNotificationReadParams) (int64, error)
 	// Re-points every member row for a given passkey at the user who just proved
 	// ownership of it in a WebAuthn assertion. This is the same linking rule
 	// RegisterAccount applies, triggered at login where it needs no salt and no
@@ -154,6 +177,7 @@ type Querier interface {
 	// see SetAccountSignerContextRuleID). Retried attaches overwrite the label
 	// rather than duplicating the row.
 	UpsertPendingCredentialSigner(ctx context.Context, arg UpsertPendingCredentialSignerParams) (UpsertPendingCredentialSignerRow, error)
+	UpsertPushDevice(ctx context.Context, arg UpsertPushDeviceParams) error
 	UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccountParams) (uuid.UUID, error)
 	UpsertSmartAccountRegistration(ctx context.Context, arg UpsertSmartAccountRegistrationParams) (SmartAccountRegistration, error)
 	UpsertUser(ctx context.Context, email string) (uuid.UUID, error)

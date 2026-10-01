@@ -48,14 +48,16 @@ type TransactionRelayHandler struct {
 	txSvcMainnet transactionRelayService
 	policy       bundlerPolicyService
 	auditSvc     auditService
+	notifSvc     notificationService
 }
 
-func NewTransactionRelayHandler(txSvc, txSvcMainnet transactionRelayService, policy bundlerPolicyService, auditSvc auditService) *TransactionRelayHandler {
+func NewTransactionRelayHandler(txSvc, txSvcMainnet transactionRelayService, policy bundlerPolicyService, auditSvc auditService, notifSvc notificationService) *TransactionRelayHandler {
 	return &TransactionRelayHandler{
 		txSvc:        txSvc,
 		txSvcMainnet: txSvcMainnet,
 		policy:       policy,
 		auditSvc:     auditSvc,
+		notifSvc:     notifSvc,
 	}
 }
 
@@ -195,6 +197,11 @@ func (h *TransactionRelayHandler) Submit(c *gin.Context) {
 		"status":  result.Status,
 		"network": string(network),
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		Type: "transaction_relayed", Title: "Transaction sent", Body: "Your transaction was submitted.",
+	}); err != nil {
+		slog.Error("record transaction relayed notification", "userID", userID, "err", err)
+	}
 
 	httpx.Success(c, http.StatusOK, gin.H{
 		"hash":   result.Hash,

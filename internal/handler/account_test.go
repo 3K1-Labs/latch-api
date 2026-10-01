@@ -19,7 +19,7 @@ func newAccountHandler(account *stubAccount, audit *stubAudit) *AccountHandler {
 	if audit == nil {
 		audit = &stubAudit{}
 	}
-	return NewAccountHandler(account, audit)
+	return NewAccountHandler(account, audit, &stubNotification{})
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────
@@ -374,7 +374,8 @@ func TestDepositStatus_Success(t *testing.T) {
 			{TxHash: "hash1", Amount: "5.0000000", Asset: "native", Status: "done", CreatedAt: time.Now().UTC()},
 		},
 	}}
-	h := newAccountHandler(stub, nil)
+	notif := &stubNotification{}
+	h := NewAccountHandler(stub, &stubAudit{}, notif)
 	r := gin.New()
 	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
 
@@ -390,6 +391,28 @@ func TestDepositStatus_Success(t *testing.T) {
 	forwards := data["forwards"].([]any)
 	require.Len(t, forwards, 1)
 	assert.Equal(t, "hash1", forwards[0].(map[string]any)["tx_hash"])
+
+	assert.Equal(t, 1, notif.notifyN, "a completed deposit must record one notification")
+	assert.Equal(t, "funding_completed", notif.gotRecord.Type)
+	assert.Equal(t, "12345", notif.gotRecord.DedupeKey, "dedupe key must be the memo_id so repeated polls don't re-notify")
+}
+
+// A pending deposit must not notify — only the completed transition is a
+// curated activity event.
+func TestDepositStatus_PendingDoesNotNotify(t *testing.T) {
+	stub := &stubAccount{fundingStatusResult: service.DepositStatus{
+		MemoID: "12345", Status: "pending", ExpiresAt: time.Now().Add(time.Hour).UTC(),
+	}}
+	notif := &stubNotification{}
+	h := NewAccountHandler(stub, &stubAudit{}, notif)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 0, notif.notifyN)
 }
 
 // The bug this guards: expires_in, expected_amt and external_id were absent from

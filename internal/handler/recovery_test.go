@@ -23,7 +23,7 @@ func newRecoveryHandler(auth *stubAuth, backup *stubBackup, otp *stubOTP, email 
 	if email == nil {
 		email = &stubEmail{}
 	}
-	return NewRecoveryHandler(auth, backup, otp, email, audit, recoverySecret, 15)
+	return NewRecoveryHandler(auth, backup, otp, email, audit, &stubNotification{}, recoverySecret, 15)
 }
 
 func makeRecoveryToken(t *testing.T, userID string, scope string, exp time.Time) string {
@@ -213,4 +213,47 @@ func TestGetBlob_Success(t *testing.T) {
 	data := resp["data"].(map[string]any)
 	encBlob := data["encrypted_blob"].(map[string]any)
 	assert.Equal(t, "2", encBlob["version"])
+}
+
+// ── notifications ────────────────────────────────────────────────────────────
+
+func TestInitiate_UserFound_RecordsNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewRecoveryHandler(&stubAuth{verifiedID: "uid"}, &stubBackup{}, &stubOTP{genCode: "111111"}, &stubEmail{}, &stubAudit{}, notif, recoverySecret, 15)
+	r := gin.New()
+	r.POST("/initiate", h.Initiate)
+
+	w := postJSON(r, "/initiate", map[string]any{"email": "user@example.com"})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "recovery_initiated", notif.gotRecord.Type)
+	assert.Equal(t, "uid", notif.gotUserID)
+}
+
+func TestInitiate_UserNotFound_NoNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewRecoveryHandler(&stubAuth{}, &stubBackup{}, &stubOTP{genCode: "111111"}, &stubEmail{}, &stubAudit{}, notif, recoverySecret, 15)
+	r := gin.New()
+	r.POST("/initiate", h.Initiate)
+
+	w := postJSON(r, "/initiate", map[string]any{"email": "nobody@example.com"})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 0, notif.notifyN, "must not notify a non-existent user")
+}
+
+func TestGetBlob_RecordsNotification(t *testing.T) {
+	tok := makeRecoveryToken(t, "uid", "recovery", time.Now().Add(time.Hour))
+	notif := &stubNotification{}
+	h := NewRecoveryHandler(&stubAuth{}, &stubBackup{}, &stubOTP{}, &stubEmail{}, &stubAudit{}, notif, recoverySecret, 15)
+	r := gin.New()
+	r.GET("/blob", h.GetBlob)
+
+	req := httptest.NewRequest(http.MethodGet, "/blob", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "recovery_completed", notif.gotRecord.Type)
 }

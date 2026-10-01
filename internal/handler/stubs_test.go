@@ -254,6 +254,63 @@ func (s *stubNotifier) NotifyCosignUpdated(_ context.Context, tokens []string, q
 	return s.err
 }
 
+// ── notificationService / pushDeviceService stubs ─────────────────────────────
+
+type stubNotification struct {
+	notifyErr error
+
+	gotUserID string
+	gotRecord service.NotificationRecord
+	notifyN   int
+
+	listOut       []service.Notification
+	listCursorOut string
+	listErr       error
+
+	unreadCount int
+	unreadErr   error
+
+	markReadErr error
+	markAllErr  error
+}
+
+func (s *stubNotification) Notify(_ context.Context, userID string, rec service.NotificationRecord) error {
+	s.gotUserID = userID
+	s.gotRecord = rec
+	s.notifyN++
+	return s.notifyErr
+}
+
+func (s *stubNotification) List(_ context.Context, _, _ string, _ int) ([]service.Notification, string, error) {
+	return s.listOut, s.listCursorOut, s.listErr
+}
+
+func (s *stubNotification) UnreadCount(_ context.Context, _ string) (int, error) {
+	return s.unreadCount, s.unreadErr
+}
+
+func (s *stubNotification) MarkRead(_ context.Context, _, _ string) error { return s.markReadErr }
+func (s *stubNotification) MarkAllRead(_ context.Context, _ string) error { return s.markAllErr }
+
+type stubPushDevice struct {
+	registerErr error
+	deleteErr   error
+
+	gotUserID   string
+	gotToken    string
+	gotPlatform string
+}
+
+func (s *stubPushDevice) Register(_ context.Context, userID, token, platform string) error {
+	s.gotUserID, s.gotToken, s.gotPlatform = userID, token, platform
+	return s.registerErr
+}
+
+func (s *stubPushDevice) Delete(_ context.Context, userID, token string) error {
+	s.gotUserID, s.gotToken = userID, token
+	return s.deleteErr
+}
+
 // ── backupService stub ────────────────────────────────────────────────────────
 
 type stubBackup struct {

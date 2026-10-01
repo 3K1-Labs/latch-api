@@ -31,6 +31,7 @@ sql:
       - "migrations/000028_account_signers_signer_id.up.sql"
       - "migrations/000029_account_signers_context_rule_id.up.sql"
       - "migrations/000030_webapp_session_proved_credentials.up.sql"
+      - "migrations/000031_notifications.up.sql"
     gen:
       go:
         package: "db"

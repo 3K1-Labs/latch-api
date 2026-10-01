@@ -31,10 +31,11 @@ type BackupSignerHandler struct {
 	txSvcMainnet backupSignerConfirmService // mainnet; nil if not configured
 	credSvc      passkeyCredentialRegisterService
 	auditSvc     auditService
+	notifSvc     notificationService
 }
 
-func NewBackupSignerHandler(txSvc, txSvcMainnet backupSignerConfirmService, credSvc passkeyCredentialRegisterService, auditSvc auditService) *BackupSignerHandler {
-	return &BackupSignerHandler{txSvc: txSvc, txSvcMainnet: txSvcMainnet, credSvc: credSvc, auditSvc: auditSvc}
+func NewBackupSignerHandler(txSvc, txSvcMainnet backupSignerConfirmService, credSvc passkeyCredentialRegisterService, auditSvc auditService, notifSvc notificationService) *BackupSignerHandler {
+	return &BackupSignerHandler{txSvc: txSvc, txSvcMainnet: txSvcMainnet, credSvc: credSvc, auditSvc: auditSvc, notifSvc: notifSvc}
 }
 
 // BackupSignerServiceOrNil boxes a possibly-nil *webapp.TransactionService
@@ -155,6 +156,11 @@ func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		"signerId":            signerID,
 		"network":             string(network),
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		Type: "signer_added", Title: "Backup signer added", Body: "A backup passkey signer was added to your wallet.",
+	}); err != nil {
+		slog.Error("record backup signer added notification", "err", err)
+	}
 
 	httpx.Success(c, http.StatusOK, gin.H{
 		"confirmed":             true,
@@ -221,6 +227,11 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		"signerId":            req.SignerID,
 		"network":             string(network),
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		Type: "signer_removed", Title: "Backup signer removed", Body: "A backup passkey signer was removed from your wallet.",
+	}); err != nil {
+		slog.Error("record backup signer removed notification", "err", err)
+	}
 
 	httpx.Success(c, http.StatusOK, gin.H{"confirmed": true})
 }

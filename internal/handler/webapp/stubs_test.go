@@ -174,6 +174,42 @@ type stubAudit struct{}
 
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
+type stubNotification struct {
+	notifyErr error
+
+	gotUserID string
+	gotRecord webapp.NotificationRecord
+	notifyN   int
+
+	listOut       []webapp.Notification
+	listCursorOut string
+	listErr       error
+
+	unreadCount int
+	unreadErr   error
+
+	markReadErr error
+	markAllErr  error
+}
+
+func (s *stubNotification) Notify(_ context.Context, userID string, rec webapp.NotificationRecord) error {
+	s.gotUserID = userID
+	s.gotRecord = rec
+	s.notifyN++
+	return s.notifyErr
+}
+
+func (s *stubNotification) List(_ context.Context, _, _ string, _ int) ([]webapp.Notification, string, error) {
+	return s.listOut, s.listCursorOut, s.listErr
+}
+
+func (s *stubNotification) UnreadCount(_ context.Context, _ string) (int, error) {
+	return s.unreadCount, s.unreadErr
+}
+
+func (s *stubNotification) MarkRead(_ context.Context, _, _ string) error { return s.markReadErr }
+func (s *stubNotification) MarkAllRead(_ context.Context, _ string) error { return s.markAllErr }
+
 type stubCredentialIndex struct {
 	gotKeyDataHex, gotAddress, gotLabel string
 	gotSeq                              int32

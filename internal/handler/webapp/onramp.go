@@ -19,11 +19,12 @@ import (
 type OnRampHandler struct {
 	onRampSvc onRampService
 	auditSvc  *webapp.AuditService
+	notifSvc  notificationService
 	cfg       *config.Config
 }
 
-func NewOnRampHandler(onRampSvc onRampService, auditSvc *webapp.AuditService, cfg *config.Config) *OnRampHandler {
-	return &OnRampHandler{onRampSvc: onRampSvc, auditSvc: auditSvc, cfg: cfg}
+func NewOnRampHandler(onRampSvc onRampService, auditSvc *webapp.AuditService, notifSvc notificationService, cfg *config.Config) *OnRampHandler {
+	return &OnRampHandler{onRampSvc: onRampSvc, auditSvc: auditSvc, notifSvc: notifSvc, cfg: cfg}
 }
 
 type createOnRampSessionRequest struct {
@@ -187,8 +188,21 @@ func (h *OnRampHandler) UpdateIntent(c *gin.Context) {
 	if req.MoonpayTransactionID != nil {
 		changed["moonpay_transaction_id"] = *req.MoonpayTransactionID
 	}
-	h.auditSvc.Log(c.Request.Context(), middleware.SessionUserIDFromContext(c.Request.Context()),
+	userID := middleware.SessionUserIDFromContext(c.Request.Context())
+	h.auditSvc.Log(c.Request.Context(), userID,
 		string(webapp.ActionOnRampIntentUpdated), c.ClientIP(), c.Request.UserAgent(), changed)
+
+	// Only the completed transition is a curated activity event — matches
+	// mobile's "funding completed" scope exactly, not "funding started".
+	// dedupe_key = id keeps a repeated PATCH to the same status a no-op.
+	if req.Status != nil && *req.Status == webapp.OnRampStatusCompleted {
+		if err := h.notifSvc.Notify(c.Request.Context(), userID, webapp.NotificationRecord{
+			Type: "funding_completed", Title: "Deposit received", Body: "Your deposit has been credited.",
+			DedupeKey: id,
+		}); err != nil {
+			slog.Error("record funding completed notification", "userID", userID, "err", err)
+		}
+	}
 
 	// Re-fetch so the response includes the live MoonPay transaction status,
 	// matching serializeIntent()'s behavior for both GET and PATCH in the TS source.
