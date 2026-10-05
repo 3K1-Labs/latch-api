@@ -168,6 +168,29 @@ func TestBuildSend_AssetNotFound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"asset_not_found"`)
 }
 
+// TestBuildSend_AccountNotOnNetwork: the smart account simply isn't deployed
+// on the requested network — distinct from signer_rule_not_found, which
+// means the account exists but this key isn't a signer of it
+// (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §6.1).
+func TestBuildSend_AccountNotOnNetwork(t *testing.T) {
+	h := NewTransactionHandler(&stubTransaction{buildSendErr: webapp.ErrSmartAccountNotOnNetwork}, nil, testCfg())
+	r := gin.New()
+	r.POST("/transaction/build-send", h.BuildSend)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/build-send", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"signerType":          "webauthn",
+		"assetId":             "native",
+		"recipient":           "GRECIPIENT",
+		"amount":              "1.5",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"account_not_on_network"`)
+}
+
 func TestBuildSend_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
 	testnetStub := &stubTransaction{buildSendResult: webapp.BuildSendResult{
 		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},

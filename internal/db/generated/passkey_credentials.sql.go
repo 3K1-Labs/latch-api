@@ -11,21 +11,31 @@ import (
 
 const deletePasskeyCredential = `-- name: DeletePasskeyCredential :exec
 DELETE FROM passkey_credentials
-WHERE credential_id = $1
+WHERE credential_id = $1 AND network = $2
 `
 
-func (q *Queries) DeletePasskeyCredential(ctx context.Context, credentialID string) error {
-	_, err := q.db.ExecContext(ctx, deletePasskeyCredential, credentialID)
+type DeletePasskeyCredentialParams struct {
+	CredentialID string `json:"credential_id"`
+	Network      string `json:"network"`
+}
+
+func (q *Queries) DeletePasskeyCredential(ctx context.Context, arg DeletePasskeyCredentialParams) error {
+	_, err := q.db.ExecContext(ctx, deletePasskeyCredential, arg.CredentialID, arg.Network)
 	return err
 }
 
 const getPasskeyCredential = `-- name: GetPasskeyCredential :one
-SELECT id, credential_id, key_data_hex, smart_account_address, label, seq, created_at, updated_at FROM passkey_credentials
-WHERE credential_id = $1
+SELECT id, credential_id, key_data_hex, smart_account_address, label, seq, created_at, updated_at, network FROM passkey_credentials
+WHERE credential_id = $1 AND network = $2
 `
 
-func (q *Queries) GetPasskeyCredential(ctx context.Context, credentialID string) (PasskeyCredential, error) {
-	row := q.db.QueryRowContext(ctx, getPasskeyCredential, credentialID)
+type GetPasskeyCredentialParams struct {
+	CredentialID string `json:"credential_id"`
+	Network      string `json:"network"`
+}
+
+func (q *Queries) GetPasskeyCredential(ctx context.Context, arg GetPasskeyCredentialParams) (PasskeyCredential, error) {
+	row := q.db.QueryRowContext(ctx, getPasskeyCredential, arg.CredentialID, arg.Network)
 	var i PasskeyCredential
 	err := row.Scan(
 		&i.ID,
@@ -36,20 +46,21 @@ func (q *Queries) GetPasskeyCredential(ctx context.Context, credentialID string)
 		&i.Seq,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const upsertPasskeyCredential = `-- name: UpsertPasskeyCredential :one
-INSERT INTO passkey_credentials (credential_id, key_data_hex, smart_account_address, label, seq)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (credential_id) DO UPDATE SET
+INSERT INTO passkey_credentials (credential_id, key_data_hex, smart_account_address, label, seq, network)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (credential_id, network) DO UPDATE SET
     key_data_hex = EXCLUDED.key_data_hex,
     smart_account_address = EXCLUDED.smart_account_address,
     label = EXCLUDED.label,
     seq = EXCLUDED.seq,
     updated_at = NOW()
-RETURNING id, credential_id, key_data_hex, smart_account_address, label, seq, created_at, updated_at
+RETURNING id, credential_id, key_data_hex, smart_account_address, label, seq, created_at, updated_at, network
 `
 
 type UpsertPasskeyCredentialParams struct {
@@ -58,6 +69,7 @@ type UpsertPasskeyCredentialParams struct {
 	SmartAccountAddress string `json:"smart_account_address"`
 	Label               string `json:"label"`
 	Seq                 int32  `json:"seq"`
+	Network             string `json:"network"`
 }
 
 func (q *Queries) UpsertPasskeyCredential(ctx context.Context, arg UpsertPasskeyCredentialParams) (PasskeyCredential, error) {
@@ -67,6 +79,7 @@ func (q *Queries) UpsertPasskeyCredential(ctx context.Context, arg UpsertPasskey
 		arg.SmartAccountAddress,
 		arg.Label,
 		arg.Seq,
+		arg.Network,
 	)
 	var i PasskeyCredential
 	err := row.Scan(
@@ -78,6 +91,7 @@ func (q *Queries) UpsertPasskeyCredential(ctx context.Context, arg UpsertPasskey
 		&i.Seq,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Network,
 	)
 	return i, err
 }

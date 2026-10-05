@@ -51,6 +51,7 @@ type MultisigAccountSummary struct {
 	Threshold           int
 	AccountSaltHex      string
 	CreatedAt           int64
+	Network             string
 	ProposalCount       int64
 	Members             []MultisigAccountMember
 	// MemberID is the calling session user's own member row id on this
@@ -73,13 +74,30 @@ type RegisterMemberInput struct {
 }
 
 type MultisigAccountsService struct {
-	sqlDB   *sql.DB
-	q       *db.Queries
-	factory smartAccountFactory
+	sqlDB *sql.DB
+	q     *db.Queries
+	// factory/factoryMainnet: see MultisigDraftService's identical fields —
+	// DraftParams/DeployParams are one-shot/stateless (no persisted row yet),
+	// so they take network directly from the caller instead of reading it
+	// back off a row. factoryMainnet is nil when mainnet isn't configured.
+	factory        smartAccountFactory
+	factoryMainnet smartAccountFactory
 }
 
-func NewMultisigAccountsService(sqlDB *sql.DB, q *db.Queries, factory smartAccountFactory) *MultisigAccountsService {
-	return &MultisigAccountsService{sqlDB: sqlDB, q: q, factory: factory}
+func NewMultisigAccountsService(sqlDB *sql.DB, q *db.Queries, factory, factoryMainnet smartAccountFactory) *MultisigAccountsService {
+	return &MultisigAccountsService{sqlDB: sqlDB, q: q, factory: factory, factoryMainnet: factoryMainnet}
+}
+
+// factoryFor returns the factory instance for network, or
+// ErrMultisigMainnetNotConfigured if mainnet is requested but unavailable.
+func (s *MultisigAccountsService) factoryFor(network string) (smartAccountFactory, error) {
+	if network == string(NetworkMainnet) {
+		if s.factoryMainnet == nil {
+			return nil, ErrMultisigMainnetNotConfigured
+		}
+		return s.factoryMainnet, nil
+	}
+	return s.factory, nil
 }
 
 // ListAccounts returns every multisig account userID can sign for — i.e.
@@ -125,6 +143,7 @@ func (s *MultisigAccountsService) ListAccounts(ctx context.Context, userID strin
 			Threshold:           int(r.Threshold),
 			AccountSaltHex:      r.AccountSaltHex,
 			CreatedAt:           r.CreatedAt,
+			Network:             r.Network,
 			ProposalCount:       r.ProposalCount,
 			Members:             members,
 			MemberID:            callerMemberID,
@@ -223,8 +242,13 @@ func signerInitSortKey(s MultisigSignerInit) string {
 
 // DraftParams validates a one-shot signer list, predicts the resulting
 // smart account's deterministic address, and returns the encoded init
-// params — without persisting anything. Ports POST /api/multisig/accounts/draft.
-func (s *MultisigAccountsService) DraftParams(ctx context.Context, threshold int, signers []MultisigSignerInit, accountSaltHex string) (smartAccountAddress, resolvedSaltHex, paramsXdrBase64 string, resolvedSigners []MultisigSignerInit, err error) {
+// params — without persisting anything. network selects the factory
+// ("testnet" if empty). Ports POST /api/multisig/accounts/draft.
+func (s *MultisigAccountsService) DraftParams(ctx context.Context, threshold int, signers []MultisigSignerInit, accountSaltHex, network string) (smartAccountAddress, resolvedSaltHex, paramsXdrBase64 string, resolvedSigners []MultisigSignerInit, err error) {
+	factory, err := s.factoryFor(network)
+	if err != nil {
+		return "", "", "", nil, err
+	}
 	if err := validateSignerInits(threshold, signers); err != nil {
 		return "", "", "", nil, err
 	}
@@ -251,7 +275,7 @@ func (s *MultisigAccountsService) DraftParams(ctx context.Context, threshold int
 		return "", "", "", nil, fmt.Errorf("encode account init params: %w", err)
 	}
 
-	smartAccountAddress, err = s.factory.PredictAddress(ctx, params)
+	smartAccountAddress, err = factory.PredictAddress(ctx, params)
 	if err != nil {
 		return "", "", "", nil, fmt.Errorf("predict multisig smart account address: %w", err)
 	}
@@ -260,9 +284,13 @@ func (s *MultisigAccountsService) DraftParams(ctx context.Context, threshold int
 
 // DeployParams validates a one-shot signer list and deploys the resulting
 // smart account via the bundler — without persisting anything (the caller
-// must call RegisterAccount separately to record it). Ports
-// POST /api/multisig/accounts/deploy.
-func (s *MultisigAccountsService) DeployParams(ctx context.Context, threshold int, signers []MultisigSignerInit, accountSaltHex string) (smartAccountAddress, predictedAddress string, alreadyDeployed bool, paramsXdrBase64 string, resolvedSigners []MultisigSignerInit, err error) {
+// must call RegisterAccount separately to record it). network selects the
+// factory ("testnet" if empty). Ports POST /api/multisig/accounts/deploy.
+func (s *MultisigAccountsService) DeployParams(ctx context.Context, threshold int, signers []MultisigSignerInit, accountSaltHex, network string) (smartAccountAddress, predictedAddress string, alreadyDeployed bool, paramsXdrBase64 string, resolvedSigners []MultisigSignerInit, err error) {
+	factory, err := s.factoryFor(network)
+	if err != nil {
+		return "", "", false, "", nil, err
+	}
 	if err := validateSignerInits(threshold, signers); err != nil {
 		return "", "", false, "", nil, err
 	}
@@ -284,11 +312,11 @@ func (s *MultisigAccountsService) DeployParams(ctx context.Context, threshold in
 		return "", "", false, "", nil, fmt.Errorf("encode account init params: %w", err)
 	}
 
-	predictedAddress, err = s.factory.PredictAddress(ctx, params)
+	predictedAddress, err = factory.PredictAddress(ctx, params)
 	if err != nil {
 		return "", "", false, "", nil, fmt.Errorf("predict multisig smart account address: %w", err)
 	}
-	smartAccountAddress, alreadyDeployed, err = s.factory.Deploy(ctx, params, predictedAddress)
+	smartAccountAddress, alreadyDeployed, err = factory.Deploy(ctx, params, predictedAddress)
 	if err != nil {
 		return "", "", false, "", nil, fmt.Errorf("deploy multisig smart account: %w", err)
 	}
@@ -309,7 +337,7 @@ func (s *MultisigAccountsService) DeployParams(ctx context.Context, threshold in
 // its own registered WebAuthn credentials (delegated/g_address members
 // have no equivalent proof-of-ownership channel here, so they can only be
 // linked at draft join/deploy time).
-func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, smartAccountAddress string, threshold int, accountSaltHex string, members []RegisterMemberInput) (MultisigAccountSummary, error) {
+func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, smartAccountAddress string, threshold int, accountSaltHex, network string, members []RegisterMemberInput) (MultisigAccountSummary, error) {
 	if threshold < 1 {
 		return MultisigAccountSummary{}, fmt.Errorf("%w: threshold must be at least 1", ErrMultisigAccountSignerValidation)
 	}
@@ -353,6 +381,7 @@ func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, s
 		SmartAccountAddress: smartAccountAddress,
 		Threshold:           int32(threshold), //nolint:gosec // bounds-checked above
 		AccountSaltHex:      accountSaltHex,
+		Network:             network,
 		CreatedAt:           time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -415,6 +444,7 @@ func (s *MultisigAccountsService) RegisterAccount(ctx context.Context, userID, s
 		Threshold:           threshold,
 		AccountSaltHex:      accountSaltHex,
 		CreatedAt:           now,
+		Network:             network,
 		Members:             result,
 		MemberID:            callerMemberID,
 	}, nil

@@ -72,9 +72,16 @@ type TransactionService struct {
 	// endpoints only (BuildCounter/BuildDelegatedCounter) — unrelated to any
 	// mobile-serving or asset-transfer path.
 	counterContractAddress string
+	// network ("testnet"/"mainnet") is which Stellar network this instance's
+	// rpcURL/passphrase/verifiers actually target — set once at construction
+	// (cmd/server/main.go builds one instance per network). Used only to pick
+	// the right default Aquarius router when the client doesn't supply one
+	// (resolveRouterContractID) — every other field already implies a single
+	// network, so this doesn't change any other behavior.
+	network string
 }
 
-func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string) *TransactionService {
+func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress, network string) *TransactionService {
 	return &TransactionService{
 		soroban:                 soroban,
 		bundler:                 bundler,
@@ -84,6 +91,7 @@ func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextR
 		webauthnVerifierAddress: webauthnVerifierAddress,
 		ed25519VerifierAddress:  ed25519VerifierAddress,
 		counterContractAddress:  counterContractAddress,
+		network:                 network,
 	}
 }
 

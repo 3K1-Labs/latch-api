@@ -268,8 +268,13 @@ func TestBuildAuthTransactionCore_BundlerDelegatedRewriteErr(t *testing.T) {
 }
 
 func TestResolveRouterContractID_CustomOverride(t *testing.T) {
-	assert.Equal(t, "CCUSTOM", resolveRouterContractID("CCUSTOM"))
-	assert.Equal(t, aquariusRouterTestnet, resolveRouterContractID(""))
+	testnetSvc, _ := newTestTransactionService(t, &fakeSorobanRPC{}, defaultContextRulesService(t))
+	assert.Equal(t, "CCUSTOM", testnetSvc.resolveRouterContractID("CCUSTOM"))
+	assert.Equal(t, aquariusRouterTestnet, testnetSvc.resolveRouterContractID(""))
+
+	mainnetSvc := NewTransactionService(&fakeSorobanRPC{}, testnetSvc.bundler, defaultContextRulesService(t), "https://rpc.example.com", testPassphrase, "", "", "", "mainnet")
+	assert.Equal(t, "CCUSTOM", mainnetSvc.resolveRouterContractID("CCUSTOM"))
+	assert.Equal(t, aquariusRouterMainnet, mainnetSvc.resolveRouterContractID(""))
 }
 
 func TestResolveAdminBundlerDelegatedAuth_RPCErr(t *testing.T) {

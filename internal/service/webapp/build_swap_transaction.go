@@ -227,7 +227,7 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 		return BuildSwapResult{}, err
 	}
 
-	routerID := resolveRouterContractID(in.RouterContractID)
+	routerID := s.resolveRouterContractID(in.RouterContractID)
 
 	// See BuildSend's identical branch: a passkey that identifies its key
 	// resolves via FindRuleForSigner, which never returns a rule that

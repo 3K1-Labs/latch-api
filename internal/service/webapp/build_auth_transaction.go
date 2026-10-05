@@ -280,19 +280,26 @@ func (s *TransactionService) buildAuthTransactionCore(
 	return result, nil
 }
 
-// aquariusRouterTestnet is the well-known testnet Aquarius router contract
-// id. Ports lib/swap-routers.ts's SWAP_ROUTER_CONTRACTS.testnet — this
-// service only ever runs against the configured testnet RPC/passphrase (see
-// cmd/server/main.go's single-network webapp wiring), so the mainnet entry
-// is intentionally not carried into the Go port.
-const aquariusRouterTestnet = "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD"
+// aquariusRouterTestnet/aquariusRouterMainnet are the well-known Aquarius
+// router contract ids per network. Ports lib/swap-routers.ts's
+// SWAP_ROUTER_CONTRACTS, from packages/swap/src/constants.ts's AQUARIUS_CONFIG
+// (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §6.3).
+const (
+	aquariusRouterTestnet = "CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD"
+	aquariusRouterMainnet = "CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK"
+)
 
 // resolveRouterContractID returns routerContractID if set, else the default
-// testnet Aquarius router. Ports build-swap/setup-swap-rules routes'
-// resolveRouterContractId().
-func resolveRouterContractID(routerContractID string) string {
+// Aquarius router for s's own network. Ports build-swap/setup-swap-rules
+// routes' resolveRouterContractId() — the extension always sends an explicit
+// routerContractId for a non-Aquarius provider (e.g. mainnet Soroswap), so
+// this default is only ever reached for Aquarius itself.
+func (s *TransactionService) resolveRouterContractID(routerContractID string) string {
 	if routerContractID != "" {
 		return routerContractID
+	}
+	if s.network == string(NetworkMainnet) {
+		return aquariusRouterMainnet
 	}
 	return aquariusRouterTestnet
 }

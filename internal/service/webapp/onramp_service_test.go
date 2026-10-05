@@ -53,7 +53,9 @@ func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuy
 
 	svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
 		moonPayServerURL, "sk_test_secret", "pk_test_pub", mode, widgetBuyURLOverride,
-		"GPOOL", "https://horizon.example.invalid", "25", "USD", TransakConfig{})
+		testGAddress, "https://horizon.example.invalid",
+		nil, "", "",
+		"25", "USD", TransakConfig{})
 	if moonPayServerURL != "" {
 		svc.moonPay.httpClient = http.DefaultClient
 	}
@@ -349,10 +351,6 @@ func TestOnRampService_UpdateIntent(t *testing.T) {
 func TestOnRampService_PoolSnapshot(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/accounts/GPOOL" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"balances": []map[string]any{{"balance": "42", "asset_type": "native"}}})
-			return
-		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"_embedded": map[string]any{"records": []map[string]any{}}})
 	}))
 	defer ts.Close()
@@ -360,9 +358,14 @@ func TestOnRampService_PoolSnapshot(t *testing.T) {
 	svc, _ := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
 	svc.horizonURL = ts.URL
 	svc.pool.httpClient = ts.Client()
+	// Balance now reads over RPC (docs/horizon-to-rpc-migration-plan.md,
+	// Bucket 2) — only the transaction list above still comes from the
+	// Horizon stub.
+	svc.soroban = fakeAccountBalanceRPC(t, testGAddress, 420_000_000, true) // 42 XLM
+	svc.rpcURLTestnet = "https://rpc.example.com"
 
 	snap, err := svc.PoolSnapshot(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, "42", snap.XLMBalance)
-	assert.Equal(t, "GPOOL", snap.PoolAddress)
+	assert.Equal(t, "42.0000000", snap.XLMBalance)
+	assert.Equal(t, testGAddress, snap.PoolAddress)
 }

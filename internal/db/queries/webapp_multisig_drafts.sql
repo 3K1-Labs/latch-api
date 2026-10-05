@@ -1,22 +1,22 @@
 -- name: InsertMultisigDraft :one
-INSERT INTO webapp.multisig_drafts (id, creator_user_id, threshold, account_salt_hex, invite_token, status, created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO webapp.multisig_drafts (id, creator_user_id, threshold, account_salt_hex, invite_token, status, network, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id;
 
 -- name: GetMultisigDraftByIDForCreator :one
-SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at
+SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at, network
 FROM webapp.multisig_drafts
 WHERE id = $1 AND creator_user_id = $2;
 
 -- name: GetActiveMultisigDraftForUser :one
-SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at
+SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at, network
 FROM webapp.multisig_drafts
 WHERE creator_user_id = $1 AND status = 'collecting'
 ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: GetMultisigDraftByInviteToken :one
-SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at
+SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at, network
 FROM webapp.multisig_drafts
 WHERE invite_token = $1;
 

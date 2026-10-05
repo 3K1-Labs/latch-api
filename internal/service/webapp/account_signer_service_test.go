@@ -22,8 +22,8 @@ func newMockAccountSignerService(t *testing.T) (*AccountSignerService, sqlmock.S
 }
 
 func acctSignerSmartAccountRow(userID uuid.UUID, credentialID, address string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at"}).
-		AddRow(uuid.New(), userID, credentialID, "keyhex", "salthex", address, int32(1), int64(1000))
+	return sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at", "network"}).
+		AddRow(uuid.New(), userID, credentialID, "keyhex", "salthex", address, int32(1), int64(1000), "testnet")
 }
 
 func TestAccountSignerService_AttachCredential(t *testing.T) {
@@ -195,7 +195,7 @@ func TestAccountSignerService_ResolveByCredentialID(t *testing.T) {
 		svc, mock := newMockAccountSignerService(t)
 		mock.ExpectQuery("SELECT (.+) FROM webapp.account_signers").WithArgs(sql.NullString{String: "cred-b", Valid: true}).WillReturnError(sql.ErrNoRows)
 
-		_, err := svc.ResolveByCredentialID(context.Background(), "cred-b")
+		_, _, err := svc.ResolveByCredentialID(context.Background(), "cred-b")
 		assert.ErrorIs(t, err, ErrAccountSignerNotFound)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
@@ -206,10 +206,15 @@ func TestAccountSignerService_ResolveByCredentialID(t *testing.T) {
 			sqlmock.NewRows([]string{"id", "smart_account_address", "signer_type", "credential_id", "label", "signer_id", "context_rule_id", "created_at"}).
 				AddRow(uuid.New(), "CADDR", "passkey", sql.NullString{String: "cred-b", Valid: true}, sql.NullString{}, sql.NullInt32{}, sql.NullInt32{}, int64(1000)),
 		)
+		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(
+			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at", "network"}).
+				AddRow(uuid.New(), uuid.New(), "orig-cred", "keydata", "salt", "CADDR", int32(1), int64(1000), "testnet"),
+		)
 
-		address, err := svc.ResolveByCredentialID(context.Background(), "cred-b")
+		address, network, err := svc.ResolveByCredentialID(context.Background(), "cred-b")
 		require.NoError(t, err)
 		assert.Equal(t, "CADDR", address)
+		assert.Equal(t, "testnet", network)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }

@@ -77,12 +77,14 @@ type stubSmartAccount struct {
 	getByCredentialIDKeyData  string
 	getByCredentialIDDeployed bool
 	getByCredentialIDErr      error
+	gotGetByCredentialIDNet   string
 }
 
 func (s *stubSmartAccount) DeployForCredential(_ context.Context, _ string, _ webapp.RegisteredCredential) (string, string, string, bool, bool, error) {
 	return s.deployKeyDataHex, s.deploySaltHex, s.deploySmartAccountAddress, s.deployDeployed, s.deployAlreadyDeployed, s.deployErr
 }
-func (s *stubSmartAccount) GetByCredentialID(_ context.Context, _ string) (string, string, bool, error) {
+func (s *stubSmartAccount) GetByCredentialID(_ context.Context, _, network string) (string, string, bool, error) {
+	s.gotGetByCredentialIDNet = network
 	return s.getByCredentialIDAddress, s.getByCredentialIDKeyData, s.getByCredentialIDDeployed, s.getByCredentialIDErr
 }
 func (s *stubSmartAccount) Query(_ context.Context, _ string) (string, bool, error) {
@@ -105,10 +107,12 @@ type stubAccounts struct {
 	accounts         []webapp.Account
 	err              error
 	gotCredentialIDs []string
+	gotNetwork       string
 }
 
-func (s *stubAccounts) ListAccountsForProvedCredentials(_ context.Context, credentialIDs []string) ([]webapp.Account, error) {
+func (s *stubAccounts) ListAccountsForProvedCredentials(_ context.Context, credentialIDs []string, network string) ([]webapp.Account, error) {
 	s.gotCredentialIDs = credentialIDs
+	s.gotNetwork = network
 	return s.accounts, s.err
 }
 
@@ -213,41 +217,45 @@ func (s *stubNotification) MarkAllRead(_ context.Context, _ string) error { retu
 type stubCredentialIndex struct {
 	gotKeyDataHex, gotAddress, gotLabel string
 	gotSeq                              int32
+	gotNetwork                          string
 	called                              bool
 	err                                 error
 
 	deregisterErr        error
 	gotDeregisterKeyData string
+	gotDeregisterNetwork string
 }
 
-func (s *stubCredentialIndex) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
+func (s *stubCredentialIndex) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32, network string) error {
 	s.called = true
-	s.gotKeyDataHex, s.gotAddress, s.gotLabel, s.gotSeq = keyDataHex, smartAccountAddress, label, seq
+	s.gotKeyDataHex, s.gotAddress, s.gotLabel, s.gotSeq, s.gotNetwork = keyDataHex, smartAccountAddress, label, seq, network
 	return s.err
 }
 
-func (s *stubCredentialIndex) Deregister(_ context.Context, keyDataHex string) error {
+func (s *stubCredentialIndex) Deregister(_ context.Context, keyDataHex, network string) error {
 	s.gotDeregisterKeyData = keyDataHex
+	s.gotDeregisterNetwork = network
 	return s.deregisterErr
 }
 
 type stubAccountSigner struct {
-	attachErr               error
-	gotAttachAddress        string
-	gotAttachCredentialID   string
-	gotAttachLabel          string
-	callerOwns              bool
-	callerOwnsErr           error
-	callerHasOther          bool
-	callerHasOtherErr       error
-	signerID                uint32
-	signerIDOK              bool
-	getSignerIDErr          error
-	markSignerOnChainErr    error
-	gotMarkSignerID         uint32
-	removeCredentialErr     error
-	resolveByCredentialAddr string
-	resolveByCredentialErr  error
+	attachErr                  error
+	gotAttachAddress           string
+	gotAttachCredentialID      string
+	gotAttachLabel             string
+	callerOwns                 bool
+	callerOwnsErr              error
+	callerHasOther             bool
+	callerHasOtherErr          error
+	signerID                   uint32
+	signerIDOK                 bool
+	getSignerIDErr             error
+	markSignerOnChainErr       error
+	gotMarkSignerID            uint32
+	removeCredentialErr        error
+	resolveByCredentialAddr    string
+	resolveByCredentialNetwork string
+	resolveByCredentialErr     error
 }
 
 func (s *stubAccountSigner) AttachCredential(_ context.Context, smartAccountAddress, credentialID, label string) error {
@@ -270,8 +278,8 @@ func (s *stubAccountSigner) GetSignerContextRuleID(_ context.Context, _, _ strin
 func (s *stubAccountSigner) RemoveCredential(_ context.Context, _, _ string) error {
 	return s.removeCredentialErr
 }
-func (s *stubAccountSigner) ResolveByCredentialID(_ context.Context, _ string) (string, error) {
-	return s.resolveByCredentialAddr, s.resolveByCredentialErr
+func (s *stubAccountSigner) ResolveByCredentialID(_ context.Context, _ string) (string, string, error) {
+	return s.resolveByCredentialAddr, s.resolveByCredentialNetwork, s.resolveByCredentialErr
 }
 
 type stubTransaction struct {
@@ -387,9 +395,13 @@ type stubMultisigDraft struct {
 	gotAddMember  webapp.DraftMultisigMember
 	gotJoinUserID string
 	gotJoinMember webapp.DraftMultisigMember
+	gotCreateNet  string
+	gotPredictNet string
+	gotDeployNet  string
 }
 
-func (s *stubMultisigDraft) CreateDraft(_ context.Context, _ string) (webapp.SerializedDraft, error) {
+func (s *stubMultisigDraft) CreateDraft(_ context.Context, _, network string) (webapp.SerializedDraft, error) {
+	s.gotCreateNet = network
 	return s.draft, s.draftErr
 }
 func (s *stubMultisigDraft) GetActiveDraft(_ context.Context, _ string) (webapp.SerializedDraft, error) {
@@ -408,10 +420,12 @@ func (s *stubMultisigDraft) AddMember(_ context.Context, _, _ string, m webapp.D
 func (s *stubMultisigDraft) DeleteMember(_ context.Context, _, _, _ string) (webapp.SerializedDraft, error) {
 	return s.draft, s.draftErr
 }
-func (s *stubMultisigDraft) PredictAddress(_ context.Context, _, _ string) (string, string, webapp.SerializedDraft, error) {
+func (s *stubMultisigDraft) PredictAddress(_ context.Context, _, _, network string) (string, string, webapp.SerializedDraft, error) {
+	s.gotPredictNet = network
 	return s.predictAddress, s.predictParamsB64, s.draft, s.predictErr
 }
-func (s *stubMultisigDraft) Deploy(_ context.Context, _, _ string) (string, bool, webapp.SerializedDraft, error) {
+func (s *stubMultisigDraft) Deploy(_ context.Context, _, _, network string) (string, bool, webapp.SerializedDraft, error) {
+	s.gotDeployNet = network
 	return s.deployAddress, s.deployAlready, s.draft, s.deployErr
 }
 func (s *stubMultisigDraft) GetPublicDraftByToken(_ context.Context, _ string) (webapp.PublicDraftView, error) {
@@ -441,19 +455,25 @@ type stubMultisigAccounts struct {
 	registerErr      error
 
 	gotRegisterMembers []webapp.RegisterMemberInput
+	gotDraftNet        string
+	gotDeployNet       string
+	gotRegisterNet     string
 }
 
 func (s *stubMultisigAccounts) ListAccounts(_ context.Context, _ string) ([]webapp.MultisigAccountSummary, error) {
 	return s.accounts, s.listErr
 }
-func (s *stubMultisigAccounts) DraftParams(_ context.Context, _ int, _ []webapp.MultisigSignerInit, _ string) (string, string, string, []webapp.MultisigSignerInit, error) {
+func (s *stubMultisigAccounts) DraftParams(_ context.Context, _ int, _ []webapp.MultisigSignerInit, _, network string) (string, string, string, []webapp.MultisigSignerInit, error) {
+	s.gotDraftNet = network
 	return s.draftAddress, s.draftSaltHex, s.draftParamsB64, s.draftSigners, s.draftErr
 }
-func (s *stubMultisigAccounts) DeployParams(_ context.Context, _ int, _ []webapp.MultisigSignerInit, _ string) (string, string, bool, string, []webapp.MultisigSignerInit, error) {
+func (s *stubMultisigAccounts) DeployParams(_ context.Context, _ int, _ []webapp.MultisigSignerInit, _, network string) (string, string, bool, string, []webapp.MultisigSignerInit, error) {
+	s.gotDeployNet = network
 	return s.deployAddress, s.predictedAddress, s.alreadyDeployed, s.deployParamsB64, s.deploySigners, s.deployErr
 }
-func (s *stubMultisigAccounts) RegisterAccount(_ context.Context, _, _ string, _ int, _ string, members []webapp.RegisterMemberInput) (webapp.MultisigAccountSummary, error) {
+func (s *stubMultisigAccounts) RegisterAccount(_ context.Context, _, _ string, _ int, _, network string, members []webapp.RegisterMemberInput) (webapp.MultisigAccountSummary, error) {
 	s.gotRegisterMembers = members
+	s.gotRegisterNet = network
 	return s.registerAccount, s.registerErr
 }
 

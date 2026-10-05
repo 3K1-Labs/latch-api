@@ -78,4 +78,18 @@ const (
 	// when the notification doesn't exist, is already read, or doesn't
 	// belong to the caller.
 	ErrNotificationNotFound ErrorCode = "notification_not_found"
+	// ErrAccountNotOnNetwork is returned when a credential or smart account is
+	// valid but has no deployment on the requested network — e.g. a passkey
+	// registered on testnet, asked about with network: "mainnet". Distinct
+	// from signer_rule_not_found, which means the account exists on that
+	// network but this key isn't one of its signers.
+	ErrAccountNotOnNetwork ErrorCode = "account_not_on_network"
+	// ErrNetworkMismatch is returned when a request's network field disagrees
+	// with the network a persisted resource (a multisig draft or account) was
+	// actually created/deployed on.
+	ErrNetworkMismatch ErrorCode = "network_mismatch"
+	// ErrAccountNotFunded is returned by the Freighter/mnemonic deploy route
+	// on mainnet when the G-address doesn't exist on-chain yet — mainnet has
+	// no friendbot, so the client must fund the classic account first.
+	ErrAccountNotFunded ErrorCode = "account_not_funded"
 )

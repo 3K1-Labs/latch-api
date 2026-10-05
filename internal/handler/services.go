@@ -97,8 +97,8 @@ type deployProofService interface {
 // Deregister after a confirmed on-chain remove_signer for a backup signer
 // (see backupSignerConfirmService).
 type passkeyCredentialRegisterService interface {
-	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
-	Deregister(ctx context.Context, keyDataHex string) error
+	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32, network string) error
+	Deregister(ctx context.Context, keyDataHex, network string) error
 }
 
 // backupSignerConfirmService is the subset of *webapp.TransactionService the
@@ -120,7 +120,7 @@ type backupSignerConfirmService interface {
 // doesn't know which credential will answer until the OS ceremony returns one.
 type passkeyCredentialLookupService interface {
 	Challenge(ctx context.Context) (nonceHex string, ttl time.Duration, err error)
-	Lookup(ctx context.Context, credentialID, nonceHex string, authenticatorData, clientDataJSON, signature []byte) (service.PasskeyCredential, error)
+	Lookup(ctx context.Context, credentialID, nonceHex, network string, authenticatorData, clientDataJSON, signature []byte) (service.PasskeyCredential, error)
 }
 
 type cosignService interface {

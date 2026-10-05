@@ -51,6 +51,17 @@ var ErrNoContextRule = fmt.Errorf("no context rule found for this smart account"
 // rule should ever be used for it.
 var ErrSignerRuleNotFound = errors.New("this passkey is not an authorized signer of this smart account")
 
+// ErrSmartAccountNotOnNetwork is returned when get_context_rules_count's
+// simulation fails outright — the contract isn't deployed at this address on
+// this RPC's network at all, as opposed to a legitimately deployed account
+// that simply has zero rules (which simulates successfully and returns
+// U32(0); see rulesCount). LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §6.1:
+// before this distinction existed, a wallet that was never deployed on the
+// requested network silently looked like "zero rules", which FindRuleForSigner
+// then reported as signer_rule_not_found — the wrong diagnosis for a mainnet
+// passkey that was simply never deployed there.
+var ErrSmartAccountNotOnNetwork = errors.New("smart account not found on this network")
+
 type ContextRulesService struct {
 	soroban sorobanRPC
 	rpcURL  string
@@ -65,7 +76,16 @@ func (s *ContextRulesService) rulesCount(ctx context.Context, smartAccountAddres
 	if err != nil {
 		return 0, err
 	}
-	if !ok || val.Type != xdr.ScValTypeScvU32 || val.U32 == nil {
+	if !ok {
+		// Unlike getRule scanning a range of context-rule ids (where a
+		// missing id is routine and should be skipped), get_context_rules_count
+		// is called exactly once against the account's own address — a failed
+		// simulation here means the contract isn't deployed at this address on
+		// this network at all, not that it has zero rules (which simulates
+		// successfully and returns U32(0)).
+		return 0, ErrSmartAccountNotOnNetwork
+	}
+	if val.Type != xdr.ScValTypeScvU32 || val.U32 == nil {
 		return 0, nil
 	}
 	return uint32(*val.U32), nil

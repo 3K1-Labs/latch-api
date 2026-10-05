@@ -21,6 +21,19 @@ type smartAccountFactory interface {
 	Deploy(ctx context.Context, params xdr.ScVal, predictedAddress string) (smartAccountAddress string, alreadyDeployed bool, err error)
 }
 
+// SmartAccountFactoryOrNil boxes a possibly-nil *SmartAccountService into the
+// smartAccountFactory interface for NewMultisigDraftService/
+// NewMultisigAccountsService's factoryMainnet parameter, avoiding the classic
+// Go trap where a nil concrete pointer boxed into an interface produces a
+// non-nil interface value (which would make factoryFor's nil check always
+// false).
+func SmartAccountFactoryOrNil(svc *SmartAccountService) smartAccountFactory {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
 // buildMultisigAccountInitParams ports lib/smart-account-factory-multisig.ts's
 // AccountInitParams encoding: an ScMap with account_salt, signers (a vector
 // of Delegated/External signer tuples, in the caller-supplied canonical

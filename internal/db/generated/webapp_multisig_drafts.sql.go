@@ -28,7 +28,7 @@ func (q *Queries) DeleteMultisigDraftMember(ctx context.Context, arg DeleteMulti
 }
 
 const getActiveMultisigDraftForUser = `-- name: GetActiveMultisigDraftForUser :one
-SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at
+SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at, network
 FROM webapp.multisig_drafts
 WHERE creator_user_id = $1 AND status = 'collecting'
 ORDER BY created_at DESC
@@ -49,12 +49,13 @@ func (q *Queries) GetActiveMultisigDraftForUser(ctx context.Context, creatorUser
 		&i.SmartAccountAddress,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const getMultisigDraftByIDForCreator = `-- name: GetMultisigDraftByIDForCreator :one
-SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at
+SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at, network
 FROM webapp.multisig_drafts
 WHERE id = $1 AND creator_user_id = $2
 `
@@ -78,12 +79,13 @@ func (q *Queries) GetMultisigDraftByIDForCreator(ctx context.Context, arg GetMul
 		&i.SmartAccountAddress,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const getMultisigDraftByInviteToken = `-- name: GetMultisigDraftByInviteToken :one
-SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at
+SELECT id, creator_user_id, threshold, account_salt_hex, invite_token, status, predicted_address, smart_account_address, created_at, expires_at, network
 FROM webapp.multisig_drafts
 WHERE invite_token = $1
 `
@@ -102,13 +104,14 @@ func (q *Queries) GetMultisigDraftByInviteToken(ctx context.Context, inviteToken
 		&i.SmartAccountAddress,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const insertMultisigDraft = `-- name: InsertMultisigDraft :one
-INSERT INTO webapp.multisig_drafts (id, creator_user_id, threshold, account_salt_hex, invite_token, status, created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO webapp.multisig_drafts (id, creator_user_id, threshold, account_salt_hex, invite_token, status, network, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id
 `
 
@@ -119,6 +122,7 @@ type InsertMultisigDraftParams struct {
 	AccountSaltHex string        `json:"account_salt_hex"`
 	InviteToken    string        `json:"invite_token"`
 	Status         string        `json:"status"`
+	Network        string        `json:"network"`
 	CreatedAt      int64         `json:"created_at"`
 	ExpiresAt      sql.NullInt64 `json:"expires_at"`
 }
@@ -131,6 +135,7 @@ func (q *Queries) InsertMultisigDraft(ctx context.Context, arg InsertMultisigDra
 		arg.AccountSaltHex,
 		arg.InviteToken,
 		arg.Status,
+		arg.Network,
 		arg.CreatedAt,
 		arg.ExpiresAt,
 	)

@@ -34,6 +34,44 @@ func TestMultisigDraftsCreate_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"inviteUrl"`)
 }
 
+// TestMultisigDraftsCreate_Mainnet: network is parsed and threaded through to
+// the service, defaulting to testnet when omitted (see
+// TestMultisigDraftsCreate_Success above for the default case).
+func TestMultisigDraftsCreate_Mainnet(t *testing.T) {
+	stub := &stubMultisigDraft{draft: sampleSerializedDraft()}
+	h := NewMultisigDraftsHandler(stub)
+	r := gin.New()
+	r.POST("/multisig/drafts", h.Create)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts", postJSONBody(map[string]any{
+		"network": "mainnet",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "mainnet", stub.gotCreateNet)
+}
+
+// TestMultisigDraftsDeploy_NetworkMismatch: the service's
+// ErrMultisigNetworkMismatch maps to 409 network_mismatch, not a generic 500.
+func TestMultisigDraftsDeploy_NetworkMismatch(t *testing.T) {
+	stub := &stubMultisigDraft{deployErr: webapp.ErrMultisigNetworkMismatch}
+	h := NewMultisigDraftsHandler(stub)
+	r := gin.New()
+	r.POST("/multisig/drafts/:id/deploy", h.Deploy)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/drafts/draft-1/deploy", postJSONBody(map[string]any{
+		"network": "mainnet",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"network_mismatch"`)
+	assert.Equal(t, "mainnet", stub.gotDeployNet)
+}
+
 func TestMultisigDraftsGetActive_MissingQueryParam(t *testing.T) {
 	h := NewMultisigDraftsHandler(&stubMultisigDraft{})
 	r := gin.New()

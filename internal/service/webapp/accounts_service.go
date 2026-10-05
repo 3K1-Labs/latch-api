@@ -40,11 +40,18 @@ type Account struct {
 // id is not a signer of any account, distinct from "not proved" (checked by
 // the caller beforehand — this method never treats a credential id as proof
 // on its own).
-func (s *AccountsService) ListAccountsForProvedCredentials(ctx context.Context, credentialIDs []string) ([]Account, error) {
+//
+// network scopes the lookup to the credential's row on that network — the
+// same physical passkey can own one smart_accounts row per network
+// (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §3/§5). The account_signers
+// backup-signer index has no network column of its own (it hangs off a
+// smart_account_address, which already implies a network), so its fallback
+// path filters by checking the resolved account's own Network field instead.
+func (s *AccountsService) ListAccountsForProvedCredentials(ctx context.Context, credentialIDs []string, network string) ([]Account, error) {
 	seen := make(map[string]bool, len(credentialIDs))
 	out := make([]Account, 0, len(credentialIDs))
 	for _, credID := range credentialIDs {
-		row, err := s.q.GetSmartAccountByCredentialID(ctx, credID)
+		row, err := s.q.GetSmartAccountByCredentialID(ctx, db.GetSmartAccountByCredentialIDParams{CredentialID: credID, Network: network})
 		if err == nil {
 			if seen[row.SmartAccountAddress] {
 				continue
@@ -80,6 +87,9 @@ func (s *AccountsService) ListAccountsForProvedCredentials(ctx context.Context, 
 		}
 		if err != nil {
 			return nil, fmt.Errorf("get smart account by address %s: %w", signerRow.SmartAccountAddress, err)
+		}
+		if account.Network != network {
+			continue
 		}
 		seen[account.SmartAccountAddress] = true
 		out = append(out, Account{

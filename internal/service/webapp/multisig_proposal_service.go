@@ -165,9 +165,19 @@ type MultisigProposalService struct {
 	rpcURL                  string
 	networkPassphrase       string
 	webauthnVerifierAddress string
+	// network is which Stellar network ("testnet"/"mainnet") this instance's
+	// rpcURL/passphrase/verifier/bundler actually target — set once at
+	// construction (cmd/server/main.go builds one instance per network, like
+	// TransactionService/SmartAccountService). Every account lookup checks
+	// the loaded row's own persisted network against this field, so a
+	// request routed to the wrong instance fails closed with
+	// ErrMultisigNetworkMismatch instead of silently running chain calls
+	// against the wrong network for that account's address
+	// (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §7.2).
+	network string
 }
 
-func NewMultisigProposalService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, balances *BalancesService, txSvc transactionSubmitter, q *db.Queries, rpcURL, networkPassphrase, webauthnVerifierAddress string) *MultisigProposalService {
+func NewMultisigProposalService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, balances *BalancesService, txSvc transactionSubmitter, q *db.Queries, rpcURL, networkPassphrase, webauthnVerifierAddress, network string) *MultisigProposalService {
 	return &MultisigProposalService{
 		soroban:                 soroban,
 		bundler:                 bundler,
@@ -178,6 +188,7 @@ func NewMultisigProposalService(soroban sorobanRPC, bundler *BundlerService, con
 		rpcURL:                  rpcURL,
 		networkPassphrase:       networkPassphrase,
 		webauthnVerifierAddress: webauthnVerifierAddress,
+		network:                 network,
 	}
 }
 
@@ -190,6 +201,9 @@ func (s *MultisigProposalService) getOwnedAccountByAddress(ctx context.Context, 
 	}
 	if err != nil {
 		return db.WebappMultisigAccount{}, fmt.Errorf("get multisig account: %w", err)
+	}
+	if account.Network != s.network {
+		return db.WebappMultisigAccount{}, ErrMultisigNetworkMismatch
 	}
 	granted, err := s.accountAccessGranted(ctx, account, userID)
 	if err != nil {
@@ -208,6 +222,9 @@ func (s *MultisigProposalService) getOwnedAccountByID(ctx context.Context, accou
 	}
 	if err != nil {
 		return db.WebappMultisigAccount{}, fmt.Errorf("get multisig account: %w", err)
+	}
+	if account.Network != s.network {
+		return db.WebappMultisigAccount{}, ErrMultisigNetworkMismatch
 	}
 	granted, err := s.accountAccessGranted(ctx, account, userID)
 	if err != nil {

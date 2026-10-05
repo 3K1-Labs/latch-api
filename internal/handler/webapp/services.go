@@ -19,7 +19,7 @@ type webauthnService interface {
 
 type smartAccountService interface {
 	DeployForCredential(ctx context.Context, userID string, cred webapp.RegisteredCredential) (keyDataHex, saltHex, smartAccountAddress string, deployed, alreadyDeployed bool, err error)
-	GetByCredentialID(ctx context.Context, credentialID string) (address, keyDataHex string, deployed bool, err error)
+	GetByCredentialID(ctx context.Context, credentialID, network string) (address, keyDataHex string, deployed bool, err error)
 	Query(ctx context.Context, keyDataHex string) (address string, deployed bool, err error)
 	DeployByKeyData(ctx context.Context, keyDataHex string) (address string, alreadyDeployed bool, err error)
 	QueryFreighter(ctx context.Context, gAddress string) (address string, deployed bool, err error)
@@ -28,7 +28,7 @@ type smartAccountService interface {
 }
 
 type accountsService interface {
-	ListAccountsForProvedCredentials(ctx context.Context, credentialIDs []string) ([]webapp.Account, error)
+	ListAccountsForProvedCredentials(ctx context.Context, credentialIDs []string, network string) ([]webapp.Account, error)
 }
 
 // sessionService mints a fresh webapp session bound to an existing user (used
@@ -53,8 +53,8 @@ type sessionService interface {
 // wiring it here closes the gap where an extension-created passkey account is
 // invisible to that recovery lookup.
 type passkeyCredentialIndexService interface {
-	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
-	Deregister(ctx context.Context, keyDataHex string) error
+	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32, network string) error
+	Deregister(ctx context.Context, keyDataHex, network string) error
 }
 
 type auditService interface {
@@ -87,23 +87,23 @@ type balancesService interface {
 }
 
 type multisigDraftService interface {
-	CreateDraft(ctx context.Context, userID string) (webapp.SerializedDraft, error)
+	CreateDraft(ctx context.Context, userID, network string) (webapp.SerializedDraft, error)
 	GetActiveDraft(ctx context.Context, userID string) (webapp.SerializedDraft, error)
 	GetDraftForCreator(ctx context.Context, draftID, userID string) (webapp.SerializedDraft, error)
 	UpdateThreshold(ctx context.Context, draftID, userID string, threshold int) (webapp.SerializedDraft, error)
 	AddMember(ctx context.Context, draftID, userID string, member webapp.DraftMultisigMember) (webapp.SerializedDraft, error)
 	DeleteMember(ctx context.Context, draftID, memberID, userID string) (webapp.SerializedDraft, error)
-	PredictAddress(ctx context.Context, draftID, userID string) (address, paramsXdrBase64 string, draft webapp.SerializedDraft, err error)
-	Deploy(ctx context.Context, draftID, userID string) (address string, alreadyDeployed bool, draft webapp.SerializedDraft, err error)
+	PredictAddress(ctx context.Context, draftID, userID, network string) (address, paramsXdrBase64 string, draft webapp.SerializedDraft, err error)
+	Deploy(ctx context.Context, draftID, userID, network string) (address string, alreadyDeployed bool, draft webapp.SerializedDraft, err error)
 	GetPublicDraftByToken(ctx context.Context, token string) (webapp.PublicDraftView, error)
 	AddMemberViaInvite(ctx context.Context, token, userID string, member webapp.DraftMultisigMember) (webapp.PublicDraftView, error)
 }
 
 type multisigAccountsService interface {
 	ListAccounts(ctx context.Context, userID string) ([]webapp.MultisigAccountSummary, error)
-	DraftParams(ctx context.Context, threshold int, signers []webapp.MultisigSignerInit, accountSaltHex string) (smartAccountAddress, resolvedSaltHex, paramsXdrBase64 string, resolvedSigners []webapp.MultisigSignerInit, err error)
-	DeployParams(ctx context.Context, threshold int, signers []webapp.MultisigSignerInit, accountSaltHex string) (smartAccountAddress, predictedAddress string, alreadyDeployed bool, paramsXdrBase64 string, resolvedSigners []webapp.MultisigSignerInit, err error)
-	RegisterAccount(ctx context.Context, userID, smartAccountAddress string, threshold int, accountSaltHex string, members []webapp.RegisterMemberInput) (webapp.MultisigAccountSummary, error)
+	DraftParams(ctx context.Context, threshold int, signers []webapp.MultisigSignerInit, accountSaltHex, network string) (smartAccountAddress, resolvedSaltHex, paramsXdrBase64 string, resolvedSigners []webapp.MultisigSignerInit, err error)
+	DeployParams(ctx context.Context, threshold int, signers []webapp.MultisigSignerInit, accountSaltHex, network string) (smartAccountAddress, predictedAddress string, alreadyDeployed bool, paramsXdrBase64 string, resolvedSigners []webapp.MultisigSignerInit, err error)
+	RegisterAccount(ctx context.Context, userID, smartAccountAddress string, threshold int, accountSaltHex, network string, members []webapp.RegisterMemberInput) (webapp.MultisigAccountSummary, error)
 }
 
 type multisigProposalService interface {
@@ -145,7 +145,7 @@ type accountSignerService interface {
 	MarkSignerContextRule(ctx context.Context, smartAccountAddress, credentialID string, contextRuleID uint32) error
 	GetSignerContextRuleID(ctx context.Context, smartAccountAddress, credentialID string) (contextRuleID uint32, ok bool, err error)
 	RemoveCredential(ctx context.Context, smartAccountAddress, credentialID string) error
-	ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress string, err error)
+	ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress, network string, err error)
 }
 
 type counterService interface {

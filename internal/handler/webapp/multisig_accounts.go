@@ -63,6 +63,7 @@ func (h *MultisigAccountsHandler) List(c *gin.Context) {
 			"threshold":           a.Threshold,
 			"accountSaltHex":      a.AccountSaltHex,
 			"createdAt":           a.CreatedAt,
+			"network":             a.Network,
 			"proposalCount":       a.ProposalCount,
 			"members":             members,
 			"memberId":            nilIfEmpty(a.MemberID),
@@ -95,6 +96,7 @@ func signerInitsJSON(signers []webapp.MultisigSignerInit) []gin.H {
 }
 
 type draftAccountRequest struct {
+	Network        string                      `json:"network,omitempty"`
 	Threshold      int                         `json:"threshold" binding:"required"`
 	Signers        []multisigSignerInitRequest `json:"signers" binding:"required"`
 	AccountSaltHex string                      `json:"accountSaltHex,omitempty"`
@@ -117,7 +119,13 @@ func (h *MultisigAccountsHandler) Draft(c *gin.Context) {
 		return
 	}
 
-	address, saltHex, paramsB64, signers, err := h.accountsSvc.DraftParams(c.Request.Context(), req.Threshold, toSignerInits(req.Signers), req.AccountSaltHex)
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	address, saltHex, paramsB64, signers, err := h.accountsSvc.DraftParams(c.Request.Context(), req.Threshold, toSignerInits(req.Signers), req.AccountSaltHex, string(network))
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -129,10 +137,12 @@ func (h *MultisigAccountsHandler) Draft(c *gin.Context) {
 		"threshold":           req.Threshold,
 		"signers":             signerInitsJSON(signers),
 		"paramsXdrBase64":     paramsB64,
+		"network":             string(network),
 	})
 }
 
 type deployAccountRequest struct {
+	Network        string                      `json:"network,omitempty"`
 	Threshold      int                         `json:"threshold" binding:"required"`
 	Signers        []multisigSignerInitRequest `json:"signers" binding:"required"`
 	AccountSaltHex string                      `json:"accountSaltHex" binding:"required"`
@@ -155,7 +165,13 @@ func (h *MultisigAccountsHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	address, predictedAddress, alreadyDeployed, paramsB64, signers, err := h.accountsSvc.DeployParams(c.Request.Context(), req.Threshold, toSignerInits(req.Signers), req.AccountSaltHex)
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	address, predictedAddress, alreadyDeployed, paramsB64, signers, err := h.accountsSvc.DeployParams(c.Request.Context(), req.Threshold, toSignerInits(req.Signers), req.AccountSaltHex, string(network))
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -169,6 +185,7 @@ func (h *MultisigAccountsHandler) Deploy(c *gin.Context) {
 		"threshold":           req.Threshold,
 		"signers":             signerInitsJSON(signers),
 		"paramsXdrBase64":     paramsB64,
+		"network":             string(network),
 	})
 }
 
@@ -181,6 +198,7 @@ type registerMemberRequest struct {
 }
 
 type registerAccountRequest struct {
+	Network             string                  `json:"network,omitempty"`
 	SmartAccountAddress string                  `json:"smartAccountAddress" binding:"required"`
 	Threshold           int                     `json:"threshold" binding:"required"`
 	AccountSaltHex      string                  `json:"accountSaltHex" binding:"required"`
@@ -206,6 +224,12 @@ func (h *MultisigAccountsHandler) Register(c *gin.Context) {
 		return
 	}
 
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
 	members := make([]webapp.RegisterMemberInput, len(req.Members))
 	for i, m := range req.Members {
 		memberType := m.Type
@@ -222,7 +246,7 @@ func (h *MultisigAccountsHandler) Register(c *gin.Context) {
 		members[i] = webapp.RegisterMemberInput{Type: memberType, KeyDataHex: m.KeyDataHex, CredentialID: m.CredentialID, GAddress: m.GAddress, Label: m.Label}
 	}
 
-	account, err := h.accountsSvc.RegisterAccount(c.Request.Context(), userID, req.SmartAccountAddress, req.Threshold, req.AccountSaltHex, members)
+	account, err := h.accountsSvc.RegisterAccount(c.Request.Context(), userID, req.SmartAccountAddress, req.Threshold, req.AccountSaltHex, string(network), members)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -245,6 +269,7 @@ func (h *MultisigAccountsHandler) Register(c *gin.Context) {
 			"smartAccountAddress": account.SmartAccountAddress,
 			"threshold":           account.Threshold,
 			"accountSaltHex":      account.AccountSaltHex,
+			"network":             account.Network,
 			"members":             memberJSON,
 		},
 	})

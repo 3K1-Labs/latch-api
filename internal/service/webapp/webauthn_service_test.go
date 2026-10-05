@@ -334,8 +334,8 @@ func TestFinishAuthentication_AdoptsExternalPasskey(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM passkey_credentials").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
-		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, addr, "", int32(0), time.Now(), time.Now()))
+			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at", "network",
+		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, addr, "", int32(0), time.Now(), time.Now(), "testnet"))
 	mock.ExpectExec("DELETE FROM webapp.webauthn_challenges").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO webapp.users").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -383,8 +383,8 @@ func TestFinishAuthentication_AdoptExternalPasskeyBadSignature(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM passkey_credentials").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
-		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, "CDJKQLOBZG6GJDQLLYYB7Z65MMFD4B2C45ANEIGTACTBALRZXLZRLZMK", "", int32(0), time.Now(), time.Now()))
+			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at", "network",
+		}).AddRow(uuid.New(), hex.EncodeToString(credID), keyDataHex, "CDJKQLOBZG6GJDQLLYYB7Z65MMFD4B2C45ANEIGTACTBALRZXLZRLZMK", "", int32(0), time.Now(), time.Now(), "testnet"))
 
 	_, err := svc.FinishAuthentication(context.Background(), FinishAuthenticationInput{
 		UserID:            uid.String(),

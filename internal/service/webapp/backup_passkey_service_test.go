@@ -43,8 +43,8 @@ func TestBackupPasskeyService_RecordIntent(t *testing.T) {
 		userID := uuid.New()
 		otherUserID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(
-			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at"}).
-				AddRow(uuid.New(), otherUserID, "cred-1", "keyhex", "salthex", "CADDR", int32(1), int64(1000)),
+			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at", "network"}).
+				AddRow(uuid.New(), otherUserID, "cred-1", "keyhex", "salthex", "CADDR", int32(1), int64(1000), "testnet"),
 		)
 
 		err := svc.RecordIntent(context.Background(), userID.String(), "CADDR", "")
@@ -56,8 +56,8 @@ func TestBackupPasskeyService_RecordIntent(t *testing.T) {
 		svc, mock := newMockBackupPasskeyService(t)
 		userID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(
-			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at"}).
-				AddRow(uuid.New(), userID, "cred-1", "keyhex", "salthex", "CADDR", int32(1), int64(1000)),
+			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at", "network"}).
+				AddRow(uuid.New(), userID, "cred-1", "keyhex", "salthex", "CADDR", int32(1), int64(1000), "testnet"),
 		)
 		mock.ExpectQuery("SELECT (.+) FROM webapp.account_signers").
 			WithArgs("CADDR", backupPasskeyIntentSignerType).
@@ -76,8 +76,8 @@ func TestBackupPasskeyService_RecordIntent(t *testing.T) {
 		userID := uuid.New()
 		intentID := uuid.New()
 		mock.ExpectQuery("SELECT (.+) FROM webapp.smart_accounts").WithArgs("CADDR").WillReturnRows(
-			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at"}).
-				AddRow(uuid.New(), userID, "cred-1", "keyhex", "salthex", "CADDR", int32(1), int64(1000)),
+			sqlmock.NewRows([]string{"id", "user_id", "credential_id", "key_data_hex", "salt_hex", "smart_account_address", "deployed", "created_at", "network"}).
+				AddRow(uuid.New(), userID, "cred-1", "keyhex", "salthex", "CADDR", int32(1), int64(1000), "testnet"),
 		)
 		mock.ExpectQuery("SELECT (.+) FROM webapp.account_signers").
 			WithArgs("CADDR", backupPasskeyIntentSignerType).

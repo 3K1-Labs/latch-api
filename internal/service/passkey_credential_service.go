@@ -89,8 +89,12 @@ func credentialIDFromKeyData(keyDataHex string) (string, error) {
 
 // Register upserts the recovery-index row for a deployed passkey. Idempotent:
 // re-registering the same credential with a new label/seq (an account rename,
-// a redeploy) simply overwrites the row.
-func (s *PasskeyCredentialService) Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
+// a redeploy) simply overwrites the row. network is the already-resolved
+// network ("testnet"/"mainnet") the deploy/add happened on — the same
+// physical passkey can hold one address per network
+// (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §3), so the index row is scoped
+// by (credential_id, network), not credential_id alone.
+func (s *PasskeyCredentialService) Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32, network string) error {
 	credentialID, err := credentialIDFromKeyData(keyDataHex)
 	if err != nil {
 		return err
@@ -108,23 +112,27 @@ func (s *PasskeyCredentialService) Register(ctx context.Context, keyDataHex, sma
 		SmartAccountAddress: smartAccountAddress,
 		Label:               label,
 		Seq:                 seq,
+		Network:             network,
 	}); err != nil {
 		return fmt.Errorf("upsert passkey credential: %w", err)
 	}
 	return nil
 }
 
-// Deregister removes the recovery-index row for keyDataHex. Called only
-// after an on-chain remove_signer call succeeds
+// Deregister removes the recovery-index row for keyDataHex on network. Called
+// only after an on-chain remove_signer call succeeds
 // (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R11) — a phantom index entry for a
 // credential that no longer authorizes the account is worse than a missing
 // one, since restore would hand back a wallet the passkey can't sign for.
-func (s *PasskeyCredentialService) Deregister(ctx context.Context, keyDataHex string) error {
+func (s *PasskeyCredentialService) Deregister(ctx context.Context, keyDataHex, network string) error {
 	credentialID, err := credentialIDFromKeyData(keyDataHex)
 	if err != nil {
 		return err
 	}
-	if err := s.q.DeletePasskeyCredential(ctx, credentialID); err != nil {
+	if err := s.q.DeletePasskeyCredential(ctx, db.DeletePasskeyCredentialParams{
+		CredentialID: credentialID,
+		Network:      network,
+	}); err != nil {
 		return fmt.Errorf("delete passkey credential: %w", err)
 	}
 	return nil
@@ -141,12 +149,17 @@ func (s *PasskeyCredentialService) Challenge(ctx context.Context) (nonceHex stri
 // registered public key, and returns its recovery record. The nonce is
 // consumed first and unconditionally, matching DeployProofService.Verify: it
 // is single-use, so a failed verification must not leave it replayable.
-func (s *PasskeyCredentialService) Lookup(ctx context.Context, credentialID, nonceHex string, authenticatorData, clientDataJSON, signature []byte) (PasskeyCredential, error) {
+//
+// network scopes which of this credential's (possibly two, one per network)
+// index rows to look up — already resolved by the caller (e.g. via
+// webapp.ParseNetwork, which defaults an omitted request field to
+// "testnet"), since the stored column is never empty.
+func (s *PasskeyCredentialService) Lookup(ctx context.Context, credentialID, nonceHex, network string, authenticatorData, clientDataJSON, signature []byte) (PasskeyCredential, error) {
 	if err := s.nonce.Consume(ctx, nonceHex, "", passkeyLookupNonceKeyType, passkeyLookupNonceScope); err != nil {
 		return PasskeyCredential{}, ErrCredentialNotFound
 	}
 
-	row, err := s.q.GetPasskeyCredential(ctx, credentialID)
+	row, err := s.q.GetPasskeyCredential(ctx, db.GetPasskeyCredentialParams{CredentialID: credentialID, Network: network})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return PasskeyCredential{}, ErrCredentialNotFound

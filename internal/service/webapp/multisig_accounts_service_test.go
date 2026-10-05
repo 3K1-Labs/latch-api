@@ -14,11 +14,19 @@ import (
 
 func newMockMultisigAccountsService(t *testing.T, factory smartAccountFactory) (*MultisigAccountsService, sqlmock.Sqlmock) {
 	t.Helper()
+	return newMockMultisigAccountsServiceWithMainnet(t, factory, nil)
+}
+
+// newMockMultisigAccountsServiceWithMainnet is newMockMultisigAccountsService
+// with an explicit (possibly non-nil) mainnet factory, for tests exercising
+// mainnet draft/deploy routing.
+func newMockMultisigAccountsServiceWithMainnet(t *testing.T, factory, factoryMainnet smartAccountFactory) (*MultisigAccountsService, sqlmock.Sqlmock) {
+	t.Helper()
 	sqlDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { sqlDB.Close() })
 	q := db.New(sqlDB)
-	return NewMultisigAccountsService(sqlDB, q, factory), mock
+	return NewMultisigAccountsService(sqlDB, q, factory, factoryMainnet), mock
 }
 
 func TestValidateSignerInits(t *testing.T) {
@@ -89,7 +97,7 @@ func TestDraftParams(t *testing.T) {
 		svc, _ := newMockMultisigAccountsService(t, factory)
 
 		addr, saltHex, paramsB64, signers, err := svc.DraftParams(context.Background(), 2,
-			[]MultisigSignerInit{{Type: "delegated", GAddress: validG1}, {Type: "delegated", GAddress: validG2}}, "")
+			[]MultisigSignerInit{{Type: "delegated", GAddress: validG1}, {Type: "delegated", GAddress: validG2}}, "", "testnet")
 		require.NoError(t, err)
 		assert.Equal(t, predicted, addr)
 		assert.NotEmpty(t, saltHex)
@@ -99,7 +107,7 @@ func TestDraftParams(t *testing.T) {
 
 	t.Run("validation error", func(t *testing.T) {
 		svc, _ := newMockMultisigAccountsService(t, nil)
-		_, _, _, _, err := svc.DraftParams(context.Background(), 1, []MultisigSignerInit{{Type: "delegated", GAddress: validG1}}, "")
+		_, _, _, _, err := svc.DraftParams(context.Background(), 1, []MultisigSignerInit{{Type: "delegated", GAddress: validG1}}, "", "testnet")
 		require.ErrorIs(t, err, ErrMultisigAccountSignerValidation)
 	})
 }
@@ -119,7 +127,7 @@ func TestDeployParams(t *testing.T) {
 		svc, _ := newMockMultisigAccountsService(t, factory)
 
 		addr, predictedAddr, already, paramsB64, signers, err := svc.DeployParams(context.Background(), 2,
-			[]MultisigSignerInit{{Type: "delegated", GAddress: validG1}, {Type: "delegated", GAddress: validG2}}, "aabbcc")
+			[]MultisigSignerInit{{Type: "delegated", GAddress: validG1}, {Type: "delegated", GAddress: validG2}}, "aabbcc", "testnet")
 		require.NoError(t, err)
 		assert.Equal(t, deployed, addr)
 		assert.Equal(t, deployed, predictedAddr)
@@ -131,7 +139,7 @@ func TestDeployParams(t *testing.T) {
 	t.Run("missing salt", func(t *testing.T) {
 		svc, _ := newMockMultisigAccountsService(t, nil)
 		_, _, _, _, _, err := svc.DeployParams(context.Background(), 2,
-			[]MultisigSignerInit{{Type: "delegated", GAddress: validG1}, {Type: "delegated", GAddress: validG2}}, "")
+			[]MultisigSignerInit{{Type: "delegated", GAddress: validG1}, {Type: "delegated", GAddress: validG2}}, "", "testnet")
 		require.ErrorIs(t, err, ErrMultisigAccountSignerValidation)
 	})
 }
@@ -144,8 +152,8 @@ func TestMultisigListAccounts_Success(t *testing.T) {
 
 	svc, mock := newMockMultisigAccountsService(t, nil)
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_accounts").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "smart_account_address", "threshold", "account_salt_hex", "created_at", "proposal_count"}).
-			AddRow(accountID, addr, 2, "aabb", 1000, 3))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "smart_account_address", "threshold", "account_salt_hex", "created_at", "network", "proposal_count"}).
+			AddRow(accountID, addr, 2, "aabb", 1000, "testnet", 3))
 	mock.ExpectQuery("SELECT (.+) FROM webapp.multisig_members").
 		WillReturnRows(sqlmock.NewRows(multisigMemberColumns).
 			AddRow(otherMemberID, accountID, "webauthn", "m1", "04ab", "cred1", nil, 1000, nil).
@@ -179,7 +187,7 @@ func TestRegisterAccount(t *testing.T) {
 		mock.ExpectQuery("INSERT INTO webapp.multisig_members").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 		mock.ExpectCommit()
 
-		result, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 2, "aabbcc", []RegisterMemberInput{
+		result, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 2, "aabbcc", "testnet", []RegisterMemberInput{
 			{Type: "delegated", GAddress: validG1},
 			{Type: "delegated", GAddress: validG2},
 		})
@@ -210,7 +218,7 @@ func TestRegisterAccount(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 		mock.ExpectCommit()
 
-		result, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 2, "aabbcc", []RegisterMemberInput{
+		result, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 2, "aabbcc", "testnet", []RegisterMemberInput{
 			{Type: "delegated", GAddress: validG1},
 			{Type: "webauthn", KeyDataHex: testWebauthnKeyDataHex(), CredentialID: credentialID},
 		})
@@ -222,7 +230,7 @@ func TestRegisterAccount(t *testing.T) {
 
 	t.Run("too few members", func(t *testing.T) {
 		svc, _ := newMockMultisigAccountsService(t, nil)
-		_, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 1, "aabbcc", []RegisterMemberInput{
+		_, err := svc.RegisterAccount(context.Background(), userID.String(), addr, 1, "aabbcc", "testnet", []RegisterMemberInput{
 			{Type: "delegated", GAddress: validG1},
 		})
 		require.ErrorIs(t, err, ErrMultisigAccountSignerValidation)
@@ -230,7 +238,7 @@ func TestRegisterAccount(t *testing.T) {
 
 	t.Run("missing smart account address", func(t *testing.T) {
 		svc, _ := newMockMultisigAccountsService(t, nil)
-		_, err := svc.RegisterAccount(context.Background(), userID.String(), "", 2, "aabbcc", []RegisterMemberInput{
+		_, err := svc.RegisterAccount(context.Background(), userID.String(), "", 2, "aabbcc", "testnet", []RegisterMemberInput{
 			{Type: "delegated", GAddress: validG1},
 			{Type: "delegated", GAddress: validG2},
 		})
