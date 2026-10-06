@@ -48,23 +48,31 @@ func testCredential(t *testing.T) (priv *ecdsa.PrivateKey, credentialID, keyData
 	return priv, credentialID, pubHex + credentialID, validWalletRef
 }
 
+// passkeyCredentialRows builds a mock result row for the passkey_credentials
+// table, including the network column every SELECT * now returns.
+func passkeyCredentialRows(credentialID, keyDataHex, address, label string, seq int32, network string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at", "network",
+	}).AddRow(uuid.New(), credentialID, keyDataHex, address, label, seq, time.Now(), time.Now(), network)
+}
+
 func TestPasskeyCredentialRegister_KeyDataTooShort(t *testing.T) {
 	svc, _ := newPasskeyCredentialService(t)
-	err := svc.Register(context.Background(), "ab", validWalletRef, "Savings", 2)
+	err := svc.Register(context.Background(), "ab", validWalletRef, "Savings", 2, "testnet")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestPasskeyCredentialRegister_KeyDataNotHex(t *testing.T) {
 	svc, _ := newPasskeyCredentialService(t)
 	notHex := "zz" + string(make([]byte, webauthnPubKeyHexLen+8))
-	err := svc.Register(context.Background(), notHex, validWalletRef, "Savings", 2)
+	err := svc.Register(context.Background(), notHex, validWalletRef, "Savings", 2, "testnet")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestPasskeyCredentialRegister_InvalidAddress(t *testing.T) {
 	svc, _ := newPasskeyCredentialService(t)
 	_, _, keyDataHex, _ := testCredential(t)
-	err := svc.Register(context.Background(), keyDataHex, "not-an-address", "Savings", 2)
+	err := svc.Register(context.Background(), keyDataHex, "not-an-address", "Savings", 2, "testnet")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
@@ -73,11 +81,20 @@ func TestPasskeyCredentialRegister_Success(t *testing.T) {
 	_, credentialID, keyDataHex, address := testCredential(t)
 
 	mock.ExpectQuery("INSERT INTO passkey_credentials").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
-		}).AddRow(uuid.New(), credentialID, keyDataHex, address, "Savings", int32(2), time.Now(), time.Now()))
+		WillReturnRows(passkeyCredentialRows(credentialID, keyDataHex, address, "Savings", 2, "testnet"))
 
-	err := svc.Register(context.Background(), keyDataHex, address, "Savings", 2)
+	err := svc.Register(context.Background(), keyDataHex, address, "Savings", 2, "testnet")
+	require.NoError(t, err)
+}
+
+func TestPasskeyCredentialRegister_Mainnet(t *testing.T) {
+	svc, mock := newPasskeyCredentialService(t)
+	_, credentialID, keyDataHex, address := testCredential(t)
+
+	mock.ExpectQuery("INSERT INTO passkey_credentials").
+		WillReturnRows(passkeyCredentialRows(credentialID, keyDataHex, address, "Savings", 2, "mainnet"))
+
+	err := svc.Register(context.Background(), keyDataHex, address, "Savings", 2, "mainnet")
 	require.NoError(t, err)
 }
 
@@ -94,11 +111,9 @@ func TestPasskeyCredentialLookup_RoundTrip(t *testing.T) {
 	_, authData, clientDataJSON, sig := makeAssertion(t, priv, nonceBytes, testOrigin)
 
 	mock.ExpectQuery("SELECT (.+) FROM passkey_credentials").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
-		}).AddRow(uuid.New(), credentialID, keyDataHex, address, "Savings", int32(2), time.Now(), time.Now()))
+		WillReturnRows(passkeyCredentialRows(credentialID, keyDataHex, address, "Savings", 2, "testnet"))
 
-	cred, err := svc.Lookup(context.Background(), credentialID, nonce, authData, clientDataJSON, sig)
+	cred, err := svc.Lookup(context.Background(), credentialID, nonce, "testnet", authData, clientDataJSON, sig)
 	require.NoError(t, err)
 	assert.Equal(t, address, cred.SmartAccountAddress)
 	assert.Equal(t, "Savings", cred.Label)
@@ -115,7 +130,7 @@ func TestPasskeyCredentialLookup_UnknownCredential(t *testing.T) {
 
 	mock.ExpectQuery("SELECT (.+) FROM passkey_credentials").WillReturnError(sql.ErrNoRows)
 
-	_, err = svc.Lookup(context.Background(), "deadbeef", nonce, []byte{}, []byte("{}"), []byte{})
+	_, err = svc.Lookup(context.Background(), "deadbeef", nonce, "testnet", []byte{}, []byte("{}"), []byte{})
 	require.ErrorIs(t, err, ErrCredentialNotFound)
 }
 
@@ -134,17 +149,15 @@ func TestPasskeyCredentialLookup_BadSignature(t *testing.T) {
 	_, authData, clientDataJSON, sig := makeAssertion(t, other, nonceBytes, testOrigin)
 
 	mock.ExpectQuery("SELECT (.+) FROM passkey_credentials").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
-		}).AddRow(uuid.New(), credentialID, keyDataHex, address, "Savings", int32(1), time.Now(), time.Now()))
+		WillReturnRows(passkeyCredentialRows(credentialID, keyDataHex, address, "Savings", 1, "testnet"))
 
-	_, err = svc.Lookup(context.Background(), credentialID, nonce, authData, clientDataJSON, sig)
+	_, err = svc.Lookup(context.Background(), credentialID, nonce, "testnet", authData, clientDataJSON, sig)
 	require.ErrorIs(t, err, ErrCredentialNotFound)
 }
 
 func TestPasskeyCredentialLookup_UnknownNonce(t *testing.T) {
 	svc, _ := newPasskeyCredentialService(t)
-	_, err := svc.Lookup(context.Background(), "deadbeef", hex.EncodeToString([]byte("not-a-real-nonce")), []byte{}, []byte("{}"), []byte{})
+	_, err := svc.Lookup(context.Background(), "deadbeef", hex.EncodeToString([]byte("not-a-real-nonce")), "testnet", []byte{}, []byte("{}"), []byte{})
 	require.ErrorIs(t, err, ErrCredentialNotFound)
 }
 
@@ -159,15 +172,13 @@ func TestPasskeyCredentialLookup_NonceIsSingleUse(t *testing.T) {
 	_, authData, clientDataJSON, sig := makeAssertion(t, priv, nonceBytes, testOrigin)
 
 	mock.ExpectQuery("SELECT (.+) FROM passkey_credentials").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "credential_id", "key_data_hex", "smart_account_address", "label", "seq", "created_at", "updated_at",
-		}).AddRow(uuid.New(), credentialID, keyDataHex, address, "Savings", int32(1), time.Now(), time.Now()))
+		WillReturnRows(passkeyCredentialRows(credentialID, keyDataHex, address, "Savings", 1, "testnet"))
 
-	_, err = svc.Lookup(context.Background(), credentialID, nonce, authData, clientDataJSON, sig)
+	_, err = svc.Lookup(context.Background(), credentialID, nonce, "testnet", authData, clientDataJSON, sig)
 	require.NoError(t, err)
 
 	// Replayed: the nonce is already consumed, so this must fail before ever
 	// touching the DB again (no second mock expectation set up).
-	_, err = svc.Lookup(context.Background(), credentialID, nonce, authData, clientDataJSON, sig)
+	_, err = svc.Lookup(context.Background(), credentialID, nonce, "testnet", authData, clientDataJSON, sig)
 	require.ErrorIs(t, err, ErrCredentialNotFound)
 }

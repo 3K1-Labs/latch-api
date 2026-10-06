@@ -23,7 +23,7 @@ func newTestTransactionService(t *testing.T, rpc sorobanRPC, contextRules *Conte
 
 	verifierAddr := testContractAddress(t)
 	ed25519VerifierAddr := testContractAddress(t)
-	svc := NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t))
+	svc := NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), "testnet")
 	return svc, bundlerKp
 }
 
@@ -384,7 +384,7 @@ func TestSubmitWebAuthn_SignsSynthesizedDelegatedEntry(t *testing.T) {
 	}
 	bundlerSvc, err := NewBundlerService(bundlerKp.Seed(), "")
 	require.NoError(t, err)
-	svc := NewTransactionService(rpc, bundlerSvc, defaultContextRulesService(t), "https://rpc.example.com", testPassphrase, testContractAddress(t), testContractAddress(t), testContractAddress(t))
+	svc := NewTransactionService(rpc, bundlerSvc, defaultContextRulesService(t), "https://rpc.example.com", testPassphrase, testContractAddress(t), testContractAddress(t), testContractAddress(t), "testnet")
 	txXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
 
 	result, err := svc.SubmitWebAuthn(context.Background(), SubmitWebAuthnInput{

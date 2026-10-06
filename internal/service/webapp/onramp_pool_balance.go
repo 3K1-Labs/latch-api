@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/latch/backend/internal/service"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // PoolPaymentRecord is one recent transaction observed against the on-ramp
@@ -29,15 +32,6 @@ type PoolAccountSnapshot struct {
 	Network            string
 	XLMBalance         string
 	RecentTransactions []PoolPaymentRecord
-}
-
-type horizonBalance struct {
-	Balance   string `json:"balance"`
-	AssetType string `json:"asset_type"`
-}
-
-type horizonAccount struct {
-	Balances []horizonBalance `json:"balances"`
 }
 
 type horizonTransaction struct {
@@ -94,7 +88,15 @@ func (f *poolBalanceFetcher) horizonGet(ctx context.Context, endpoint string, ou
 // fetchPoolAccountSnapshot(): the pool's native XLM balance plus its most
 // recent 20 transactions, optionally filtered to a single memo (used to find
 // the payment matching one on-ramp intent).
-func (f *poolBalanceFetcher) FetchSnapshot(ctx context.Context, horizonURL, network, poolAddress, memoFilter string) (PoolAccountSnapshot, error) {
+//
+// The balance half reads over Soroban RPC, not Horizon — Stellar's own
+// Horizon→RPC migration guide maps a classic GET /accounts/{address} to
+// getLedgerEntries directly (docs/horizon-to-rpc-migration-plan.md, Bucket 2).
+// The transaction-matching half stays on Horizon for now: Horizon's
+// /accounts/{id}/transactions has no RPC equivalent (RPC's getTransactions is
+// a ledger-range scan with no per-account filter), and migrating it needs the
+// retention-window validation the plan calls out before cutover.
+func (f *poolBalanceFetcher) FetchSnapshot(ctx context.Context, soroban sorobanRPC, rpcURL, horizonURL, network, poolAddress, memoFilter string) (PoolAccountSnapshot, error) {
 	snapshot := PoolAccountSnapshot{
 		PoolAddress:        poolAddress,
 		Network:            network,
@@ -102,19 +104,12 @@ func (f *poolBalanceFetcher) FetchSnapshot(ctx context.Context, horizonURL, netw
 		RecentTransactions: []PoolPaymentRecord{},
 	}
 
-	var account horizonAccount
-	found, err := f.horizonGet(ctx, horizonURL+"/accounts/"+url.PathEscape(poolAddress), &account)
+	stroops, found, err := accountNativeBalanceOnRPC(ctx, soroban, rpcURL, poolAddress)
 	if err != nil {
-		return PoolAccountSnapshot{}, fmt.Errorf("fetch pool account: %w", err)
+		return PoolAccountSnapshot{}, fmt.Errorf("fetch pool account balance: %w", err)
 	}
-	if !found {
-		return snapshot, nil
-	}
-	for _, b := range account.Balances {
-		if b.AssetType == "native" {
-			snapshot.XLMBalance = b.Balance
-			break
-		}
+	if found {
+		snapshot.XLMBalance = stroopsToXLMString(stroops)
 	}
 
 	txEndpoint := horizonURL + "/accounts/" + url.PathEscape(poolAddress) + "/transactions?order=desc&limit=20"
@@ -145,4 +140,41 @@ func (f *poolBalanceFetcher) FetchSnapshot(ctx context.Context, horizonURL, netw
 		})
 	}
 	return snapshot, nil
+}
+
+// accountNativeBalanceOnRPC fetches gAddress's account ledger entry via
+// Soroban RPC and returns its native XLM balance in stroops. found is false
+// (with a nil error) when the account has no ledger entry yet — mirrors
+// Horizon's 404 → "not found" convention, so callers don't need a separate
+// not-found error type.
+func accountNativeBalanceOnRPC(ctx context.Context, soroban sorobanRPC, rpcURL, gAddress string) (stroops int64, found bool, err error) {
+	keyXDR, err := service.GetAccountLedgerKey(gAddress)
+	if err != nil {
+		return 0, false, fmt.Errorf("build ledger key for %s: %w", gAddress, err)
+	}
+	result, err := soroban.GetLedgerEntries(ctx, rpcURL, []string{keyXDR})
+	if err != nil {
+		return 0, false, fmt.Errorf("get ledger entries: %w", err)
+	}
+	if len(result.Entries) == 0 {
+		return 0, false, nil
+	}
+	var entryData xdr.LedgerEntryData
+	if err := xdr.SafeUnmarshalBase64(result.Entries[0].DataXDR, &entryData); err != nil {
+		return 0, false, fmt.Errorf("decode ledger entry XDR: %w", err)
+	}
+	return int64(entryData.MustAccount().Balance), true, nil
+}
+
+// stroopsToXLMString formats a stroop amount as a fixed 7-decimal XLM string
+// (e.g. 1000000000 -> "100.0000000"), matching Horizon's own balance format
+// exactly so this swap changes neither the wire shape nor existing client
+// parsing. Negative input (shouldn't occur for a real account balance) is
+// clamped to zero rather than producing a malformed string.
+func stroopsToXLMString(stroops int64) string {
+	if stroops < 0 {
+		stroops = 0
+	}
+	const stroopsPerXLM = 10_000_000
+	return fmt.Sprintf("%d.%07d", stroops/stroopsPerXLM, stroops%stroopsPerXLM)
 }

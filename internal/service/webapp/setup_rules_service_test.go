@@ -27,7 +27,7 @@ func newTestTransactionServiceWithContextRules(t *testing.T, rpc sorobanRPC, con
 	require.NoError(t, err)
 	verifierAddr := testContractAddress(t)
 	ed25519VerifierAddr := testContractAddress(t)
-	return NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t))
+	return NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), "testnet")
 }
 
 // ── SetupSendRules ───────────────────────────────────────────────────────────

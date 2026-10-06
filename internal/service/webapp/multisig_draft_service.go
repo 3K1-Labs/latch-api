@@ -31,6 +31,15 @@ var (
 	ErrMultisigInviteUnavailable   = errors.New("invite not found, expired, or draft not collecting")
 	ErrMultisigDraftMemberNotFound = errors.New("multisig draft member not found")
 	ErrMultisigNoActiveDraft       = errors.New("no active multisig draft")
+	// ErrMultisigNetworkMismatch is returned when a request's network field
+	// disagrees with the network a draft/account was actually created/deployed
+	// on — the persisted row's network always wins; this just tells the
+	// caller its request was wrong (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §7.2).
+	ErrMultisigNetworkMismatch = errors.New("network does not match this resource's deployment network")
+	// ErrMultisigMainnetNotConfigured is returned when a mainnet multisig
+	// operation is requested but no mainnet factory is configured on this
+	// server.
+	ErrMultisigMainnetNotConfigured = errors.New("mainnet is not configured on this server")
 )
 
 // SerializedDraftMember is a draft member as returned to the draft's
@@ -62,6 +71,7 @@ type SerializedDraft struct {
 	SmartAccountAddress string
 	CreatedAt           int64
 	ExpiresAt           *int64
+	Network             string
 	Members             []SerializedDraftMember
 	ValidMemberCount    int
 	CanDeploy           bool
@@ -91,13 +101,33 @@ type PublicDraftView struct {
 }
 
 type MultisigDraftService struct {
-	sqlDB   *sql.DB
-	q       *db.Queries
-	factory smartAccountFactory
+	sqlDB *sql.DB
+	q     *db.Queries
+	// factory/factoryMainnet: a draft (and the account it deploys into) are
+	// read-mostly DB rows shared across both networks — unlike
+	// TransactionService/SmartAccountService, which get one instance per
+	// network, this service holds both factories and picks between them per
+	// draft via its own persisted Network column, since predict/deploy load
+	// an existing draft row rather than receiving the network fresh on every
+	// call. factoryMainnet is nil when mainnet isn't configured.
+	factory        smartAccountFactory
+	factoryMainnet smartAccountFactory
 }
 
-func NewMultisigDraftService(sqlDB *sql.DB, q *db.Queries, factory smartAccountFactory) *MultisigDraftService {
-	return &MultisigDraftService{sqlDB: sqlDB, q: q, factory: factory}
+func NewMultisigDraftService(sqlDB *sql.DB, q *db.Queries, factory, factoryMainnet smartAccountFactory) *MultisigDraftService {
+	return &MultisigDraftService{sqlDB: sqlDB, q: q, factory: factory, factoryMainnet: factoryMainnet}
+}
+
+// factoryFor returns the factory instance for network, or
+// ErrMultisigMainnetNotConfigured if mainnet is requested but unavailable.
+func (s *MultisigDraftService) factoryFor(network string) (smartAccountFactory, error) {
+	if network == string(NetworkMainnet) {
+		if s.factoryMainnet == nil {
+			return nil, ErrMultisigMainnetNotConfigured
+		}
+		return s.factoryMainnet, nil
+	}
+	return s.factory, nil
 }
 
 // ── conversions ──────────────────────────────────────────────────────────────
@@ -175,6 +205,7 @@ func (s *MultisigDraftService) serialize(draft db.WebappMultisigDraft, memberRow
 		SmartAccountAddress: strOrEmpty(draft.SmartAccountAddress),
 		CreatedAt:           draft.CreatedAt,
 		ExpiresAt:           nullInt64Ptr(draft.ExpiresAt),
+		Network:             draft.Network,
 		Members:             members,
 		ValidMemberCount:    validCount,
 		CanDeploy:           canDeploy,
@@ -219,9 +250,12 @@ func (s *MultisigDraftService) loadAndSerialize(ctx context.Context, draft db.We
 
 // ── draft CRUD ───────────────────────────────────────────────────────────────
 
-// CreateDraft starts a new multisig draft for userID. Ports
-// POST /api/multisig/drafts.
-func (s *MultisigDraftService) CreateDraft(ctx context.Context, userID string) (SerializedDraft, error) {
+// CreateDraft starts a new multisig draft for userID on network ("testnet"
+// if empty). Ports POST /api/multisig/drafts.
+func (s *MultisigDraftService) CreateDraft(ctx context.Context, userID, network string) (SerializedDraft, error) {
+	if network == string(NetworkMainnet) && s.factoryMainnet == nil {
+		return SerializedDraft{}, ErrMultisigMainnetNotConfigured
+	}
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return SerializedDraft{}, fmt.Errorf("parse user id: %w", err)
@@ -244,6 +278,7 @@ func (s *MultisigDraftService) CreateDraft(ctx context.Context, userID string) (
 		AccountSaltHex: saltHex,
 		InviteToken:    inviteToken,
 		Status:         "collecting",
+		Network:        network,
 		CreatedAt:      now.UnixMilli(),
 		ExpiresAt:      sql.NullInt64{Int64: now.Add(draftInviteTTL).UnixMilli(), Valid: true},
 	})
@@ -410,10 +445,21 @@ func (s *MultisigDraftService) DeleteMember(ctx context.Context, draftID, member
 // ── predict / deploy ─────────────────────────────────────────────────────────
 
 // PredictAddress computes and persists a collecting draft's deterministic
-// smart account address from its current valid members. Ports
-// POST /api/multisig/drafts/[id]/predict.
-func (s *MultisigDraftService) PredictAddress(ctx context.Context, draftID, userID string) (address, paramsXdrBase64 string, result SerializedDraft, err error) {
+// smart account address from its current valid members, using the factory
+// for the draft's own persisted network. network is the client's optional
+// override ("" accepts whatever the draft already is); a non-empty value
+// that disagrees with the draft's network is rejected with
+// ErrMultisigNetworkMismatch rather than silently predicting against the
+// draft's real network anyway. Ports POST /api/multisig/drafts/[id]/predict.
+func (s *MultisigDraftService) PredictAddress(ctx context.Context, draftID, userID, network string) (address, paramsXdrBase64 string, result SerializedDraft, err error) {
 	draft, err := s.getDraftForCreator(ctx, draftID, userID)
+	if err != nil {
+		return "", "", SerializedDraft{}, err
+	}
+	if network != "" && network != draft.Network {
+		return "", "", SerializedDraft{}, ErrMultisigNetworkMismatch
+	}
+	factory, err := s.factoryFor(draft.Network)
 	if err != nil {
 		return "", "", SerializedDraft{}, err
 	}
@@ -432,7 +478,7 @@ func (s *MultisigDraftService) PredictAddress(ctx context.Context, draftID, user
 		return "", "", SerializedDraft{}, err
 	}
 
-	predicted, err := s.factory.PredictAddress(ctx, params)
+	predicted, err := factory.PredictAddress(ctx, params)
 	if err != nil {
 		return "", "", SerializedDraft{}, fmt.Errorf("predict multisig smart account address: %w", err)
 	}
@@ -465,10 +511,20 @@ func (s *MultisigDraftService) buildParams(draft db.WebappMultisigDraft, signers
 }
 
 // Deploy predicts (if needed), deploys, and persists a collecting draft as a
-// live MultisigAccount + MultisigMembers, marking the draft "deployed".
+// live MultisigAccount + MultisigMembers, marking the draft "deployed". Uses
+// the factory for the draft's own persisted network, same network-mismatch
+// rule as PredictAddress — a client can't deploy a testnet draft onto
+// mainnet (or vice versa) by passing a different network on this call.
 // Ports POST /api/multisig/drafts/[id]/deploy.
-func (s *MultisigDraftService) Deploy(ctx context.Context, draftID, userID string) (address string, alreadyDeployed bool, result SerializedDraft, err error) {
+func (s *MultisigDraftService) Deploy(ctx context.Context, draftID, userID, network string) (address string, alreadyDeployed bool, result SerializedDraft, err error) {
 	draft, err := s.getDraftForCreator(ctx, draftID, userID)
+	if err != nil {
+		return "", false, SerializedDraft{}, err
+	}
+	if network != "" && network != draft.Network {
+		return "", false, SerializedDraft{}, ErrMultisigNetworkMismatch
+	}
+	factory, err := s.factoryFor(draft.Network)
 	if err != nil {
 		return "", false, SerializedDraft{}, err
 	}
@@ -496,18 +552,18 @@ func (s *MultisigDraftService) Deploy(ctx context.Context, draftID, userID strin
 
 	predicted := strOrEmpty(draft.PredictedAddress)
 	if predicted == "" {
-		predicted, err = s.factory.PredictAddress(ctx, params)
+		predicted, err = factory.PredictAddress(ctx, params)
 		if err != nil {
 			return "", false, SerializedDraft{}, fmt.Errorf("predict multisig smart account address: %w", err)
 		}
 	}
 
-	deployedAddress, alreadyDeployed, err := s.factory.Deploy(ctx, params, predicted)
+	deployedAddress, alreadyDeployed, err := factory.Deploy(ctx, params, predicted)
 	if err != nil {
 		return "", false, SerializedDraft{}, fmt.Errorf("deploy multisig smart account: %w", err)
 	}
 
-	if err := s.persistDeployedAccount(ctx, draft.CreatorUserID, deployedAddress, int(draft.Threshold), draft.AccountSaltHex, memberRows); err != nil {
+	if err := s.persistDeployedAccount(ctx, draft.CreatorUserID, deployedAddress, int(draft.Threshold), draft.AccountSaltHex, draft.Network, memberRows); err != nil {
 		return "", false, SerializedDraft{}, err
 	}
 
@@ -529,7 +585,7 @@ func (s *MultisigDraftService) Deploy(ctx context.Context, draftID, userID strin
 // MultisigMembers in a single transaction — an improvement over the source
 // app's separate delete-then-insert calls (see golang.md's transaction
 // ownership rule).
-func (s *MultisigDraftService) persistDeployedAccount(ctx context.Context, userID uuid.UUID, smartAccountAddress string, threshold int, accountSaltHex string, draftMemberRows []db.WebappMultisigDraftMember) error {
+func (s *MultisigDraftService) persistDeployedAccount(ctx context.Context, userID uuid.UUID, smartAccountAddress string, threshold int, accountSaltHex, network string, draftMemberRows []db.WebappMultisigDraftMember) error {
 	tx, err := s.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -544,6 +600,7 @@ func (s *MultisigDraftService) persistDeployedAccount(ctx context.Context, userI
 		SmartAccountAddress: smartAccountAddress,
 		Threshold:           int32(threshold), //nolint:gosec // bounds-checked at write time
 		AccountSaltHex:      accountSaltHex,
+		Network:             network,
 		CreatedAt:           time.Now().UnixMilli(),
 	})
 	if err != nil {

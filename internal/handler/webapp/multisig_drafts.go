@@ -64,24 +64,43 @@ func serializedDraftJSON(d webapp.SerializedDraft) gin.H {
 		"smartAccountAddress": nilIfEmpty(d.SmartAccountAddress),
 		"createdAt":           d.CreatedAt,
 		"expiresAt":           expiresAt,
+		"network":             d.Network,
 		"members":             members,
 		"validMemberCount":    d.ValidMemberCount,
 		"canDeploy":           d.CanDeploy,
 	}
 }
 
+type createDraftRequest struct {
+	// Network is optional and defaults to testnet, matching every other
+	// network-aware endpoint.
+	Network string `json:"network,omitempty"`
+}
+
 // Create godoc
 // @Summary      Create a new multisig draft
 // @Description  Starts a new multisig account draft owned by the session user, generating an invite token other members join with.
 // @Tags         multisig-drafts
+// @Accept       json
 // @Produce      json
+// @Param        body body createDraftRequest false "Optional network"
 // @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
 // @Failure      500 {object} webappErrorResponse
 // @Router       /api/multisig/drafts [post]
 func (h *MultisigDraftsHandler) Create(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	draft, err := h.draftSvc.CreateDraft(c.Request.Context(), userID)
+	var req createDraftRequest
+	_ = c.ShouldBindJSON(&req) // body is optional
+
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	draft, err := h.draftSvc.CreateDraft(c.Request.Context(), userID, string(network))
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -182,20 +201,33 @@ func (h *MultisigDraftsHandler) UpdateThreshold(c *gin.Context) {
 	})
 }
 
+// draftNetworkOverrideRequest is the optional body for predict/deploy — these
+// act on an existing draft, so the draft's own persisted network always
+// governs; a client-supplied value here is only ever checked against it
+// (ErrMultisigNetworkMismatch), never used to override it.
+type draftNetworkOverrideRequest struct {
+	Network string `json:"network,omitempty"`
+}
+
 // Predict godoc
 // @Summary      Predict a draft's deploy address
 // @Description  Computes the deterministic smart account address and factory deploy params for the draft's current threshold and members, without deploying.
 // @Tags         multisig-drafts
+// @Accept       json
 // @Produce      json
 // @Param        id path string true "Draft ID"
 // @Success      200 {object} map[string]any
 // @Failure      400 {object} webappErrorResponse
 // @Failure      404 {object} webappErrorResponse
+// @Failure      409 {object} webappErrorResponse
 // @Router       /api/multisig/drafts/{id}/predict [post]
 func (h *MultisigDraftsHandler) Predict(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	address, paramsB64, draft, err := h.draftSvc.PredictAddress(c.Request.Context(), c.Param("id"), userID)
+	var req draftNetworkOverrideRequest
+	_ = c.ShouldBindJSON(&req)
+
+	address, paramsB64, draft, err := h.draftSvc.PredictAddress(c.Request.Context(), c.Param("id"), userID, req.Network)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -211,6 +243,7 @@ func (h *MultisigDraftsHandler) Predict(c *gin.Context) {
 // @Summary      Deploy a multisig draft on-chain
 // @Description  Deploys the draft's smart account via the factory contract using its current threshold and members. Idempotent: returns alreadyDeployed=true if it's already live.
 // @Tags         multisig-drafts
+// @Accept       json
 // @Produce      json
 // @Param        id path string true "Draft ID"
 // @Success      200 {object} map[string]any
@@ -221,7 +254,10 @@ func (h *MultisigDraftsHandler) Predict(c *gin.Context) {
 func (h *MultisigDraftsHandler) Deploy(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	address, alreadyDeployed, draft, err := h.draftSvc.Deploy(c.Request.Context(), c.Param("id"), userID)
+	var req draftNetworkOverrideRequest
+	_ = c.ShouldBindJSON(&req)
+
+	address, alreadyDeployed, draft, err := h.draftSvc.Deploy(c.Request.Context(), c.Param("id"), userID, req.Network)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return

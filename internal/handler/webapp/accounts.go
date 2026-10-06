@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/middleware"
+	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
 
@@ -27,11 +28,19 @@ func NewAccountsHandler(accountsSvc accountsService, sessionSvc sessionService, 
 // @Tags         accounts
 // @Produce      json
 // @Param        credentialId query string false "base64url WebAuthn credential ID to filter by"
+// @Param        network query string false "Network" default(testnet)
 // @Success      200 {object} map[string]any
+// @Failure      400 {object} webappErrorResponse
 // @Failure      500 {object} webappErrorResponse
 // @Router       /api/accounts [get]
 func (h *AccountsHandler) List(c *gin.Context) {
 	sessionID := middleware.SessionIDFromContext(c.Request.Context())
+
+	network, err := webapp.ParseNetwork(c.Query("network"))
+	if err != nil {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInvalidNetwork, err.Error())
+		return
+	}
 
 	var credentialIDs []string
 	if credentialID := c.Query("credentialId"); credentialID != "" {
@@ -56,9 +65,9 @@ func (h *AccountsHandler) List(c *gin.Context) {
 		credentialIDs = ids
 	}
 
-	accounts, err := h.accountsSvc.ListAccountsForProvedCredentials(c.Request.Context(), credentialIDs)
+	accounts, err := h.accountsSvc.ListAccountsForProvedCredentials(c.Request.Context(), credentialIDs, string(network))
 	if err != nil {
-		slog.Error("list accounts", "sessionID", sessionID, "err", err)
+		slog.Error("list accounts", "sessionID", sessionID, "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
@@ -70,6 +79,7 @@ func (h *AccountsHandler) List(c *gin.Context) {
 			"credentialId":        a.CredentialID,
 			"deployed":            a.Deployed,
 			"createdAt":           a.CreatedAt,
+			"network":             string(network),
 		})
 	}
 	webappx.Success(c, http.StatusOK, gin.H{"accounts": out})

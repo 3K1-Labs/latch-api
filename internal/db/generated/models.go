@@ -85,6 +85,7 @@ type PasskeyCredential struct {
 	Seq                 int32     `json:"seq"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	Network             string    `json:"network"`
 }
 
 type PushDevice struct {
@@ -172,6 +173,7 @@ type WebappMultisigAccount struct {
 	Threshold           int32     `json:"threshold"`
 	AccountSaltHex      string    `json:"account_salt_hex"`
 	CreatedAt           int64     `json:"created_at"`
+	Network             string    `json:"network"`
 }
 
 type WebappMultisigApproval struct {
@@ -197,6 +199,7 @@ type WebappMultisigDraft struct {
 	SmartAccountAddress sql.NullString `json:"smart_account_address"`
 	CreatedAt           int64          `json:"created_at"`
 	ExpiresAt           sql.NullInt64  `json:"expires_at"`
+	Network             string         `json:"network"`
 }
 
 type WebappMultisigDraftMember struct {
@@ -302,6 +305,7 @@ type WebappSmartAccount struct {
 	SmartAccountAddress string    `json:"smart_account_address"`
 	Deployed            int32     `json:"deployed"`
 	CreatedAt           int64     `json:"created_at"`
+	Network             string    `json:"network"`
 }
 
 type WebappUser struct {

@@ -20,7 +20,7 @@ func newTestTransactionServiceWithCounter(t *testing.T, rpc sorobanRPC, contextR
 	require.NoError(t, err)
 	verifierAddr := testContractAddress(t)
 	ed25519VerifierAddr := testContractAddress(t)
-	return NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, counterAddr)
+	return NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, counterAddr, "testnet")
 }
 
 func TestBuildCounter_Success(t *testing.T) {

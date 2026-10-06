@@ -51,6 +51,8 @@ func (h *AccountSignerHandler) resolveNetwork(raw string) (transactionService, w
 // error.
 func failAccountSignerBuild(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSmartAccountNotOnNetwork):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrAccountNotOnNetwork, err.Error())
 	case errors.Is(err, webapp.ErrNoDefaultRule):
 		webappx.Fail(c, http.StatusUnprocessableEntity, webappx.ErrNoDefaultRule, err.Error())
 	case errors.Is(err, webapp.ErrLastSigner):
@@ -187,7 +189,7 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
+	txSvc, network, err := h.resolveNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
@@ -215,7 +217,7 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrSignerAddedIndexFailed, "add_context_rule succeeded on-chain but indexing it failed; retry this confirm call")
 		return
 	}
-	if err := h.credentialSvc.Register(c.Request.Context(), req.KeyDataHex, req.SmartAccountAddress, req.Label, req.Seq); err != nil {
+	if err := h.credentialSvc.Register(c.Request.Context(), req.KeyDataHex, req.SmartAccountAddress, req.Label, req.Seq, string(network)); err != nil {
 		slog.Error("register backup signer in recovery index", "smartAccountAddress", req.SmartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrSignerAddedIndexFailed, "add_context_rule succeeded on-chain but indexing it failed; retry this confirm call")
 		return
@@ -353,7 +355,7 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
+	txSvc, network, err := h.resolveNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
@@ -394,7 +396,7 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	// convenience for fresh-device restore (see PasskeyCredentialService's
 	// doc comment).
 	if keyDataHex, keyErr := h.webauthnSvc.GetCredentialKeyDataHex(c.Request.Context(), req.CredentialID); keyErr == nil {
-		if err := h.credentialSvc.Deregister(c.Request.Context(), keyDataHex); err != nil {
+		if err := h.credentialSvc.Deregister(c.Request.Context(), keyDataHex, string(network)); err != nil {
 			slog.Error("deregister removed signer from recovery index", "smartAccountAddress", req.SmartAccountAddress, "err", err)
 		}
 	} else {

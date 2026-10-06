@@ -167,17 +167,25 @@ func (s *AccountSignerService) RemoveCredential(ctx context.Context, smartAccoun
 	return nil
 }
 
-// ResolveByCredentialID finds the smart account address a backup signer
-// credential was attached to. This is authentication-finish's fallback
-// (R15) for when GetByCredentialID's smart_accounts lookup misses because
-// the credential is a backup signer, not an account's original credential.
-func (s *AccountSignerService) ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress string, err error) {
+// ResolveByCredentialID finds the smart account address (and the network it
+// was deployed on) a backup signer credential was attached to. This is
+// authentication-finish's fallback (R15) for when GetByCredentialID's
+// smart_accounts lookup misses because the credential is a backup signer,
+// not an account's original credential. The network comes back from the
+// resolved smart_accounts row itself, not the caller — account_signers has
+// no network column of its own (it hangs off smart_account_address, which
+// already implies one).
+func (s *AccountSignerService) ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress, network string, err error) {
 	row, err := s.q.GetAccountSignerByCredentialID(ctx, sql.NullString{String: credentialID, Valid: true})
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrAccountSignerNotFound
+		return "", "", ErrAccountSignerNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("get account signer by credential %s: %w", credentialID, err)
+		return "", "", fmt.Errorf("get account signer by credential %s: %w", credentialID, err)
 	}
-	return row.SmartAccountAddress, nil
+	account, err := s.q.GetSmartAccountByAddress(ctx, row.SmartAccountAddress)
+	if err != nil {
+		return "", "", fmt.Errorf("get smart account %s: %w", row.SmartAccountAddress, err)
+	}
+	return row.SmartAccountAddress, account.Network, nil
 }

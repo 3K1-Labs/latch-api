@@ -30,7 +30,7 @@ type Querier interface {
 	DeleteMultisigApprovalsForProposal(ctx context.Context, proposalID uuid.UUID) error
 	DeleteMultisigDraftMember(ctx context.Context, arg DeleteMultisigDraftMemberParams) error
 	DeleteMultisigMembersForAccount(ctx context.Context, multisigAccountID uuid.UUID) error
-	DeletePasskeyCredential(ctx context.Context, credentialID string) error
+	DeletePasskeyCredential(ctx context.Context, arg DeletePasskeyCredentialParams) error
 	DeletePushDevice(ctx context.Context, arg DeletePushDeviceParams) error
 	DeletePushTokenRegistrations(ctx context.Context, pushToken string) error
 	// Used by "replace" semantics (authentication finish): drops every proved
@@ -58,11 +58,11 @@ type Querier interface {
 	GetMultisigMemberByID(ctx context.Context, id uuid.UUID) (WebappMultisigMember, error)
 	GetMultisigProposalByID(ctx context.Context, id uuid.UUID) (WebappMultisigProposal, error)
 	GetOnRampIntentByID(ctx context.Context, id uuid.UUID) (WebappOnRampIntent, error)
-	GetPasskeyCredential(ctx context.Context, credentialID string) (PasskeyCredential, error)
+	GetPasskeyCredential(ctx context.Context, arg GetPasskeyCredentialParams) (PasskeyCredential, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (GetRefreshTokenRow, error)
 	GetSignPayload(ctx context.Context, id string) (WebappSignPayload, error)
 	GetSmartAccountByAddress(ctx context.Context, smartAccountAddress string) (WebappSmartAccount, error)
-	GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error)
+	GetSmartAccountByCredentialID(ctx context.Context, arg GetSmartAccountByCredentialIDParams) (WebappSmartAccount, error)
 	GetSmartAccountRegistrationUserID(ctx context.Context, smartAccountAddress string) (uuid.UUID, error)
 	GetUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 	GetUserEmailByID(ctx context.Context, id uuid.UUID) (string, error)

@@ -199,6 +199,10 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
 			return
 		}
+		if errors.Is(err, webapp.ErrSmartAccountNotOnNetwork) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrAccountNotOnNetwork, err.Error())
+			return
+		}
 		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
 			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
@@ -567,6 +571,10 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
 			return
 		}
+		if errors.Is(err, webapp.ErrSmartAccountNotOnNetwork) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrAccountNotOnNetwork, err.Error())
+			return
+		}
 		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
 			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
@@ -659,6 +667,10 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		GAddress:            req.GAddress,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrSmartAccountNotOnNetwork) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrAccountNotOnNetwork, err.Error())
+			return
+		}
 		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
 			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
@@ -900,6 +912,8 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSmartAccountNotOnNetwork):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrAccountNotOnNetwork, err.Error())
 	case errors.Is(err, webapp.ErrSignerRuleNotFound):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 	case errors.Is(err, webapp.ErrSwapSignerMismatch):
@@ -925,6 +939,8 @@ func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err erro
 // detail leaked, per security.md.
 func prepareSignErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSmartAccountNotOnNetwork):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrAccountNotOnNetwork, err.Error())
 	case errors.Is(err, webapp.ErrSignerRuleNotFound):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 	case errors.Is(err, webapp.ErrPrepareSignNoContextRule):

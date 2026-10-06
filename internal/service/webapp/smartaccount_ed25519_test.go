@@ -149,7 +149,7 @@ func TestBuildMultisigAccountInitParams_RejectsUnknownSignerType(t *testing.T) {
 
 func TestDeployMultisig_ValidatesSignerSetBeforeChainWork(t *testing.T) {
 	// A nil sorobanRPC proves these reject before any network call is made.
-	s := NewSmartAccountService(nil, nil, nil, "", "", "")
+	s := NewSmartAccountService(nil, nil, nil, "", "", "", "testnet")
 
 	_, _, err := s.DeployMultisig(t.Context(), []MultisigSignerInit{
 		{Type: "ed25519", KeyDataHex: strings.Repeat("ab", 32)},

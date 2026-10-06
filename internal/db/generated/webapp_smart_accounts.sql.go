@@ -12,7 +12,7 @@ import (
 )
 
 const getSmartAccountByAddress = `-- name: GetSmartAccountByAddress :one
-SELECT id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, created_at
+SELECT id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, created_at, network
 FROM webapp.smart_accounts
 WHERE smart_account_address = $1
 `
@@ -29,18 +29,24 @@ func (q *Queries) GetSmartAccountByAddress(ctx context.Context, smartAccountAddr
 		&i.SmartAccountAddress,
 		&i.Deployed,
 		&i.CreatedAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const getSmartAccountByCredentialID = `-- name: GetSmartAccountByCredentialID :one
-SELECT id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, created_at
+SELECT id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, created_at, network
 FROM webapp.smart_accounts
-WHERE credential_id = $1
+WHERE credential_id = $1 AND network = $2
 `
 
-func (q *Queries) GetSmartAccountByCredentialID(ctx context.Context, credentialID string) (WebappSmartAccount, error) {
-	row := q.db.QueryRowContext(ctx, getSmartAccountByCredentialID, credentialID)
+type GetSmartAccountByCredentialIDParams struct {
+	CredentialID string `json:"credential_id"`
+	Network      string `json:"network"`
+}
+
+func (q *Queries) GetSmartAccountByCredentialID(ctx context.Context, arg GetSmartAccountByCredentialIDParams) (WebappSmartAccount, error) {
+	row := q.db.QueryRowContext(ctx, getSmartAccountByCredentialID, arg.CredentialID, arg.Network)
 	var i WebappSmartAccount
 	err := row.Scan(
 		&i.ID,
@@ -51,12 +57,13 @@ func (q *Queries) GetSmartAccountByCredentialID(ctx context.Context, credentialI
 		&i.SmartAccountAddress,
 		&i.Deployed,
 		&i.CreatedAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const listSmartAccountsForUser = `-- name: ListSmartAccountsForUser :many
-SELECT smart_account_address, credential_id, deployed, created_at
+SELECT smart_account_address, credential_id, deployed, created_at, network
 FROM webapp.smart_accounts
 WHERE user_id = $1
 ORDER BY created_at DESC
@@ -67,6 +74,7 @@ type ListSmartAccountsForUserRow struct {
 	CredentialID        string `json:"credential_id"`
 	Deployed            int32  `json:"deployed"`
 	CreatedAt           int64  `json:"created_at"`
+	Network             string `json:"network"`
 }
 
 func (q *Queries) ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID) ([]ListSmartAccountsForUserRow, error) {
@@ -83,6 +91,7 @@ func (q *Queries) ListSmartAccountsForUser(ctx context.Context, userID uuid.UUID
 			&i.CredentialID,
 			&i.Deployed,
 			&i.CreatedAt,
+			&i.Network,
 		); err != nil {
 			return nil, err
 		}
@@ -109,9 +118,12 @@ func (q *Queries) MarkSmartAccountDeployed(ctx context.Context, smartAccountAddr
 }
 
 const upsertSmartAccount = `-- name: UpsertSmartAccount :one
-INSERT INTO webapp.smart_accounts (id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (credential_id) DO UPDATE SET
+INSERT INTO webapp.smart_accounts (id, user_id, credential_id, key_data_hex, salt_hex, smart_account_address, deployed, network, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (credential_id, network) DO UPDATE SET
+  smart_account_address = EXCLUDED.smart_account_address,
+  key_data_hex = EXCLUDED.key_data_hex,
+  salt_hex = EXCLUDED.salt_hex,
   deployed = EXCLUDED.deployed
 RETURNING id
 `
@@ -124,6 +136,7 @@ type UpsertSmartAccountParams struct {
 	SaltHex             string    `json:"salt_hex"`
 	SmartAccountAddress string    `json:"smart_account_address"`
 	Deployed            int32     `json:"deployed"`
+	Network             string    `json:"network"`
 	CreatedAt           int64     `json:"created_at"`
 }
 
@@ -136,6 +149,7 @@ func (q *Queries) UpsertSmartAccount(ctx context.Context, arg UpsertSmartAccount
 		arg.SaltHex,
 		arg.SmartAccountAddress,
 		arg.Deployed,
+		arg.Network,
 		arg.CreatedAt,
 	)
 	var id uuid.UUID

@@ -348,7 +348,7 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 	if signerType == "" {
 		signerType = "passkey"
 	}
-	routerID := resolveRouterContractID(in.RouterContractID)
+	routerID := s.resolveRouterContractID(in.RouterContractID)
 
 	if signerType == "freighter" && in.GAddress == "" {
 		return SetupSwapRulesResult{}, fmt.Errorf("gAddress is required for freighter setup")

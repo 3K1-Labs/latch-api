@@ -99,6 +99,29 @@ func TestDiscoverContextRule_FallsBackToDefault(t *testing.T) {
 	assert.Equal(t, ContextRuleDiscoveryDefault, discovery)
 }
 
+// TestRulesCount_AccountNotOnNetwork: get_context_rules_count's simulation
+// fails outright (the contract isn't deployed at this address on this RPC's
+// network) — rulesCount must report ErrSmartAccountNotOnNetwork, not silently
+// treat it as zero rules (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §6.1).
+func TestRulesCount_AccountNotOnNetwork(t *testing.T) {
+	rpc := &simulateReadFakeRPC{t: t, responses: []*xdr.ScVal{nil}}
+	svc := NewContextRulesService(rpc, "https://rpc.example.com")
+
+	_, _, err := svc.DiscoverContextRule(context.Background(), testContractAddress(t), testContractAddress(t))
+	require.ErrorIs(t, err, ErrSmartAccountNotOnNetwork)
+}
+
+// TestRulesCount_ZeroRulesIsNotAnError: a genuinely deployed account with no
+// context rules configured yet must stay a plain "0, nil" — distinct from
+// the account not existing at all (TestRulesCount_AccountNotOnNetwork above).
+func TestRulesCount_ZeroRulesIsNotAnError(t *testing.T) {
+	svc := newContextRulesService(t, scU32(0))
+
+	count, err := svc.rulesCount(context.Background(), testContractAddress(t))
+	require.NoError(t, err)
+	assert.Equal(t, uint32(0), count)
+}
+
 func TestDiscoverContextRule_FallbackWhenNoRules(t *testing.T) {
 	svc := newContextRulesService(t, scU32(0))
 

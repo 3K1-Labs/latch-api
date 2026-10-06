@@ -340,7 +340,7 @@ func (h *SmartAccountHandler) DeployWebauthn(c *gin.Context) {
 	// need retrying, and DeployByKeyData is idempotent so a retry only wastes
 	// a round trip, it can't fix the index anyway without the same credential
 	// coming back through here again.
-	if err := h.credSvc.Register(c.Request.Context(), req.KeyDataHex, address, req.Label, req.Seq); err != nil {
+	if err := h.credSvc.Register(c.Request.Context(), req.KeyDataHex, address, req.Label, req.Seq, string(network)); err != nil {
 		slog.Error("register passkey credential index", "network", network, "err", err)
 	}
 

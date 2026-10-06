@@ -151,6 +151,7 @@ func main() {
 		queries, onRampRelayerSvc, cfg.WebAppOnRampIntentTTL,
 		cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
 		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
+		sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.SorobanRPCURLMainnet,
 		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
 		webapp.TransakConfig{
 			APIKey:         cfg.WebAppTransakAPIKey,
@@ -169,8 +170,6 @@ func main() {
 	// completeness.
 	var webappSmartAccountSvc *webapp.SmartAccountService
 	var webappTransactionSvc *webapp.TransactionService
-	var webappMultisigDraftSvc *webapp.MultisigDraftService
-	var webappMultisigAccountsSvc *webapp.MultisigAccountsService
 	var webappMultisigProposalSvc *webapp.MultisigProposalService
 	switch {
 	case cfg.WebAppBundlerSecret == "":
@@ -183,18 +182,16 @@ func main() {
 		} else {
 			webappSmartAccountSvc = webapp.NewSmartAccountService(
 				sorobanSvc, bundlerSvc, queries,
-				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress, string(webapp.NetworkTestnet),
 			)
 			webappTransactionSvc = webapp.NewTransactionService(
 				sorobanSvc, bundlerSvc, webappContextRulesSvc,
 				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
-				cfg.WebAppEd25519VerifierAddress, cfg.WebAppCounterContractAddress,
+				cfg.WebAppEd25519VerifierAddress, cfg.WebAppCounterContractAddress, string(webapp.NetworkTestnet),
 			)
-			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
-			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)
 			webappMultisigProposalSvc = webapp.NewMultisigProposalService(
 				sorobanSvc, bundlerSvc, webappContextRulesSvc, webappBalancesSvc, webappTransactionSvc, queries,
-				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
+				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress, string(webapp.NetworkTestnet),
 			)
 		}
 	}
@@ -203,16 +200,13 @@ func main() {
 	// above, independent of the testnet switch — mainnet's availability must
 	// not depend on testnet's gate. Send-path and stateless smart-account
 	// handlers select between the two per-request based on the client's
-	// network field; nil here means those requests get
-	// mainnet_not_configured rather than silently falling back to testnet.
-	// Deploy/multisig (persisted, multi-request flows) stay testnet-only —
-	// they need a DB-level network column to track which network an
-	// already-deployed account lives on, which is out of scope here; see
-	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's phasing.
+	// network field; nil here means those requests get mainnet_not_configured
+	// rather than silently falling back to testnet.
 	webappContextRulesSvcMainnet := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLMainnet)
 	webappBalancesSvcMainnet := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLMainnet)
 	var webappTransactionSvcMainnet *webapp.TransactionService
 	var webappSmartAccountSvcMainnet *webapp.SmartAccountService
+	var webappMultisigProposalSvcMainnet *webapp.MultisigProposalService
 	switch cfg.WebAppBundlerSecretMainnet {
 	case "":
 		slog.Warn("BUNDLER_SECRET_MAINNET not configured — mainnet webapp transaction/smart-account routes will return mainnet_not_configured")
@@ -220,21 +214,48 @@ func main() {
 		if bundlerSvcMainnet, err := webapp.NewBundlerService(cfg.WebAppBundlerSecretMainnet, ""); err != nil {
 			slog.Warn("invalid BUNDLER_SECRET_MAINNET — mainnet webapp transaction/smart-account routes will return mainnet_not_configured", "err", err)
 		} else {
-			webappTransactionSvcMainnet = webapp.NewTransactionService(
-				sorobanSvc, bundlerSvcMainnet, webappContextRulesSvcMainnet,
-				cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppWebAuthnVerifierAddressMainnet,
-				cfg.WebAppEd25519VerifierAddressMainnet, cfg.WebAppCounterContractAddress,
-			)
+			// An empty mainnet WebAuthn verifier would never equal the
+			// mainnet factory's own webauthn_verifier, so every passkey send
+			// would 409 with signer_rule_not_found instead of a clean
+			// mainnet_not_configured — install nothing rather than serve that
+			// confusing error (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §6.2).
+			if cfg.WebAppWebAuthnVerifierAddressMainnet == "" {
+				slog.Warn("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS_MAINNET not configured — mainnet webapp transaction routes will return mainnet_not_configured")
+			} else {
+				webappTransactionSvcMainnet = webapp.NewTransactionService(
+					sorobanSvc, bundlerSvcMainnet, webappContextRulesSvcMainnet,
+					cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppWebAuthnVerifierAddressMainnet,
+					cfg.WebAppEd25519VerifierAddressMainnet, cfg.WebAppCounterContractAddress, string(webapp.NetworkMainnet),
+				)
+				webappMultisigProposalSvcMainnet = webapp.NewMultisigProposalService(
+					sorobanSvc, bundlerSvcMainnet, webappContextRulesSvcMainnet, webappBalancesSvcMainnet, webappTransactionSvcMainnet, queries,
+					cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppWebAuthnVerifierAddressMainnet, string(webapp.NetworkMainnet),
+				)
+			}
 
 			if cfg.WebAppFactoryAddressMainnet == "" {
 				slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET not configured — mainnet smart-account creation routes will return mainnet_not_configured")
 			} else {
 				webappSmartAccountSvcMainnet = webapp.NewSmartAccountService(
 					sorobanSvc, bundlerSvcMainnet, queries,
-					cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppFactoryAddressMainnet,
+					cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppFactoryAddressMainnet, string(webapp.NetworkMainnet),
 				)
 			}
 		}
+	}
+
+	// Multisig draft/accounts services hold both networks' factories at once
+	// (rather than one instance per network like above) since predict/deploy
+	// read an existing draft/account row's own persisted network rather than
+	// taking it fresh on every call — see MultisigDraftService's doc comment.
+	// Still testnet-gated: a deployment with no testnet bundler/factory gets
+	// no multisig routes at all, mainnet included, matching the existing
+	// mobile/webapp-shared gate above.
+	var webappMultisigDraftSvc *webapp.MultisigDraftService
+	var webappMultisigAccountsSvc *webapp.MultisigAccountsService
+	if webappSmartAccountSvc != nil {
+		webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc, webapp.SmartAccountFactoryOrNil(webappSmartAccountSvcMainnet))
+		webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc, webapp.SmartAccountFactoryOrNil(webappSmartAccountSvcMainnet))
 	}
 
 	// Handlers
@@ -563,7 +584,10 @@ func main() {
 		if cfg.WebAppWebAuthnRPID == "" || cfg.WebAppWebAuthnOrigin == "" {
 			slog.Warn("WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN not configured — webapp /webapp/webauthn ceremony routes disabled")
 		} else {
-			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(webappWebauthnSvc, webappSmartAccountSvc, webappAccountsSvc, passkeyCredentialSvc, webappAccountSignerSvc, webappSessionSvc, webappAuditSvc, webappNotificationSvc, cfg, crossSiteWebAppCookies)
+			webappWebauthnHandler := webapphandler.NewWebAuthnHandler(
+				webappWebauthnSvc, webappSmartAccountSvc, webapphandler.SmartAccountServiceOrNil(webappSmartAccountSvcMainnet),
+				webappAccountsSvc, passkeyCredentialSvc, webappAccountSignerSvc, webappSessionSvc, webappAuditSvc, webappNotificationSvc, cfg, crossSiteWebAppCookies,
+			)
 			webauthnGroup := webappGroup.Group("/webauthn")
 			{
 				webauthnGroup.POST("/registration/begin", webappWebauthnHandler.RegistrationBegin)
@@ -632,7 +656,9 @@ func main() {
 		webappMultisigDraftsHandler := webapphandler.NewMultisigDraftsHandler(webappMultisigDraftSvc)
 		webappMultisigDraftWebAuthnHandler := webapphandler.NewMultisigDraftWebAuthnHandler(webappMultisigDraftSvc, webappWebauthnSvc, cfg)
 		webappMultisigJoinHandler := webapphandler.NewMultisigJoinHandler(webappMultisigDraftSvc, webappWebauthnSvc, cfg)
-		webappMultisigProposalsHandler := webapphandler.NewMultisigProposalsHandler(webappMultisigProposalSvc, cfg)
+		webappMultisigProposalsHandler := webapphandler.NewMultisigProposalsHandler(
+			webappMultisigProposalSvc, webapphandler.MultisigProposalServiceOrNil(webappMultisigProposalSvcMainnet), cfg,
+		)
 
 		multisigGroup := webappGroup.Group("/multisig")
 

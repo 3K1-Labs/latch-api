@@ -12,15 +12,48 @@ import (
 )
 
 type MultisigProposalsHandler struct {
-	proposalSvc multisigProposalService
-	cfg         *config.Config
+	proposalSvc        multisigProposalService // testnet
+	proposalSvcMainnet multisigProposalService // mainnet; nil if not configured
+	cfg                *config.Config
 }
 
-func NewMultisigProposalsHandler(proposalSvc multisigProposalService, cfg *config.Config) *MultisigProposalsHandler {
-	return &MultisigProposalsHandler{proposalSvc: proposalSvc, cfg: cfg}
+func NewMultisigProposalsHandler(proposalSvc, proposalSvcMainnet multisigProposalService, cfg *config.Config) *MultisigProposalsHandler {
+	return &MultisigProposalsHandler{proposalSvc: proposalSvc, proposalSvcMainnet: proposalSvcMainnet, cfg: cfg}
+}
+
+// MultisigProposalServiceOrNil boxes a possibly-nil *webapp.MultisigProposalService
+// into the multisigProposalService interface, mirroring
+// TransactionServiceOrNil/SmartAccountServiceOrNil elsewhere in this package —
+// a nil concrete pointer boxed directly into an interface value is non-nil,
+// which would defeat resolveNetwork's nil check.
+func MultisigProposalServiceOrNil(svc *webapp.MultisigProposalService) multisigProposalService {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
+// resolveNetwork parses a request's network value and selects the matching
+// multisigProposalService instance — this only picks which network's chain
+// config a request runs against; the service itself still verifies the
+// loaded account's own persisted network matches (ErrMultisigNetworkMismatch)
+// before doing anything with it.
+func (h *MultisigProposalsHandler) resolveNetwork(raw string) (multisigProposalService, webapp.Network, error) {
+	network, err := webapp.ParseNetwork(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	if network == webapp.NetworkMainnet {
+		if h.proposalSvcMainnet == nil {
+			return nil, "", errMainnetNotConfigured
+		}
+		return h.proposalSvcMainnet, network, nil
+	}
+	return h.proposalSvc, network, nil
 }
 
 type createProposalRequest struct {
+	Network                   string         `json:"network,omitempty"`
 	SmartAccountAddress       string         `json:"smartAccountAddress" binding:"required"`
 	OperationKind             string         `json:"operationKind" binding:"required"` // "counter_increment" | "sac_transfer"
 	TargetContractID          string         `json:"targetContractId,omitempty"`
@@ -52,17 +85,20 @@ func (h *MultisigProposalsHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Multisig proposals are testnet-only for now — mainnet support for
-	// multisig is a separate follow-up (needs its own mainnet-scoped
-	// services); see LATCH_GO_BACKEND_MAINNET_SUPPORT.md's phase 3.
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, webapp.NetworkTestnet))
+	proposalSvc, network, err := h.resolveNetwork(req.Network)
 	if err != nil {
-		slog.Error("load asset catalog", "err", err)
+		failNetworkResolution(c, err)
+		return
+	}
+
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, network))
+	if err != nil {
+		slog.Error("load asset catalog", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 
-	result, err := h.proposalSvc.CreateProposal(c.Request.Context(), userID, webapp.CreateProposalInput{
+	result, err := proposalSvc.CreateProposal(c.Request.Context(), userID, webapp.CreateProposalInput{
 		SmartAccountAddress:       req.SmartAccountAddress,
 		OperationKind:             req.OperationKind,
 		TargetContractID:          req.TargetContractID,
@@ -119,7 +155,13 @@ func (h *MultisigProposalsHandler) List(c *gin.Context) {
 		return
 	}
 
-	threshold, proposals, err := h.proposalSvc.ListProposals(c.Request.Context(), userID, account)
+	proposalSvc, _, err := h.resolveNetwork(c.Query("network"))
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	threshold, proposals, err := proposalSvc.ListProposals(c.Request.Context(), userID, account)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -144,7 +186,13 @@ func (h *MultisigProposalsHandler) List(c *gin.Context) {
 func (h *MultisigProposalsHandler) Get(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	detail, err := h.proposalSvc.GetProposal(c.Request.Context(), userID, c.Param("id"))
+	proposalSvc, _, err := h.resolveNetwork(c.Query("network"))
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	detail, err := proposalSvc.GetProposal(c.Request.Context(), userID, c.Param("id"))
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -211,7 +259,15 @@ func (h *MultisigProposalsHandler) Get(c *gin.Context) {
 func (h *MultisigProposalsHandler) Refresh(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	result, err := h.proposalSvc.RefreshProposal(c.Request.Context(), userID, c.Param("id"))
+	var req networkOnlyRequest
+	_ = c.ShouldBindJSON(&req)
+	proposalSvc, _, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	result, err := proposalSvc.RefreshProposal(c.Request.Context(), userID, c.Param("id"))
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -238,7 +294,15 @@ func (h *MultisigProposalsHandler) Refresh(c *gin.Context) {
 func (h *MultisigProposalsHandler) Execute(c *gin.Context) {
 	userID := middleware.SessionUserIDFromContext(c.Request.Context())
 
-	result, err := h.proposalSvc.ExecuteProposal(c.Request.Context(), userID, c.Param("id"))
+	var req networkOnlyRequest
+	_ = c.ShouldBindJSON(&req)
+	proposalSvc, _, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	result, err := proposalSvc.ExecuteProposal(c.Request.Context(), userID, c.Param("id"))
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -247,7 +311,15 @@ func (h *MultisigProposalsHandler) Execute(c *gin.Context) {
 	webappx.Success(c, http.StatusOK, gin.H{"hash": result.Hash, "status": result.Status})
 }
 
+// networkOnlyRequest is the optional body for routes that act on an existing
+// proposal/account by ID and take no other input — network just picks which
+// instance to route to; the service verifies the loaded row's own network.
+type networkOnlyRequest struct {
+	Network string `json:"network,omitempty"`
+}
+
 type approveWebauthnRequest struct {
+	Network       string `json:"network,omitempty"`
 	MemberID      string `json:"memberId" binding:"required"`
 	SigDataXdrHex string `json:"sigDataXdrHex" binding:"required"`
 }
@@ -273,7 +345,13 @@ func (h *MultisigProposalsHandler) ApproveWebauthn(c *gin.Context) {
 		return
 	}
 
-	approvalID, err := h.proposalSvc.ApproveWebauthn(c.Request.Context(), userID, c.Param("id"), req.MemberID, req.SigDataXdrHex)
+	proposalSvc, _, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	approvalID, err := proposalSvc.ApproveWebauthn(c.Request.Context(), userID, c.Param("id"), req.MemberID, req.SigDataXdrHex)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -282,6 +360,7 @@ func (h *MultisigProposalsHandler) ApproveWebauthn(c *gin.Context) {
 }
 
 type approveDelegatedBeginRequest struct {
+	Network  string `json:"network,omitempty"`
 	MemberID string `json:"memberId" binding:"required"`
 }
 
@@ -307,7 +386,13 @@ func (h *MultisigProposalsHandler) ApproveDelegatedBegin(c *gin.Context) {
 		return
 	}
 
-	result, err := h.proposalSvc.ApproveDelegatedBegin(c.Request.Context(), userID, c.Param("id"), req.MemberID)
+	proposalSvc, _, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	result, err := proposalSvc.ApproveDelegatedBegin(c.Request.Context(), userID, c.Param("id"), req.MemberID)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return
@@ -323,6 +408,7 @@ func (h *MultisigProposalsHandler) ApproveDelegatedBegin(c *gin.Context) {
 }
 
 type approveDelegatedFinishRequest struct {
+	Network               string `json:"network,omitempty"`
 	MemberID              string `json:"memberId" binding:"required"`
 	SignedAuthEntryBase64 string `json:"signedAuthEntryBase64" binding:"required"`
 	SignerAddress         string `json:"signerAddress" binding:"required"`
@@ -350,7 +436,13 @@ func (h *MultisigProposalsHandler) ApproveDelegatedFinish(c *gin.Context) {
 		return
 	}
 
-	approvalID, err := h.proposalSvc.ApproveDelegatedFinish(c.Request.Context(), userID, c.Param("id"), req.MemberID, req.SignedAuthEntryBase64, req.SignerAddress)
+	proposalSvc, _, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
+	approvalID, err := proposalSvc.ApproveDelegatedFinish(c.Request.Context(), userID, c.Param("id"), req.MemberID, req.SignedAuthEntryBase64, req.SignerAddress)
 	if err != nil {
 		multisigErrorResponse(c, err)
 		return

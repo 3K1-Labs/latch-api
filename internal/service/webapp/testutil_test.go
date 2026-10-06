@@ -65,11 +65,19 @@ func (f *fakeSmartAccountFactory) Deploy(ctx context.Context, params xdr.ScVal, 
 
 func newMockMultisigDraftService(t *testing.T, factory smartAccountFactory) (*MultisigDraftService, sqlmock.Sqlmock) {
 	t.Helper()
+	return newMockMultisigDraftServiceWithMainnet(t, factory, nil)
+}
+
+// newMockMultisigDraftServiceWithMainnet is newMockMultisigDraftService with
+// an explicit (possibly non-nil) mainnet factory, for tests exercising
+// mainnet draft/deploy routing.
+func newMockMultisigDraftServiceWithMainnet(t *testing.T, factory, factoryMainnet smartAccountFactory) (*MultisigDraftService, sqlmock.Sqlmock) {
+	t.Helper()
 	sqlDB, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { sqlDB.Close() })
 	q := db.New(sqlDB)
-	return NewMultisigDraftService(sqlDB, q, factory), mock
+	return NewMultisigDraftService(sqlDB, q, factory, factoryMainnet), mock
 }
 
 // fakeTransactionSubmitter is a function-field fake for the
@@ -102,5 +110,5 @@ func newMockMultisigProposalService(t *testing.T, soroban sorobanRPC, contextRul
 	bundlerSvc, err := NewBundlerService(bundlerKp.Seed(), "")
 	require.NoError(t, err)
 
-	return NewMultisigProposalService(soroban, bundlerSvc, contextRules, balances, txSvc, q, "https://rpc.example.com", testPassphrase, testContractAddress(t)), mock
+	return NewMultisigProposalService(soroban, bundlerSvc, contextRules, balances, txSvc, q, "https://rpc.example.com", testPassphrase, testContractAddress(t), "testnet"), mock
 }

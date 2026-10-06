@@ -26,7 +26,7 @@ func newTestPhantomSmartAccountService(t *testing.T, rpc sorobanRPC) *SmartAccou
 	bundlerSvc, err := NewBundlerService(bundlerKp.Seed(), "")
 	require.NoError(t, err)
 	factoryAddr := testContractAddress(t)
-	return NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr)
+	return NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr, "testnet")
 }
 
 func TestDerivePhantomSalt_Deterministic(t *testing.T) {

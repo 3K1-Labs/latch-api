@@ -30,6 +30,7 @@ type stubPasskeyCredentialLookup struct {
 
 	gotCredentialID      string
 	gotNonce             string
+	gotNetwork           string
 	gotAuthenticatorData []byte
 	gotClientDataJSON    []byte
 	gotSignature         []byte
@@ -45,9 +46,10 @@ func (s *stubPasskeyCredentialLookup) Challenge(_ context.Context) (string, time
 	return s.challengeNonce, s.challengeTTL, nil
 }
 
-func (s *stubPasskeyCredentialLookup) Lookup(_ context.Context, credentialID, nonceHex string, authenticatorData, clientDataJSON, signature []byte) (service.PasskeyCredential, error) {
+func (s *stubPasskeyCredentialLookup) Lookup(_ context.Context, credentialID, nonceHex, network string, authenticatorData, clientDataJSON, signature []byte) (service.PasskeyCredential, error) {
 	s.gotCredentialID = credentialID
 	s.gotNonce = nonceHex
+	s.gotNetwork = network
 	s.gotAuthenticatorData = authenticatorData
 	s.gotClientDataJSON = clientDataJSON
 	s.gotSignature = signature

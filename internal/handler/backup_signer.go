@@ -145,7 +145,7 @@ func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	// Not best-effort: the chain call already succeeded, so a failure here
 	// must be retried (this same call, not the chain call) rather than
 	// silently dropped.
-	if err := h.credSvc.Register(c.Request.Context(), req.KeyDataHex, req.SmartAccountAddress, req.Label, req.Seq); err != nil {
+	if err := h.credSvc.Register(c.Request.Context(), req.KeyDataHex, req.SmartAccountAddress, req.Label, req.Seq, string(network)); err != nil {
 		slog.Error("register backup signer in recovery index", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrSignerIndexFailed, "add_signer succeeded on-chain but indexing it failed; retry this confirm call")
 		return
@@ -218,7 +218,7 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	// succeeded and is the artifact that matters. passkey_credentials is a
 	// discovery convenience, not a security boundary — the contract itself
 	// is what actually stops the removed key from signing.
-	if err := h.credSvc.Deregister(c.Request.Context(), req.KeyDataHex); err != nil {
+	if err := h.credSvc.Deregister(c.Request.Context(), req.KeyDataHex, string(network)); err != nil {
 		slog.Error("deregister backup signer from recovery index", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
 	}
 

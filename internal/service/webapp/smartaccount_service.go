@@ -48,9 +48,15 @@ type SmartAccountService struct {
 	rpcURL            string
 	networkPassphrase string
 	factoryAddress    string
+	// network is which Stellar network ("testnet"/"mainnet") this instance's
+	// rpcURL/factoryAddress/bundler actually deploy against — set once at
+	// construction (cmd/server/main.go constructs one instance per network),
+	// and written onto every webapp.smart_accounts row this instance persists
+	// so a later lookup can tell the two apart (§3/§4).
+	network string
 }
 
-func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Queries, rpcURL, networkPassphrase, factoryAddress string) *SmartAccountService {
+func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Queries, rpcURL, networkPassphrase, factoryAddress, network string) *SmartAccountService {
 	return &SmartAccountService{
 		soroban:           soroban,
 		bundler:           bundler,
@@ -58,6 +64,7 @@ func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Q
 		rpcURL:            rpcURL,
 		networkPassphrase: networkPassphrase,
 		factoryAddress:    factoryAddress,
+		network:           network,
 	}
 }
 
@@ -341,6 +348,7 @@ func (s *SmartAccountService) DeployForCredential(ctx context.Context, userID st
 		SaltHex:             saltHex,
 		SmartAccountAddress: address,
 		Deployed:            1,
+		Network:             s.network,
 		CreatedAt:           time.Now().UnixMilli(),
 	}); err != nil {
 		return "", "", "", false, false, fmt.Errorf("store smart account: %w", err)
@@ -373,8 +381,8 @@ func (s *SmartAccountService) Query(ctx context.Context, keyDataHex string) (add
 // owning credential ID. Used by webauthn authentication-finish to return the
 // signed-in credential's account details (ports the `acct` lookup in
 // app/api/webauthn/authentication/finish/route.ts).
-func (s *SmartAccountService) GetByCredentialID(ctx context.Context, credentialID string) (address, keyDataHex string, deployed bool, err error) {
-	row, err := s.q.GetSmartAccountByCredentialID(ctx, credentialID)
+func (s *SmartAccountService) GetByCredentialID(ctx context.Context, credentialID, network string) (address, keyDataHex string, deployed bool, err error) {
+	row, err := s.q.GetSmartAccountByCredentialID(ctx, db.GetSmartAccountByCredentialIDParams{CredentialID: credentialID, Network: network})
 	if err != nil {
 		return "", "", false, fmt.Errorf("get smart account for credential: %w", err)
 	}

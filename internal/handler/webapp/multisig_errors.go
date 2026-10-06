@@ -35,6 +35,12 @@ func multisigErrorResponse(c *gin.Context, err error) {
 	case errors.Is(err, webapp.ErrMultisigNoContextRule):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrNoContextRule, err.Error())
 
+	case errors.Is(err, webapp.ErrMultisigNetworkMismatch):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrNetworkMismatch, err.Error())
+
+	case errors.Is(err, webapp.ErrMultisigMainnetNotConfigured):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrMainnetNotConfigured, err.Error())
+
 	case errors.Is(err, webapp.ErrMultisigDraftNotFound),
 		errors.Is(err, webapp.ErrMultisigAccountNotFound),
 		errors.Is(err, webapp.ErrMultisigProposalNotFound),

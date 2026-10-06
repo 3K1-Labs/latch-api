@@ -451,7 +451,7 @@ func TestDeployFreighter_InvalidGAddress(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestDeployFreighter_NetworkMainnet_Rejected(t *testing.T) {
+func TestDeployFreighter_NetworkMainnet_NotConfigured(t *testing.T) {
 	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS"}, nil, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
 	r := gin.New()
 	r.POST("/smart-account/freighter", h.DeployFreighter)
@@ -465,6 +465,47 @@ func TestDeployFreighter_NetworkMainnet_Rejected(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
+}
+
+// TestDeployFreighter_NetworkMainnet_Configured: when a mainnet service is
+// configured, DeployFreighter routes to it instead of rejecting mainnet
+// outright — mainnet has no friendbot, but funding is the service layer's
+// job (see freighter_service_test.go's mainnet cases), not a blanket reject
+// at the handler (LATCH_BACKEND_MAINNET_ACCOUNT_NETWORK.md §7.1).
+func TestDeployFreighter_NetworkMainnet_Configured(t *testing.T) {
+	mainnetStub := &stubSmartAccount{deployFreighterAddress: "CMAINNET"}
+	h := NewSmartAccountHandler(&stubSmartAccount{}, mainnetStub, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/freighter", h.DeployFreighter)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+		"network":  "mainnet",
+		"gAddress": testHandlerGAddress,
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"smartAccountAddress":"CMAINNET"`)
+}
+
+// TestDeployFreighter_AccountNotFunded: mainnet's "G-address doesn't exist
+// yet" failure maps to 400 account_not_funded, not a generic 500.
+func TestDeployFreighter_AccountNotFunded(t *testing.T) {
+	mainnetStub := &stubSmartAccount{deployFreighterErr: webapp.ErrAccountNotFunded}
+	h := NewSmartAccountHandler(&stubSmartAccount{}, mainnetStub, &stubContextRules{}, &stubContextRules{}, &stubBalances{}, &stubBalances{}, testCfg())
+	r := gin.New()
+	r.POST("/smart-account/freighter", h.DeployFreighter)
+
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+		"network":  "mainnet",
+		"gAddress": testHandlerGAddress,
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"account_not_funded"`)
 }
 
 func TestDeployFreighter_NetworkInvalid(t *testing.T) {

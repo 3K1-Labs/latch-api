@@ -199,7 +199,7 @@ func newTestSmartAccountService(t *testing.T, rpc sorobanRPC) (*SmartAccountServ
 	q := db.New(sqlDB)
 
 	factoryAddr := testContractAddress(t)
-	svc := NewSmartAccountService(rpc, bundlerSvc, q, "https://rpc.example.com", "Test SDF Network ; September 2015", factoryAddr)
+	svc := NewSmartAccountService(rpc, bundlerSvc, q, "https://rpc.example.com", "Test SDF Network ; September 2015", factoryAddr, "testnet")
 	return svc, mock
 }
 

@@ -357,6 +357,12 @@ type FinishAuthenticationInput struct {
 	ChromeExtensionIDFromBody string
 	ExtensionIDHeader         string
 	Config                    WebAuthnConfig
+	// Network is the already-resolved network ("testnet"/"mainnet") this
+	// authentication is for — only consulted by adoptExternalPasskey, which
+	// provisions a fresh webapp.smart_accounts row for a passkey that so far
+	// only exists in the shared passkey_credentials index (mobile or an
+	// extension registration on another network).
+	Network string
 }
 
 // AuthenticatedCredential identifies the credential that completed
@@ -496,7 +502,10 @@ func (s *WebAuthnService) adoptExternalPasskey(
 	authData *authenticatorData,
 	credentialIDB64 string,
 ) (AuthenticatedCredential, error) {
-	row, err := s.q.GetPasskeyCredential(ctx, hex.EncodeToString(in.CredentialID))
+	row, err := s.q.GetPasskeyCredential(ctx, db.GetPasskeyCredentialParams{
+		CredentialID: hex.EncodeToString(in.CredentialID),
+		Network:      in.Network,
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
 	}
@@ -566,6 +575,7 @@ func (s *WebAuthnService) adoptExternalPasskey(
 		SaltHex:             hex.EncodeToString(DeriveWebauthnSalt(row.KeyDataHex)),
 		SmartAccountAddress: row.SmartAccountAddress,
 		Deployed:            1,
+		Network:             in.Network,
 		CreatedAt:           now,
 	}); err != nil {
 		return AuthenticatedCredential{}, fmt.Errorf("store adopted smart account: %w", err)

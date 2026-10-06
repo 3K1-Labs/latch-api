@@ -23,7 +23,7 @@ func (q *Queries) DeleteMultisigMembersForAccount(ctx context.Context, multisigA
 }
 
 const getMultisigAccountByAddress = `-- name: GetMultisigAccountByAddress :one
-SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at
+SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at, network
 FROM webapp.multisig_accounts
 WHERE smart_account_address = $1
 `
@@ -38,12 +38,13 @@ func (q *Queries) GetMultisigAccountByAddress(ctx context.Context, smartAccountA
 		&i.Threshold,
 		&i.AccountSaltHex,
 		&i.CreatedAt,
+		&i.Network,
 	)
 	return i, err
 }
 
 const getMultisigAccountByID = `-- name: GetMultisigAccountByID :one
-SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at
+SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at, network
 FROM webapp.multisig_accounts
 WHERE id = $1
 `
@@ -58,6 +59,7 @@ func (q *Queries) GetMultisigAccountByID(ctx context.Context, id uuid.UUID) (Web
 		&i.Threshold,
 		&i.AccountSaltHex,
 		&i.CreatedAt,
+		&i.Network,
 	)
 	return i, err
 }
@@ -119,7 +121,7 @@ func (q *Queries) InsertMultisigMember(ctx context.Context, arg InsertMultisigMe
 
 const listMultisigAccountsWithProposalCountForUser = `-- name: ListMultisigAccountsWithProposalCountForUser :many
 SELECT
-  a.id, a.smart_account_address, a.threshold, a.account_salt_hex, a.created_at,
+  a.id, a.smart_account_address, a.threshold, a.account_salt_hex, a.created_at, a.network,
   COALESCE(p.proposal_count, 0)::bigint AS proposal_count
 FROM webapp.multisig_accounts a
 LEFT JOIN (
@@ -137,6 +139,7 @@ type ListMultisigAccountsWithProposalCountForUserRow struct {
 	Threshold           int32     `json:"threshold"`
 	AccountSaltHex      string    `json:"account_salt_hex"`
 	CreatedAt           int64     `json:"created_at"`
+	Network             string    `json:"network"`
 	ProposalCount       int64     `json:"proposal_count"`
 }
 
@@ -163,6 +166,7 @@ func (q *Queries) ListMultisigAccountsWithProposalCountForUser(ctx context.Conte
 			&i.Threshold,
 			&i.AccountSaltHex,
 			&i.CreatedAt,
+			&i.Network,
 			&i.ProposalCount,
 		); err != nil {
 			return nil, err
@@ -240,8 +244,8 @@ func (q *Queries) RelinkMultisigMembersByCredential(ctx context.Context, arg Rel
 }
 
 const upsertMultisigAccount = `-- name: UpsertMultisigAccount :one
-INSERT INTO webapp.multisig_accounts (id, user_id, smart_account_address, threshold, account_salt_hex, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO webapp.multisig_accounts (id, user_id, smart_account_address, threshold, account_salt_hex, network, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (smart_account_address) DO UPDATE SET
   threshold        = EXCLUDED.threshold,
   account_salt_hex = EXCLUDED.account_salt_hex
@@ -254,6 +258,7 @@ type UpsertMultisigAccountParams struct {
 	SmartAccountAddress string    `json:"smart_account_address"`
 	Threshold           int32     `json:"threshold"`
 	AccountSaltHex      string    `json:"account_salt_hex"`
+	Network             string    `json:"network"`
 	CreatedAt           int64     `json:"created_at"`
 }
 
@@ -264,6 +269,7 @@ func (q *Queries) UpsertMultisigAccount(ctx context.Context, arg UpsertMultisigA
 		arg.SmartAccountAddress,
 		arg.Threshold,
 		arg.AccountSaltHex,
+		arg.Network,
 		arg.CreatedAt,
 	)
 	var id uuid.UUID

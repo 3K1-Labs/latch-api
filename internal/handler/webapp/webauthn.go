@@ -26,31 +26,69 @@ func keyDataHashHex(keyDataHex string) string {
 }
 
 type WebAuthnHandler struct {
-	webauthnSvc      webauthnService
-	smartAccountSvc  smartAccountService
-	accountsSvc      accountsService
-	credentialSvc    passkeyCredentialIndexService
-	accountSignerSvc accountSignerService
-	sessionSvc       sessionService
-	auditSvc         auditService
-	notifSvc         notificationService
-	cfg              *config.Config
-	crossSiteCookies bool
+	webauthnSvc webauthnService
+	// smartAccountSvc/smartAccountSvcMainnet mirror SmartAccountHandler's own
+	// pair — registration deploys on whichever network the request asks for,
+	// never silently falling back to testnet. smartAccountSvcMainnet is nil
+	// when mainnet isn't configured; resolveNetwork reports
+	// mainnet_not_configured rather than deploying on testnet and returning
+	// that address for a mainnet request.
+	smartAccountSvc        smartAccountService
+	smartAccountSvcMainnet smartAccountService
+	accountsSvc            accountsService
+	credentialSvc          passkeyCredentialIndexService
+	accountSignerSvc       accountSignerService
+	sessionSvc             sessionService
+	auditSvc               auditService
+	notifSvc               notificationService
+	cfg                    *config.Config
+	crossSiteCookies       bool
 }
 
-func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionService, auditSvc auditService, notifSvc notificationService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
+func NewWebAuthnHandler(webauthnSvc webauthnService, smartAccountSvc, smartAccountSvcMainnet smartAccountService, accountsSvc accountsService, credentialSvc passkeyCredentialIndexService, accountSignerSvc accountSignerService, sessionSvc sessionService, auditSvc auditService, notifSvc notificationService, cfg *config.Config, crossSiteCookies bool) *WebAuthnHandler {
 	return &WebAuthnHandler{
-		webauthnSvc:      webauthnSvc,
-		smartAccountSvc:  smartAccountSvc,
-		accountsSvc:      accountsSvc,
-		credentialSvc:    credentialSvc,
-		accountSignerSvc: accountSignerSvc,
-		sessionSvc:       sessionSvc,
-		auditSvc:         auditSvc,
-		notifSvc:         notifSvc,
-		cfg:              cfg,
-		crossSiteCookies: crossSiteCookies,
+		webauthnSvc:            webauthnSvc,
+		smartAccountSvc:        smartAccountSvc,
+		smartAccountSvcMainnet: smartAccountSvcMainnet,
+		accountsSvc:            accountsSvc,
+		credentialSvc:          credentialSvc,
+		accountSignerSvc:       accountSignerSvc,
+		sessionSvc:             sessionSvc,
+		auditSvc:               auditSvc,
+		notifSvc:               notifSvc,
+		cfg:                    cfg,
+		crossSiteCookies:       crossSiteCookies,
 	}
+}
+
+// resolveNetwork parses a request's network value and selects the matching
+// smart-account service instance, mirroring
+// SmartAccountHandler.resolveNetwork — kept as its own copy rather than
+// shared, since the two handlers are constructed with independently-nilable
+// service pairs.
+func (h *WebAuthnHandler) resolveNetwork(raw string) (smartAccountService, webapp.Network, error) {
+	network, err := webapp.ParseNetwork(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	if network == webapp.NetworkMainnet {
+		if h.smartAccountSvcMainnet == nil {
+			return nil, "", errMainnetNotConfigured
+		}
+		return h.smartAccountSvcMainnet, network, nil
+	}
+	return h.smartAccountSvc, network, nil
+}
+
+// otherNetworkService returns the service instance (and network name) for
+// the network opposite requested — nil if that network isn't configured on
+// this server. Used only to tell "this credential has no smart account at
+// all" apart from "it has one, just not on the network asked about".
+func (h *WebAuthnHandler) otherNetworkService(requested webapp.Network) (smartAccountService, webapp.Network) {
+	if requested == webapp.NetworkMainnet {
+		return h.smartAccountSvc, webapp.NetworkTestnet
+	}
+	return h.smartAccountSvcMainnet, webapp.NetworkMainnet
 }
 
 func (h *WebAuthnHandler) webAuthnConfig() webapp.WebAuthnConfig {
@@ -175,6 +213,10 @@ type publicKeyCredentialJSON struct {
 type finishRegistrationRequest struct {
 	Response          publicKeyCredentialJSON `json:"response" binding:"required"`
 	ChromeExtensionID string                  `json:"chromeExtensionId,omitempty"`
+	// Network is optional and defaults to testnet — omitted by every client
+	// that predates mainnet support, which must keep deploying on testnet
+	// exactly as before.
+	Network string `json:"network,omitempty"`
 	// DisplayName and Seq feed the passkey-credential recovery index (see
 	// credentialSvc.Register below) so a fresh device restoring this passkey
 	// gets its label back. Both optional: an older client that sends neither
@@ -212,6 +254,12 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 		return
 	}
 
+	smartAccountSvc, network, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
 	rawID, err := base64.RawURLEncoding.DecodeString(req.Response.RawID)
 	if err != nil {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid rawId encoding")
@@ -244,9 +292,9 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 		return
 	}
 
-	keyDataHex, saltHex, smartAccountAddress, deployed, alreadyDeployed, err := h.smartAccountSvc.DeployForCredential(c.Request.Context(), userID, cred)
+	keyDataHex, saltHex, smartAccountAddress, deployed, alreadyDeployed, err := smartAccountSvc.DeployForCredential(c.Request.Context(), userID, cred)
 	if err != nil {
-		slog.Error("deploy smart account for credential", "userID", userID, "err", err)
+		slog.Error("deploy smart account for credential", "userID", userID, "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
@@ -259,7 +307,7 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 	if len(label) > finishRegistrationLabelMaxLen {
 		label = label[:finishRegistrationLabelMaxLen]
 	}
-	if err := h.credentialSvc.Register(c.Request.Context(), keyDataHex, smartAccountAddress, label, req.Seq); err != nil {
+	if err := h.credentialSvc.Register(c.Request.Context(), keyDataHex, smartAccountAddress, label, req.Seq, string(network)); err != nil {
 		slog.Error("register passkey credential index", "userID", userID, "err", err)
 	}
 
@@ -283,6 +331,7 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 		"smartAccountAddress": smartAccountAddress,
 		"deployed":            deployed,
 		"alreadyDeployed":     alreadyDeployed,
+		"network":             string(network),
 		"determinismCheck":    gin.H{"keyDataHash": keyDataHashHex(keyDataHex)},
 	})
 }
@@ -406,6 +455,9 @@ func (h *WebAuthnHandler) AttachSignerFinish(c *gin.Context) {
 type finishAuthenticationRequest struct {
 	Response          publicKeyCredentialJSON `json:"response" binding:"required"`
 	ChromeExtensionID string                  `json:"chromeExtensionId,omitempty"`
+	// Network is optional and defaults to testnet, reading the testnet row —
+	// exactly today's behavior for a client that predates mainnet support.
+	Network string `json:"network,omitempty"`
 }
 
 // AuthenticationBegin godoc
@@ -479,6 +531,12 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		return
 	}
 
+	smartAccountSvc, network, err := h.resolveNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
+		return
+	}
+
 	rawID, err := base64.RawURLEncoding.DecodeString(req.Response.RawID)
 	if err != nil {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid rawId encoding")
@@ -509,6 +567,7 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		ChromeExtensionIDFromBody: req.ChromeExtensionID,
 		ExtensionIDHeader:         extensionIDHeader(c),
 		Config:                    h.webAuthnConfig(),
+		Network:                   string(network),
 	})
 	if err != nil {
 		slog.Error("finish webauthn authentication", "userID", userID, "err", err)
@@ -544,16 +603,33 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		return
 	}
 
-	smartAccountAddress, keyDataHex, deployed, err := h.smartAccountSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID)
+	smartAccountAddress, keyDataHex, deployed, err := smartAccountSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID, string(network))
 	if err != nil {
 		// cred.CredentialID may be a backup signer rather than an account's
-		// original credential (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R15) —
-		// smart_accounts only ever holds the original. Fall back to the
-		// account_signers index before failing.
-		fallbackAddress, fallbackErr := h.accountSignerSvc.ResolveByCredentialID(c.Request.Context(), cred.CredentialID)
+		// original credential (LATCH_BACKEND_SOLO_BACKUP_SIGNERS.md R15), or
+		// this account's original credential but deployed only on the other
+		// network. Check the other network's row before falling back to the
+		// account_signers index, so "exists on testnet, asked about mainnet"
+		// comes back as account_not_on_network rather than a generic failure
+		// — and never leaks the other network's address in the response.
+		if otherSvc, otherNetwork := h.otherNetworkService(network); otherSvc != nil {
+			if _, _, _, otherErr := otherSvc.GetByCredentialID(c.Request.Context(), cred.CredentialID, string(otherNetwork)); otherErr == nil {
+				webappx.Fail(c, http.StatusNotFound, webappx.ErrAccountNotOnNetwork, "this passkey has no smart account on the requested network")
+				return
+			}
+		}
+
+		fallbackAddress, fallbackNetwork, fallbackErr := h.accountSignerSvc.ResolveByCredentialID(c.Request.Context(), cred.CredentialID)
 		if fallbackErr != nil {
-			slog.Error("get smart account for authenticated credential", "userID", userID, "err", err)
+			// Genuinely no smart account anywhere for this credential.
+			slog.Error("get smart account for authenticated credential", "userID", userID, "network", network, "err", err)
 			webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "credential verified, but no smart account mapping exists")
+			return
+		}
+		if fallbackNetwork != string(network) {
+			// This credential is valid and does have a smart account — just not
+			// on the requested network. Never return the other network's C...
+			webappx.Fail(c, http.StatusNotFound, webappx.ErrAccountNotOnNetwork, "this passkey has no smart account on the requested network")
 			return
 		}
 		// A WebAuthn assertion carries no public key, so the client can't
@@ -573,7 +649,7 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 	// §2: only the credential that just verified — this session's proved set
 	// was just replaced with exactly it, so this is equivalent to (and
 	// cheaper than) re-reading the set back from storage.
-	accounts, err := h.accountsSvc.ListAccountsForProvedCredentials(c.Request.Context(), []string{cred.CredentialID})
+	accounts, err := h.accountsSvc.ListAccountsForProvedCredentials(c.Request.Context(), []string{cred.CredentialID}, string(network))
 	if err != nil {
 		slog.Error("list accounts after webauthn authentication", "userID", userID, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -585,6 +661,7 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 			"smartAccountAddress": a.SmartAccountAddress,
 			"credentialId":        a.CredentialID,
 			"deployed":            a.Deployed,
+			"network":             string(network),
 		})
 	}
 
@@ -592,6 +669,7 @@ func (h *WebAuthnHandler) AuthenticationFinish(c *gin.Context) {
 		"smartAccountAddress": smartAccountAddress,
 		"keyDataHex":          keyDataHex,
 		"deployed":            deployed,
+		"network":             string(network),
 		"activeCredentialId":  cred.CredentialID,
 		"accounts":            accountsOut,
 	})

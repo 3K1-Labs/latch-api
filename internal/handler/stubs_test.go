@@ -132,21 +132,25 @@ type stubPasskeyCredentialRegister struct {
 	gotAddress    string
 	gotLabel      string
 	gotSeq        int32
+	gotNetwork    string
 
 	deregisterErr        error
 	gotDeregisterKeyData string
+	gotDeregisterNetwork string
 }
 
-func (s *stubPasskeyCredentialRegister) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
+func (s *stubPasskeyCredentialRegister) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32, network string) error {
 	s.gotKeyDataHex = keyDataHex
 	s.gotAddress = smartAccountAddress
 	s.gotLabel = label
 	s.gotSeq = seq
+	s.gotNetwork = network
 	return s.err
 }
 
-func (s *stubPasskeyCredentialRegister) Deregister(_ context.Context, keyDataHex string) error {
+func (s *stubPasskeyCredentialRegister) Deregister(_ context.Context, keyDataHex, network string) error {
 	s.gotDeregisterKeyData = keyDataHex
+	s.gotDeregisterNetwork = network
 	return s.deregisterErr
 }
 

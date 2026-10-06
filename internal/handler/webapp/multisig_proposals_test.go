@@ -14,7 +14,7 @@ func TestMultisigProposalsCreate_Success(t *testing.T) {
 	stub := &stubMultisigProposal{createResult: webapp.ProposalSummary{
 		ID: "prop-1", AuthDigestHex: "digest", ValidUntilLedger: 1000, ContextRuleID: 1, SignaturePayloadHex: "payload",
 	}}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals", h.Create)
 
@@ -31,7 +31,7 @@ func TestMultisigProposalsCreate_Success(t *testing.T) {
 }
 
 func TestMultisigProposalsCreate_InvalidBody(t *testing.T) {
-	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, testCfg())
+	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals", h.Create)
 
@@ -42,9 +42,71 @@ func TestMultisigProposalsCreate_InvalidBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestMultisigProposalsCreate_NetworkMainnet_RoutesToMainnetService mirrors
+// the pattern used throughout (e.g. TestBuildSend_NetworkMainnet_RoutesToMainnetService):
+// a mainnet network field selects the mainnet service instance, not testnet.
+func TestMultisigProposalsCreate_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
+	testnetStub := &stubMultisigProposal{createResult: webapp.ProposalSummary{ID: "testnet-prop"}}
+	mainnetStub := &stubMultisigProposal{createResult: webapp.ProposalSummary{ID: "mainnet-prop"}}
+	h := NewMultisigProposalsHandler(testnetStub, mainnetStub, testCfg())
+	r := gin.New()
+	r.POST("/multisig/proposals", h.Create)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/proposals", postJSONBody(map[string]any{
+		"network":             "mainnet",
+		"smartAccountAddress": "CADDRESS",
+		"operationKind":       "counter_increment",
+		"targetContractId":    "CTARGET",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"id":"mainnet-prop"`)
+}
+
+// TestMultisigProposalsCreate_NetworkMainnet_NotConfigured: no mainnet
+// service was wired up, so a mainnet request fails closed instead of
+// silently running against testnet.
+func TestMultisigProposalsCreate_NetworkMainnet_NotConfigured(t *testing.T) {
+	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, nil, testCfg())
+	r := gin.New()
+	r.POST("/multisig/proposals", h.Create)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/proposals", postJSONBody(map[string]any{
+		"network":             "mainnet",
+		"smartAccountAddress": "CADDRESS",
+		"operationKind":       "counter_increment",
+		"targetContractId":    "CTARGET",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
+}
+
+func TestMultisigProposalsCreate_NetworkMismatch(t *testing.T) {
+	stub := &stubMultisigProposal{createErr: webapp.ErrMultisigNetworkMismatch}
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
+	r := gin.New()
+	r.POST("/multisig/proposals", h.Create)
+
+	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/multisig/proposals", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"operationKind":       "counter_increment",
+		"targetContractId":    "CTARGET",
+	})), "user-1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"network_mismatch"`)
+}
+
 func TestMultisigProposalsCreate_NoContextRule(t *testing.T) {
 	stub := &stubMultisigProposal{createErr: webapp.ErrMultisigNoContextRule}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals", h.Create)
 
@@ -66,7 +128,7 @@ func TestMultisigProposalsList_Success(t *testing.T) {
 	stub := &stubMultisigProposal{listThreshold: 2, listProposals: []webapp.ProposalListItem{
 		{ID: "prop-1", Status: "pending", OperationKind: "counter_increment"},
 	}}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.GET("/multisig/proposals", h.List)
 
@@ -79,7 +141,7 @@ func TestMultisigProposalsList_Success(t *testing.T) {
 }
 
 func TestMultisigProposalsList_MissingAccount(t *testing.T) {
-	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, testCfg())
+	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, nil, testCfg())
 	r := gin.New()
 	r.GET("/multisig/proposals", h.List)
 
@@ -95,7 +157,7 @@ func TestMultisigProposalsGet_Success(t *testing.T) {
 		Account:  webapp.MultisigAccountRef{SmartAccountAddress: "CADDRESS", Threshold: 2},
 		Proposal: webapp.ProposalFull{ID: "prop-1", Status: "pending"},
 	}}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.GET("/multisig/proposals/:id", h.Get)
 
@@ -109,7 +171,7 @@ func TestMultisigProposalsGet_Success(t *testing.T) {
 
 func TestMultisigProposalsGet_NotFound(t *testing.T) {
 	stub := &stubMultisigProposal{detailErr: webapp.ErrMultisigProposalNotFound}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.GET("/multisig/proposals/:id", h.Get)
 
@@ -122,7 +184,7 @@ func TestMultisigProposalsGet_NotFound(t *testing.T) {
 
 func TestMultisigProposalsRefresh_Success(t *testing.T) {
 	stub := &stubMultisigProposal{refreshResult: webapp.RefreshResult{Refreshed: true, ValidUntilLedger: 2000, AuthDigestHex: "newdigest"}}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/refresh", h.Refresh)
 
@@ -136,7 +198,7 @@ func TestMultisigProposalsRefresh_Success(t *testing.T) {
 
 func TestMultisigProposalsExecute_Success(t *testing.T) {
 	stub := &stubMultisigProposal{executeResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/execute", h.Execute)
 
@@ -150,7 +212,7 @@ func TestMultisigProposalsExecute_Success(t *testing.T) {
 
 func TestMultisigProposalsExecute_ThresholdNotMet(t *testing.T) {
 	stub := &stubMultisigProposal{executeErr: webapp.ErrMultisigThresholdNotMet}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/execute", h.Execute)
 
@@ -163,7 +225,7 @@ func TestMultisigProposalsExecute_ThresholdNotMet(t *testing.T) {
 
 func TestMultisigProposalsExecute_Refreshed(t *testing.T) {
 	stub := &stubMultisigProposal{executeErr: webapp.ErrMultisigProposalRefreshed}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/execute", h.Execute)
 
@@ -178,7 +240,7 @@ func TestMultisigProposalsExecute_Refreshed(t *testing.T) {
 
 func TestMultisigProposalsApproveWebauthn_Success(t *testing.T) {
 	stub := &stubMultisigProposal{approvalID: "approval-1"}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/approve/webauthn", h.ApproveWebauthn)
 
@@ -193,7 +255,7 @@ func TestMultisigProposalsApproveWebauthn_Success(t *testing.T) {
 }
 
 func TestMultisigProposalsApproveWebauthn_InvalidBody(t *testing.T) {
-	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, testCfg())
+	h := NewMultisigProposalsHandler(&stubMultisigProposal{}, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/approve/webauthn", h.ApproveWebauthn)
 
@@ -211,7 +273,7 @@ func TestMultisigProposalsApproveDelegatedBegin_Success(t *testing.T) {
 		},
 		SignerAddress: "GADDR", ValidUntilLedger: 1000,
 	}}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/approve/delegated/begin", h.ApproveDelegatedBegin)
 
@@ -228,7 +290,7 @@ func TestMultisigProposalsApproveDelegatedBegin_Success(t *testing.T) {
 
 func TestMultisigProposalsApproveDelegatedFinish_Success(t *testing.T) {
 	stub := &stubMultisigProposal{finishID: "approval-1"}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/approve/delegated/finish", h.ApproveDelegatedFinish)
 
@@ -244,7 +306,7 @@ func TestMultisigProposalsApproveDelegatedFinish_Success(t *testing.T) {
 
 func TestMultisigProposalsApproveDelegatedFinish_NotStarted(t *testing.T) {
 	stub := &stubMultisigProposal{finishErr: webapp.ErrMultisigApprovalNotStarted}
-	h := NewMultisigProposalsHandler(stub, testCfg())
+	h := NewMultisigProposalsHandler(stub, nil, testCfg())
 	r := gin.New()
 	r.POST("/multisig/proposals/:id/approve/delegated/finish", h.ApproveDelegatedFinish)
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 )
 
 // PasskeyCredentialHandler resolves a WebAuthn credential ID to the smart
@@ -53,6 +54,11 @@ type lookupPasskeyCredentialRequest struct {
 	AuthenticatorData string `json:"authenticator_data" binding:"required"`
 	ClientDataJSON    string `json:"client_data_json" binding:"required"`
 	Signature         string `json:"signature" binding:"required"`
+	// Network is optional and defaults to testnet, matching every other
+	// network-aware endpoint — a device recovering a synced passkey blind
+	// (no local state at all) may not know which network it was deployed on
+	// yet; omitting it keeps today's testnet-only behavior exactly.
+	Network string `json:"network,omitempty"`
 }
 
 // Lookup godoc
@@ -93,7 +99,13 @@ func (h *PasskeyCredentialHandler) Lookup(c *gin.Context) {
 		return
 	}
 
-	cred, err := h.svc.Lookup(c.Request.Context(), req.CredentialID, req.Nonce, authenticatorData, clientDataJSON, signature)
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be \"testnet\" or \"mainnet\"")
+		return
+	}
+
+	cred, err := h.svc.Lookup(c.Request.Context(), req.CredentialID, req.Nonce, string(network), authenticatorData, clientDataJSON, signature)
 	if err != nil {
 		if errors.Is(err, service.ErrCredentialNotFound) {
 			httpx.Fail(c, http.StatusUnauthorized, httpx.ErrUnauthorized, "no wallet found for this passkey")

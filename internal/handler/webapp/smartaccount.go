@@ -1,6 +1,7 @@
 package webapp
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -212,7 +213,7 @@ type deployFreighterSmartAccountRequest struct {
 
 // DeployFreighter godoc
 // @Summary      Deploy a smart account for a Freighter/mnemonic G-address
-// @Description  Funds gAddress via testnet friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer. Testnet only — friendbot funding doesn't exist on mainnet.
+// @Description  On testnet, funds gAddress via friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer. On mainnet, there is no friendbot — gAddress must already exist on-chain or this fails with account_not_funded.
 // @Tags         smart-account
 // @Accept       json
 // @Produce      json
@@ -228,19 +229,19 @@ func (h *SmartAccountHandler) DeployFreighter(c *gin.Context) {
 		return
 	}
 
-	network, err := webapp.ParseNetwork(req.Network)
+	svc, network, err := h.resolveNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
-	if network == webapp.NetworkMainnet {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrMainnetNotConfigured, "DeployFreighter funds via testnet friendbot, which doesn't exist on mainnet")
-		return
-	}
 
-	address, alreadyDeployed, err := h.smartAccountSvc.DeployFreighter(c.Request.Context(), req.GAddress)
+	address, alreadyDeployed, err := svc.DeployFreighter(c.Request.Context(), req.GAddress)
 	if err != nil {
-		slog.Error("deploy freighter smart account", "err", err)
+		if errors.Is(err, webapp.ErrAccountNotFunded) {
+			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAccountNotFunded, err.Error())
+			return
+		}
+		slog.Error("deploy freighter smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}

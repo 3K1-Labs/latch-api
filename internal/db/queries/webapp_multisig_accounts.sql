@@ -1,18 +1,18 @@
 -- name: UpsertMultisigAccount :one
-INSERT INTO webapp.multisig_accounts (id, user_id, smart_account_address, threshold, account_salt_hex, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO webapp.multisig_accounts (id, user_id, smart_account_address, threshold, account_salt_hex, network, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (smart_account_address) DO UPDATE SET
   threshold        = EXCLUDED.threshold,
   account_salt_hex = EXCLUDED.account_salt_hex
 RETURNING id;
 
 -- name: GetMultisigAccountByAddress :one
-SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at
+SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at, network
 FROM webapp.multisig_accounts
 WHERE smart_account_address = $1;
 
 -- name: GetMultisigAccountByID :one
-SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at
+SELECT id, user_id, smart_account_address, threshold, account_salt_hex, created_at, network
 FROM webapp.multisig_accounts
 WHERE id = $1;
 
@@ -26,7 +26,7 @@ WHERE id = $1;
 -- is resolved separately in Go from ListMultisigMembersForAccount, since sqlc
 -- can't reliably infer nullability for a synthetic joined column.
 SELECT
-  a.id, a.smart_account_address, a.threshold, a.account_salt_hex, a.created_at,
+  a.id, a.smart_account_address, a.threshold, a.account_salt_hex, a.created_at, a.network,
   COALESCE(p.proposal_count, 0)::bigint AS proposal_count
 FROM webapp.multisig_accounts a
 LEFT JOIN (
