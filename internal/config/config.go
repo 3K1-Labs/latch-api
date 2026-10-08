@@ -221,6 +221,23 @@ type Config struct {
 	// for deployments that share one secret across both relayers.
 	RelayerURLMainnet    string
 	RelayerAPIKeyMainnet string
+
+	// latch-relayer's gasless service (cmd/gasless), a separate deployment
+	// from the deposit bridge above with its own API key. When set for a
+	// network, wallet setup calls (deploy, add_context_rule, add_signer) are
+	// submitted through it instead of the bundler. Empty leaves that network
+	// on the bundler.
+	GaslessURL           string
+	GaslessAPIKey        string
+	GaslessURLMainnet    string
+	GaslessAPIKeyMainnet string
+	// GaslessTimeout bounds one gasless submission. Keep it under the global
+	// 30s request timeout and above the service's SPONSOR_SYNC_WAIT_SECONDS.
+	GaslessTimeout time.Duration
+	// GaslessFallbackToBundler sends a setup call through the bundler when the
+	// gasless service is unreachable or won't sponsor it. A transition
+	// setting; a sponsorship limit is never bypassed this way.
+	GaslessFallbackToBundler bool
 }
 
 func Load() (*Config, error) {
@@ -311,6 +328,16 @@ func Load() (*Config, error) {
 		RelayerURLMainnet:    getEnv("RELAYER_URL_MAINNET", ""),
 		RelayerAPIKeyMainnet: getEnv("RELAYER_API_KEY_MAINNET", ""),
 		RelayerTimeout:       time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
+
+		GaslessURL:               getEnv("GASLESS_URL", ""),
+		GaslessAPIKey:            getEnv("GASLESS_API_KEY", ""),
+		GaslessURLMainnet:        getEnv("GASLESS_URL_MAINNET", ""),
+		GaslessAPIKeyMainnet:     getEnv("GASLESS_API_KEY_MAINNET", ""),
+		GaslessTimeout:           time.Duration(getEnvInt("GASLESS_TIMEOUT_SEC", 24)) * time.Second,
+		GaslessFallbackToBundler: getEnvBool("GASLESS_FALLBACK_TO_BUNDLER", true),
+	}
+	if cfg.GaslessTimeout <= 0 || cfg.GaslessTimeout >= 30*time.Second {
+		return nil, fmt.Errorf("GASLESS_TIMEOUT_SEC must be between 1 and 29 (the request timeout is 30s)")
 	}
 
 	var err error

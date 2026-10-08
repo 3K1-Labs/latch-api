@@ -48,6 +48,8 @@ type SmartAccountService struct {
 	rpcURL            string
 	networkPassphrase string
 	factoryAddress    string
+	// gasless, when enabled, takes wallet deployment off the bundler.
+	gasless gaslessRoute
 }
 
 func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Queries, rpcURL, networkPassphrase, factoryAddress string) *SmartAccountService {
@@ -199,6 +201,33 @@ func (s *SmartAccountService) Deploy(ctx context.Context, params xdr.ScVal, pred
 	}
 
 	bundlerG := s.bundler.PublicKey()
+
+	// Deployment is a sponsored setup call: latch-relayer's gasless service
+	// pays for it from its own channel accounts (create_account needs no
+	// authorization). Falls through to the bundler only when the route says so.
+	if s.gasless.enabled() {
+		createFn := invokeContractHostFunction(factoryContractID, "create_account", params)
+		res, handled, err := s.gasless.submit(ctx, predictedAddress, bundlerG, createFn, nil)
+		if handled {
+			if err != nil {
+				return "", false, err
+			}
+			if res.Status != service.RPCStatusSuccess {
+				return "", false, fmt.Errorf("create_account %s still pending; retry to check the deployment", res.Hash)
+			}
+			// The gasless record doesn't carry the return value: confirm the
+			// predicted address now holds a contract instead.
+			deployed, err := s.IsDeployed(ctx, predictedAddress)
+			if err != nil {
+				return "", false, fmt.Errorf("confirm deployment: %w", err)
+			}
+			if !deployed {
+				return "", false, fmt.Errorf("deterministic address mismatch: create_account %s succeeded but %s holds no contract", res.Hash, predictedAddress)
+			}
+			return predictedAddress, false, nil
+		}
+	}
+
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
 		return "", false, fmt.Errorf("fetch bundler sequence: %w", err)

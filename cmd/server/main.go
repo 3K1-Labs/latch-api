@@ -190,6 +190,12 @@ func main() {
 				cfg.SorobanRPCURLTestnet, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
 				cfg.WebAppEd25519VerifierAddress, cfg.WebAppCounterContractAddress,
 			)
+			if cfg.GaslessURL != "" {
+				gasless := service.NewGaslessClient(cfg.GaslessURL, cfg.GaslessAPIKey, cfg.GaslessTimeout)
+				webappSmartAccountSvc.UseGasless(gasless, cfg.GaslessFallbackToBundler)
+				webappTransactionSvc.UseGasless(gasless, cfg.GaslessFallbackToBundler)
+				slog.Info("gasless sponsorship enabled for testnet setup calls", "fallback_to_bundler", cfg.GaslessFallbackToBundler)
+			}
 			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
 			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)
 			webappMultisigProposalSvc = webapp.NewMultisigProposalService(
@@ -226,6 +232,13 @@ func main() {
 				cfg.WebAppEd25519VerifierAddressMainnet, cfg.WebAppCounterContractAddress,
 			)
 
+			var gaslessMainnet *service.GaslessClient
+			if cfg.GaslessURLMainnet != "" {
+				gaslessMainnet = service.NewGaslessClient(cfg.GaslessURLMainnet, cfg.GaslessAPIKeyMainnet, cfg.GaslessTimeout)
+				webappTransactionSvcMainnet.UseGasless(gaslessMainnet, cfg.GaslessFallbackToBundler)
+				slog.Info("gasless sponsorship enabled for mainnet setup calls", "fallback_to_bundler", cfg.GaslessFallbackToBundler)
+			}
+
 			if cfg.WebAppFactoryAddressMainnet == "" {
 				slog.Warn("NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET not configured — mainnet smart-account creation routes will return mainnet_not_configured")
 			} else {
@@ -233,6 +246,9 @@ func main() {
 					sorobanSvc, bundlerSvcMainnet, queries,
 					cfg.SorobanRPCURLMainnet, cfg.WebAppNetworkPassphraseMainnet, cfg.WebAppFactoryAddressMainnet,
 				)
+				if gaslessMainnet != nil {
+					webappSmartAccountSvcMainnet.UseGasless(gaslessMainnet, cfg.GaslessFallbackToBundler)
+				}
 			}
 		}
 	}

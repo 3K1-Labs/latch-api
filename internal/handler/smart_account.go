@@ -329,6 +329,9 @@ func (h *SmartAccountHandler) DeployWebauthn(c *gin.Context) {
 
 	address, alreadyDeployed, err := svc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
 	if err != nil {
+		if failSponsorship(c, err) {
+			return
+		}
 		slog.Error("deploy webauthn smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
