@@ -290,6 +290,9 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
 			return
 		}
+		if failSponsorship(c, err) {
+			return
+		}
 		slog.Error("submit webauthn transaction", "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
 		return
@@ -357,6 +360,9 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
 			return
 		}
+		if failSponsorship(c, err) {
+			return
+		}
 		slog.Error("submit delegated transaction", "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
 		return
@@ -422,6 +428,9 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+			return
+		}
+		if failSponsorship(c, err) {
 			return
 		}
 		slog.Error("submit phantom transaction", "network", req.Network, "err", err)

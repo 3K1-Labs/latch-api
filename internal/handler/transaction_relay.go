@@ -182,6 +182,9 @@ func (h *TransactionRelayHandler) Submit(c *gin.Context) {
 
 	result, err := svc.SubmitBatchAuthEntries(c.Request.Context(), req.TxXdr, entries)
 	if err != nil {
+		if failSponsorship(c, err) {
+			return
+		}
 		// A rejected simulation is the caller's transaction being invalid —
 		// bad auth, insufficient balance, a failing contract — not a server
 		// fault. Returning 400 lets the client show the user something useful

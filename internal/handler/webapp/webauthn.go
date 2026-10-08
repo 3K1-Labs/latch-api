@@ -246,6 +246,9 @@ func (h *WebAuthnHandler) RegistrationFinish(c *gin.Context) {
 
 	keyDataHex, saltHex, smartAccountAddress, deployed, alreadyDeployed, err := h.smartAccountSvc.DeployForCredential(c.Request.Context(), userID, cred)
 	if err != nil {
+		if failSponsorship(c, err) {
+			return
+		}
 		slog.Error("deploy smart account for credential", "userID", userID, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
