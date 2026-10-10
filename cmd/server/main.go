@@ -194,7 +194,8 @@ func main() {
 				gasless := service.NewGaslessClient(cfg.GaslessURL, cfg.GaslessAPIKey, cfg.GaslessTimeout)
 				webappSmartAccountSvc.UseGasless(gasless, cfg.GaslessFallbackToBundler)
 				webappTransactionSvc.UseGasless(gasless, cfg.GaslessFallbackToBundler)
-				slog.Info("gasless sponsorship enabled for testnet setup calls", "fallback_to_bundler", cfg.GaslessFallbackToBundler)
+				webappTransactionSvc.UseGaslessForward(cfg.GaslessForwardEnabled)
+				slog.Info("gasless enabled for testnet", "fallback_to_bundler", cfg.GaslessFallbackToBundler, "user_paid_send_swap", cfg.GaslessForwardEnabled)
 			}
 			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
 			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)
@@ -236,7 +237,8 @@ func main() {
 			if cfg.GaslessURLMainnet != "" {
 				gaslessMainnet = service.NewGaslessClient(cfg.GaslessURLMainnet, cfg.GaslessAPIKeyMainnet, cfg.GaslessTimeout)
 				webappTransactionSvcMainnet.UseGasless(gaslessMainnet, cfg.GaslessFallbackToBundler)
-				slog.Info("gasless sponsorship enabled for mainnet setup calls", "fallback_to_bundler", cfg.GaslessFallbackToBundler)
+				webappTransactionSvcMainnet.UseGaslessForward(cfg.GaslessForwardEnabled)
+				slog.Info("gasless enabled for mainnet", "fallback_to_bundler", cfg.GaslessFallbackToBundler, "user_paid_send_swap", cfg.GaslessForwardEnabled)
 			}
 
 			if cfg.WebAppFactoryAddressMainnet == "" {

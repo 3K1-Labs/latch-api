@@ -35,6 +35,10 @@ type authTransactionCoreInput struct {
 	// external signer needed if the bundler itself can sign delegatedAuthG).
 	bundlerDelegatedAuthMode bool
 	delegatedAuthG           string
+	// dropAuthAddress removes recorded entries authorizing as this address:
+	// latch-relayer's executor in a forward()-wrapped (user-paid) build,
+	// which it signs itself at submit. Empty keeps every entry.
+	dropAuthAddress string
 }
 
 // buildAuthTransactionCore simulates buildTx(nil, nil), extracts and
@@ -72,6 +76,7 @@ func (s *TransactionService) buildAuthTransactionCore(
 	if err != nil {
 		return BuildAuthTransactionResult{}, fmt.Errorf("normalize auth entries: %w", err)
 	}
+	entries = dropAuthFor(entries, in.dropAuthAddress)
 	if len(entries) == 0 {
 		return BuildAuthTransactionResult{}, fmt.Errorf("no auth entries in simulation result")
 	}

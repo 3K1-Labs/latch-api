@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -32,6 +33,10 @@ type GaslessClient struct {
 	// field only so tests can shrink it.
 	retryInterval time.Duration
 	httpClient    *http.Client
+
+	mu          sync.Mutex
+	feeConfig   *GaslessFeeConfig
+	feeConfigAt time.Time
 }
 
 func NewGaslessClient(baseURL, apiKey string, budget time.Duration) *GaslessClient {
@@ -109,6 +114,17 @@ type gaslessError struct {
 // a new submission. Within one call, resending while the service boots is
 // safe: the same request_id never pays twice.
 func (c *GaslessClient) SubmitSponsored(ctx context.Context, wallet, txB64 string) (GaslessRecord, error) {
+	return c.submit(ctx, wallet, "sponsored", txB64)
+}
+
+// SubmitForward submits a forward()-wrapped transaction: the user reimburses
+// the fee in XLM or USDC. txB64 carries the user's signed entries only; the
+// gasless service adds and signs the executor's.
+func (c *GaslessClient) SubmitForward(ctx context.Context, wallet, txB64 string) (GaslessRecord, error) {
+	return c.submit(ctx, wallet, "forward", txB64)
+}
+
+func (c *GaslessClient) submit(ctx context.Context, wallet, mode, txB64 string) (GaslessRecord, error) {
 	if !c.Configured() {
 		return GaslessRecord{}, fmt.Errorf("%w: not configured", ErrGaslessUnavailable)
 	}
@@ -116,21 +132,44 @@ func (c *GaslessClient) SubmitSponsored(ctx context.Context, wallet, txB64 strin
 	if err != nil {
 		return GaslessRecord{}, err
 	}
-	body, err := json.Marshal(gaslessSubmitRequest{RequestID: id, Wallet: wallet, Mode: "sponsored", Transaction: txB64})
+	body, err := json.Marshal(gaslessSubmitRequest{RequestID: id, Wallet: wallet, Mode: mode, Transaction: txB64})
 	if err != nil {
 		return GaslessRecord{}, fmt.Errorf("marshal gasless request: %w", err)
 	}
+	raw, status, err := c.call(ctx, http.MethodPost, "/gasless/submit", body)
+	if err != nil {
+		return GaslessRecord{}, err
+	}
+	if status == http.StatusOK || status == http.StatusAccepted {
+		var rec GaslessRecord
+		if err := json.Unmarshal(raw, &rec); err != nil || rec.Status == "" {
+			return GaslessRecord{}, fmt.Errorf("%w: unreadable record (status %d)", ErrGaslessUnavailable, status)
+		}
+		return rec, nil
+	}
+	return GaslessRecord{}, gaslessStatusError(status, raw)
+}
 
+// call sends one request, resending while the service boots (safe: every
+// route is idempotent), and returns the body and status of the first real
+// answer. Transport failures and a spent budget are ErrGaslessUnavailable.
+func (c *GaslessClient) call(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.budget)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/gasless/submit", bytes.NewReader(body))
-		if err != nil {
-			return GaslessRecord{}, fmt.Errorf("build gasless request: %w", err)
+		var rd io.Reader
+		if body != nil {
+			rd = bytes.NewReader(body)
 		}
-		req.Header.Set("Content-Type", "application/json")
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, rd)
+		if err != nil {
+			return nil, 0, fmt.Errorf("build gasless request: %w", err)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		if c.apiKey != "" {
 			req.Header.Set("Authorization", "Bearer "+c.apiKey)
 		}
@@ -138,7 +177,11 @@ func (c *GaslessClient) SubmitSponsored(ctx context.Context, wallet, txB64 strin
 		resp, err := c.httpClient.Do(req)
 		if err == nil && !isRelayerBooting(resp.StatusCode) {
 			defer resp.Body.Close()
-			return decodeGaslessResponse(resp)
+			raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			if err != nil {
+				return nil, 0, fmt.Errorf("%w: read response: %w", ErrGaslessUnavailable, err)
+			}
+			return raw, resp.StatusCode, nil
 		}
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -147,47 +190,112 @@ func (c *GaslessClient) SubmitSponsored(ctx context.Context, wallet, txB64 strin
 			if err == nil {
 				err = fmt.Errorf("status %d", resp.StatusCode)
 			}
-			return GaslessRecord{}, fmt.Errorf("%w: %w", ErrGaslessUnavailable, err)
+			return nil, 0, fmt.Errorf("%w: %w", ErrGaslessUnavailable, err)
 		}
 		select {
 		case <-ctx.Done():
-			return GaslessRecord{}, fmt.Errorf("%w: %w", ErrGaslessUnavailable, ctx.Err())
+			return nil, 0, fmt.Errorf("%w: %w", ErrGaslessUnavailable, ctx.Err())
 		case <-time.After(c.retryInterval):
 		}
 	}
 }
 
-func decodeGaslessResponse(resp *http.Response) (GaslessRecord, error) {
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if err != nil {
-		return GaslessRecord{}, fmt.Errorf("%w: read response: %w", ErrGaslessUnavailable, err)
+// gaslessStatusError classifies a non-2xx answer.
+func gaslessStatusError(status int, raw []byte) error {
+	if status == http.StatusUnauthorized {
+		return fmt.Errorf("%w: gasless service rejected the api key", ErrGaslessUnavailable)
 	}
-
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusAccepted:
-		var rec GaslessRecord
-		if err := json.Unmarshal(raw, &rec); err != nil || rec.Status == "" {
-			return GaslessRecord{}, fmt.Errorf("%w: unreadable record (status %d)", ErrGaslessUnavailable, resp.StatusCode)
-		}
-		return rec, nil
-	case http.StatusUnauthorized:
-		return GaslessRecord{}, fmt.Errorf("%w: gasless service rejected the api key", ErrGaslessUnavailable)
-	}
-
 	var e gaslessError
 	_ = json.Unmarshal(raw, &e)
-	detail := fmt.Sprintf("status %d %s: %s", resp.StatusCode, e.Error.Code, e.Error.Message)
-	switch resp.StatusCode {
+	detail := fmt.Sprintf("status %d %s: %s", status, e.Error.Code, e.Error.Message)
+	switch status {
 	case http.StatusForbidden:
-		return GaslessRecord{}, fmt.Errorf("%w: %s", ErrGaslessNotSponsorable, detail)
+		return fmt.Errorf("%w: %s", ErrGaslessNotSponsorable, detail)
 	case http.StatusTooManyRequests:
-		return GaslessRecord{}, fmt.Errorf("%w: %s", ErrGaslessLimitReached, detail)
+		return fmt.Errorf("%w: %s", ErrGaslessLimitReached, detail)
 	case http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusNotImplemented:
-		return GaslessRecord{}, fmt.Errorf("%w: %s", ErrGaslessRefused, detail)
+		return fmt.Errorf("%w: %s", ErrGaslessRefused, detail)
 	default:
-		// 503 sponsorship_unavailable, 500, anything unexpected.
-		return GaslessRecord{}, fmt.Errorf("%w: %s", ErrGaslessUnavailable, detail)
+		// 503 sponsorship_unavailable / price_unavailable, 500, anything unexpected.
+		return fmt.Errorf("%w: %s", ErrGaslessUnavailable, detail)
 	}
+}
+
+// GaslessFeeToken is a token users may pay fees in. Both are SACs with 7
+// decimals.
+type GaslessFeeToken struct {
+	Contract string `json:"contract"`
+	Symbol   string `json:"symbol"`
+	Native   bool   `json:"native"`
+}
+
+// GaslessFeeConfig is what latch-api builds forward() calls with.
+type GaslessFeeConfig struct {
+	FeeTokens    []GaslessFeeToken `json:"fee_tokens"`
+	FeeForwarder string            `json:"fee_forwarder"`
+	Relayer      string            `json:"relayer"`
+}
+
+// feeConfigTTL bounds how long the fee config is cached. It only changes on a
+// gasless redeploy.
+const feeConfigTTL = 10 * time.Minute
+
+// FeeConfig returns the accepted fee tokens and the FeeForwarder and relayer
+// addresses, cached for feeConfigTTL.
+func (c *GaslessClient) FeeConfig(ctx context.Context) (GaslessFeeConfig, error) {
+	c.mu.Lock()
+	if c.feeConfig != nil && time.Since(c.feeConfigAt) < feeConfigTTL {
+		cfg := *c.feeConfig
+		c.mu.Unlock()
+		return cfg, nil
+	}
+	c.mu.Unlock()
+
+	raw, status, err := c.call(ctx, http.MethodGet, "/gasless/fee-tokens", nil)
+	if err != nil {
+		return GaslessFeeConfig{}, err
+	}
+	if status != http.StatusOK {
+		return GaslessFeeConfig{}, gaslessStatusError(status, raw)
+	}
+	var cfg GaslessFeeConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil || cfg.FeeForwarder == "" || cfg.Relayer == "" || len(cfg.FeeTokens) == 0 {
+		return GaslessFeeConfig{}, fmt.Errorf("%w: unreadable fee config", ErrGaslessUnavailable)
+	}
+	c.mu.Lock()
+	c.feeConfig, c.feeConfigAt = &cfg, time.Now()
+	c.mu.Unlock()
+	return cfg, nil
+}
+
+// GaslessQuote is the max_fee_amount a user should sign for one forward().
+type GaslessQuote struct {
+	FeeForwarder string `json:"fee_forwarder"`
+	Relayer      string `json:"relayer"`
+	FeeToken     string `json:"fee_token"`
+	Symbol       string `json:"symbol"`
+	MaxFeeAmount int64  `json:"max_fee_amount"`
+}
+
+// Quote prices the most a forward() whose simulation reported resourceFee
+// stroops can cost, in token's units.
+func (c *GaslessClient) Quote(ctx context.Context, token string, resourceFee int64) (GaslessQuote, error) {
+	body, err := json.Marshal(map[string]any{"fee_token": token, "resource_fee_stroops": resourceFee})
+	if err != nil {
+		return GaslessQuote{}, err
+	}
+	raw, status, err := c.call(ctx, http.MethodPost, "/gasless/quote", body)
+	if err != nil {
+		return GaslessQuote{}, err
+	}
+	if status != http.StatusOK {
+		return GaslessQuote{}, gaslessStatusError(status, raw)
+	}
+	var q GaslessQuote
+	if err := json.Unmarshal(raw, &q); err != nil || q.MaxFeeAmount <= 0 {
+		return GaslessQuote{}, fmt.Errorf("%w: unreadable quote", ErrGaslessUnavailable)
+	}
+	return q, nil
 }
 
 func newGaslessRequestID() (string, error) {

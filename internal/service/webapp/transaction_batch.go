@@ -84,6 +84,9 @@ func (s *TransactionService) SubmitBatchAuthEntries(ctx context.Context, txXdrB6
 	// as in submitWithBundler. Batches stay on the bundler: the gasless
 	// service takes one operation per transaction.
 	if len(hostFunctions) == 1 && s.gasless.enabled() {
+		if wallet, ok := forwardCallWallet(hostFunctions[0]); ok {
+			return s.gasless.submitForward(ctx, wallet, bundlerG, hostFunctions[0], entries)
+		}
 		if wallet, ok := sponsoredWalletCall(hostFunctions[0]); ok {
 			if res, handled, err := s.gasless.submit(ctx, wallet, bundlerG, hostFunctions[0], entries); handled {
 				return res, err
