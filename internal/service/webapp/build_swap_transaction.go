@@ -294,6 +294,22 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 	swapFn := invokeContractHostFunction(routerContractID, "swap_chained",
 		smartAccountVal, swapChainVal, tokenInVal, scU128(amountInHi, amountInLo), scU128(amountOutMinHi, amountOutMinLo))
 
+	// User-paid fee: wrap the swap in forward(). Swaps already sign against
+	// the signer's Default rule, which covers every call in the wrapped tree.
+	var swapFee *NetworkFee
+	var dropRelayer string
+	if s.gasless.forwardEnabled() {
+		w, wrapped, err := s.wrapForFee(ctx, in.SmartAccountAddress, swapFn, spend{token: in.TokenInContractID, amount: amountIn})
+		if err != nil {
+			return BuildSwapResult{}, err
+		}
+		if wrapped {
+			swapFn = w.hostFunction
+			fee := w.fee
+			swapFee, dropRelayer = &fee, w.relayer
+		}
+	}
+
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
 		return BuildSwapResult{}, fmt.Errorf("fetch bundler sequence: %w", err)
@@ -324,10 +340,12 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 		feePayerG:                bundlerG,
 		bundlerDelegatedAuthMode: swapAuth.useDelegatedAuth,
 		delegatedAuthG:           swapAuth.delegatedAuthG,
+		dropAuthAddress:          dropRelayer,
 	}, buildTx)
 	if err != nil {
 		return BuildSwapResult{}, err
 	}
+	coreResult.NetworkFee = swapFee
 
 	return BuildSwapResult{
 		BuildAuthTransactionResult: coreResult,

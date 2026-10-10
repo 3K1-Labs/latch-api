@@ -18,6 +18,13 @@ const (
 	// ErrSponsorshipRetry is returned when a sponsored submission didn't go
 	// through and nothing was charged (HTTP 503). Retrying is safe.
 	ErrSponsorshipRetry ErrorCode = "sponsorship_retry"
+	// ErrInsufficientFeeBalance is returned when a user-paid transaction
+	// can't cover the network fee in XLM or USDC (HTTP 422).
+	ErrInsufficientFeeBalance ErrorCode = "insufficient_fee_balance"
+	// ErrFeeQuoteStale is returned when a user-paid transaction's signed
+	// fee maximum no longer covers the network fee, or the wallet changed
+	// since it was built (HTTP 409). Rebuild and sign again.
+	ErrFeeQuoteStale ErrorCode = "fee_quote_stale"
 	// ErrNoContextRule is returned by proposal creation when the caller
 	// requires a matched on-chain context rule and none was found.
 	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"
