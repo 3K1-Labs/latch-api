@@ -1,7 +1,8 @@
 /references
-.env
 .env.example
 .DS_Store
 /tmp/
 coverage.out
 coverage2.out
+config.bat
+node_modules
