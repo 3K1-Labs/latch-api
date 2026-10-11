@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,11 @@ import (
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
 )
+
+type cachedIntent struct {
+	intent    service.Intent
+	expiresAt time.Time
+}
 
 // AccountHandler tracks ownership of a user's smart accounts and mints
 // latch-relayer funding intents for them. A user can own many smart accounts
@@ -21,10 +27,17 @@ type AccountHandler struct {
 	accountSvc accountService
 	auditSvc   auditService
 	notifSvc   notificationService
+	intentMu   sync.RWMutex
+	intentMap  map[string]cachedIntent
 }
 
 func NewAccountHandler(accountSvc accountService, auditSvc auditService, notifSvc notificationService) *AccountHandler {
-	return &AccountHandler{accountSvc: accountSvc, auditSvc: auditSvc, notifSvc: notifSvc}
+	return &AccountHandler{
+		accountSvc: accountSvc,
+		auditSvc:   auditSvc,
+		notifSvc:   notifSvc,
+		intentMap:  make(map[string]cachedIntent),
+	}
 }
 
 type registerAccountRequest struct {
@@ -122,6 +135,10 @@ type createDepositIntentRequest struct {
 	// ExternalID is the on-ramp provider's order ID, so a deposit can be traced
 	// from either side during reconciliation.
 	ExternalID string `json:"external_id"`
+
+	// IdempotencyKey is an optional client-supplied token to ensure safe retries.
+	// Can also be passed via the Idempotency-Key HTTP header.
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 // CreateDepositIntent godoc
@@ -129,9 +146,9 @@ type createDepositIntentRequest struct {
 // @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry;
 // @Description  pass expires_in to cover slower settlement — bank transfers take days, and a
 // @Description  deposit arriving after expiry is swept to recovery, not credited)
-// @Description  for a smart account already associated with the caller. Not idempotent — every call
-// @Description  mints a new intent, matching latch-relayer's "one intent per funding session"
-// @Description  model. The caller must have already registered the address via
+// @Description  for a smart account already associated with the caller. Supports Idempotency-Key
+// @Description  header or request property for safe retries.
+// @Description  The caller must have already registered the address via
 // @Description  POST /v1/accounts/register. network is optional and defaults to testnet;
 // @Description  mainnet is rejected with 400 until a mainnet relayer is deployed.
 // @Tags         accounts
@@ -153,6 +170,27 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid request body")
 		return
+	}
+
+	idempotencyKey := c.GetHeader("Idempotency-Key")
+	if idempotencyKey == "" {
+		idempotencyKey = req.IdempotencyKey
+	}
+
+	if idempotencyKey != "" {
+		cacheKey := userID + ":" + idempotencyKey
+		h.intentMu.RLock()
+		cached, exists := h.intentMap[cacheKey]
+		h.intentMu.RUnlock()
+		if exists && time.Now().Before(cached.expiresAt) {
+			httpx.Success(c, http.StatusCreated, gin.H{
+				"intent_id":    cached.intent.IntentID,
+				"memo_id":      cached.intent.MemoID,
+				"pool_address": cached.intent.PoolAddress,
+				"expires_at":   cached.intent.ExpiresAt.UTC().Format(time.RFC3339),
+			})
+			return
+		}
 	}
 
 	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress, req.Network,
@@ -179,6 +217,16 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		}
 		return
+	}
+
+	if idempotencyKey != "" {
+		cacheKey := userID + ":" + idempotencyKey
+		h.intentMu.Lock()
+		h.intentMap[cacheKey] = cachedIntent{
+			intent:    intent,
+			expiresAt: intent.ExpiresAt,
+		}
+		h.intentMu.Unlock()
 	}
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionFundingIntentCreated), c.ClientIP(), c.Request.UserAgent(), map[string]any{
