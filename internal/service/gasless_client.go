@@ -65,6 +65,10 @@ var (
 	// ErrGaslessLimitReached: the wallet's sponsorship cap or the daily
 	// sponsorship budget is spent.
 	ErrGaslessLimitReached = errors.New("sponsorship limit reached")
+	// ErrGaslessFailureLimit: the wallet's user-paid transactions failed
+	// on-chain too often recently (forward_failure_limit). Retrying won't
+	// help until older failures leave the gasless service's window.
+	ErrGaslessFailureLimit = errors.New("too many recent failed user-paid transactions")
 	// ErrGaslessRefused: the service refused the request itself (malformed,
 	// simulation failed, request_id conflict). Retrying the same request
 	// won't help.
@@ -212,6 +216,9 @@ func gaslessStatusError(status int, raw []byte) error {
 	case http.StatusForbidden:
 		return fmt.Errorf("%w: %s", ErrGaslessNotSponsorable, detail)
 	case http.StatusTooManyRequests:
+		if e.Error.Code == "forward_failure_limit" {
+			return fmt.Errorf("%w: %s", ErrGaslessFailureLimit, detail)
+		}
 		return fmt.Errorf("%w: %s", ErrGaslessLimitReached, detail)
 	case http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusNotImplemented:
 		return fmt.Errorf("%w: %s", ErrGaslessRefused, detail)

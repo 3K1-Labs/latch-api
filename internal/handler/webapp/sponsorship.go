@@ -13,7 +13,8 @@ import (
 // failSponsorship answers a gasless outcome and reports whether err was one:
 // 429 sponsorship limit reached (the user pays fees themselves); 503 didn't
 // go through, safe to retry; 422 can't cover a user-paid fee in XLM or USDC;
-// 409 the fee quote is stale, rebuild and sign again.
+// 409 the fee quote is stale, rebuild and sign again; 429 too many recent
+// failed user-paid transactions, try again later.
 func failSponsorship(c *gin.Context, err error) bool {
 	switch {
 	case errors.Is(err, webapp.ErrSponsorshipLimitReached):
@@ -24,6 +25,9 @@ func failSponsorship(c *gin.Context, err error) bool {
 		return true
 	case errors.Is(err, webapp.ErrNoFeeToken):
 		webappx.Fail(c, http.StatusUnprocessableEntity, webappx.ErrInsufficientFeeBalance, webapp.ErrNoFeeToken.Error())
+		return true
+	case errors.Is(err, webapp.ErrTooManyFailedTransactions):
+		webappx.Fail(c, http.StatusTooManyRequests, webappx.ErrTooManyFailedTransactions, webapp.ErrTooManyFailedTransactions.Error())
 		return true
 	case errors.Is(err, webapp.ErrFeeQuoteStale):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrFeeQuoteStale, webapp.ErrFeeQuoteStale.Error())

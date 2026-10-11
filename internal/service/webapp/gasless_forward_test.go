@@ -260,9 +260,11 @@ func TestSubmit_ForwardGoesToGaslessForwardMode(t *testing.T) {
 		err  error
 		want error
 	}{
-		"refused means re-sign":    {service.ErrGaslessRefused, ErrFeeQuoteStale},
-		"unavailable means retry":  {service.ErrGaslessUnavailable, ErrSponsorshipRetry},
-		"not sponsorable is retry": {service.ErrGaslessNotSponsorable, ErrSponsorshipRetry},
+		"refused means re-sign":     {service.ErrGaslessRefused, ErrFeeQuoteStale},
+		"failure limit means later": {service.ErrGaslessFailureLimit, ErrTooManyFailedTransactions},
+		"in-flight limit is retry":  {service.ErrGaslessLimitReached, ErrSponsorshipRetry},
+		"unavailable means retry":   {service.ErrGaslessUnavailable, ErrSponsorshipRetry},
+		"not sponsorable is retry":  {service.ErrGaslessNotSponsorable, ErrSponsorshipRetry},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

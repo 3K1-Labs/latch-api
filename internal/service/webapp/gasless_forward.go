@@ -30,6 +30,10 @@ var (
 	// ErrNoFeeToken: the wallet can't cover the network fee in XLM or USDC
 	// on top of what the action itself spends.
 	ErrNoFeeToken = errors.New("not enough XLM or USDC to pay the network fee: add XLM or USDC")
+	// ErrTooManyFailedTransactions: too many of the wallet's user-paid
+	// transactions failed on-chain recently (each still cost a network fee).
+	// Unlike ErrSponsorshipRetry, retrying right away won't help.
+	ErrTooManyFailedTransactions = errors.New("too many recent transactions from this wallet failed: try again later")
 	// ErrFeeQuoteStale: the signed maximum no longer covers the network fee,
 	// or the wallet's state changed since it was built. Nothing was charged.
 	ErrFeeQuoteStale = errors.New("the network fee changed: review the transaction and sign again")
@@ -344,6 +348,9 @@ func (r gaslessRoute) submitForward(ctx context.Context, wallet, source string, 
 	}
 	rec, err := r.client.SubmitForward(ctx, wallet, txB64)
 	if err != nil {
+		if errors.Is(err, service.ErrGaslessFailureLimit) {
+			return SubmitResult{}, fmt.Errorf("%w (%v)", ErrTooManyFailedTransactions, err)
+		}
 		if errors.Is(err, service.ErrGaslessRefused) {
 			return SubmitResult{}, fmt.Errorf("%w (%v)", ErrFeeQuoteStale, err)
 		}

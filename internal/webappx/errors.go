@@ -25,6 +25,10 @@ const (
 	// fee maximum no longer covers the network fee, or the wallet changed
 	// since it was built (HTTP 409). Rebuild and sign again.
 	ErrFeeQuoteStale ErrorCode = "fee_quote_stale"
+	// ErrTooManyFailedTransactions is returned when too many of a wallet's
+	// user-paid transactions failed on-chain recently (HTTP 429). Retrying
+	// right away won't help; the client should say "try again later".
+	ErrTooManyFailedTransactions ErrorCode = "too_many_failed_transactions"
 	// ErrNoContextRule is returned by proposal creation when the caller
 	// requires a matched on-chain context rule and none was found.
 	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"
