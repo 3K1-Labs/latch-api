@@ -31,4 +31,9 @@ const (
 	// call already succeeded but writing the recovery index failed — the
 	// client must retry this same confirm call, not the chain call (HTTP 500).
 	ErrSignerIndexFailed ErrorCode = "SIGNER_INDEX_FAILED"
+
+	// ErrNetworkMismatch is for requests that name a Stellar network other
+	// than the one this deployment serves (HTTP 400). See
+	// docs/network-per-deployment.md.
+	ErrNetworkMismatch ErrorCode = "NETWORK_MISMATCH"
 )
