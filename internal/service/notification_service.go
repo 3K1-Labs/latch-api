@@ -93,13 +93,14 @@ func (s *NotificationService) Notify(ctx context.Context, userID string, rec Not
 		slog.Error("list push tokens for notification", "notificationID", id, "err", err)
 		return nil
 	}
-	s.dispatchPush(tokens, rec.Title, rec.Body, rec.Type, id.String())
+	s.dispatchPush(ctx, tokens, rec.Title, rec.Body, rec.Type, id.String())
 	return nil
 }
 
-// dispatchPush fires the actual Expo call on a detached context, recovering
-// any panic, exactly as CosignHandler.notifyQueue does.
-func (s *NotificationService) dispatchPush(tokens []string, title, body, notifType, notificationID string) {
+// dispatchPush fires the actual Expo call on a context detached from the
+// request's cancellation (the push must outlive the request), recovering any
+// panic as CosignHandler.notifyQueue does.
+func (s *NotificationService) dispatchPush(ctx context.Context, tokens []string, title, body, notifType, notificationID string) {
 	if len(tokens) == 0 {
 		return
 	}
@@ -109,7 +110,7 @@ func (s *NotificationService) dispatchPush(tokens []string, title, body, notifTy
 				slog.Error("panic in notification push", "panic", r)
 			}
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		data := map[string]string{"type": notifType, "notificationId": notificationID}
 		if err := s.notifier.Notify(ctx, tokens, title, body, data); err != nil {
