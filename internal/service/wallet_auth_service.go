@@ -6,7 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/latch/backend/internal/deploynet"
 )
 
 // Networks a wallet can sign in on. A smart account exists on exactly one
@@ -29,17 +30,15 @@ var (
 	ErrInvalidNetwork = errors.New("network must be testnet or mainnet")
 )
 
-// ParseWalletNetwork normalizes a request's network field. Empty means testnet,
-// matching the pre-mainnet-support behavior of the wallet sign-in flow.
+// ParseWalletNetwork normalizes a request's network field. Empty means the
+// deployment's network, and the network this deployment does not serve fails
+// with an error wrapping deploynet.ErrMismatch (see deploynet.Resolve).
 func ParseWalletNetwork(raw string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", NetworkTestnet:
-		return NetworkTestnet, nil
-	case NetworkMainnet:
-		return NetworkMainnet, nil
-	default:
+	network, err := deploynet.Resolve(raw)
+	if errors.Is(err, deploynet.ErrInvalid) {
 		return "", ErrInvalidNetwork
 	}
+	return network, err
 }
 
 // SorobanURLs holds the per-network Soroban RPC endpoints passkey sign-in reads

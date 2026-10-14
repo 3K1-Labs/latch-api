@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
@@ -218,6 +219,8 @@ func (h *TransactionRelayHandler) failNetworkResolution(c *gin.Context, err erro
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "mainnet is not configured on this deployment")
 	case errors.Is(err, errTestnetNotConfigured):
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "testnet is not configured on this deployment")
+	case errors.Is(err, deploynet.ErrMismatch):
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 	default:
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be \"testnet\" or \"mainnet\"")
 	}

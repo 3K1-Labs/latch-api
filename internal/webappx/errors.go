@@ -29,6 +29,9 @@ const (
 	// ErrInvalidNetwork is returned when a request's network field is
 	// neither empty, "testnet", nor "mainnet".
 	ErrInvalidNetwork ErrorCode = "invalid_network"
+	// ErrNetworkMismatch is returned when a request names the Stellar network
+	// this deployment does not serve (docs/network-per-deployment.md).
+	ErrNetworkMismatch ErrorCode = "network_mismatch"
 	// ErrMainnetNotConfigured is returned when network: "mainnet" is
 	// requested but this server has no mainnet bundler/RPC configured —
 	// never silently falls back to testnet.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
@@ -56,6 +57,8 @@ func (h *WalletAuthHandler) Challenge(c *gin.Context) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "wallet does not match key_type")
 		case errors.Is(err, service.ErrInvalidNetwork):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+		case errors.Is(err, deploynet.ErrMismatch):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 		default:
 			slog.Error("wallet challenge", "err", err)
 			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
@@ -140,6 +143,8 @@ func (h *WalletAuthHandler) writeSignInErr(c *gin.Context, wallet string, err er
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "wallet does not match key_type")
 	case errors.Is(err, service.ErrInvalidNetwork):
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+	case errors.Is(err, deploynet.ErrMismatch):
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 	case errors.Is(err, service.ErrPasskeyNotEnabled):
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "passkey wallet sign-in is not enabled yet")
 	case errors.Is(err, service.ErrNonceInvalid):

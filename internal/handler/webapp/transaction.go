@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
@@ -70,6 +71,10 @@ func resolveNetworkFor(txSvc, txSvcMainnet transactionService, raw string) (tran
 func failNetworkResolution(c *gin.Context, err error) {
 	if errors.Is(err, errMainnetNotConfigured) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrMainnetNotConfigured, err.Error())
+		return
+	}
+	if errors.Is(err, deploynet.ErrMismatch) {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrNetworkMismatch, err.Error())
 		return
 	}
 	webappx.Fail(c, http.StatusBadRequest, webappx.ErrInvalidNetwork, err.Error())

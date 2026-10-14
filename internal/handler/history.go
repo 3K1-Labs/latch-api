@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
@@ -43,9 +44,9 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		return
 	}
 
-	network := c.Query("network")
-	if network != "mainnet" {
-		network = "testnet"
+	network, ok := resolveRequestNetwork(c, c.Query("network"))
+	if !ok {
+		return
 	}
 
 	limit := 50
@@ -81,7 +82,7 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 }
 
 func (h *HistoryHandler) networkURLs(network string) (sorobanURL, horizonURL, nativeSACID string) {
-	if network == "mainnet" {
+	if network == deploynet.Mainnet {
 		return h.cfg.SorobanRPCURLMainnet, h.cfg.HorizonURLMainnet, h.cfg.NativeSACIDMainnet
 	}
 	return h.cfg.SorobanRPCURLTestnet, h.cfg.HorizonURLTestnet, h.cfg.NativeSACIDTestnet

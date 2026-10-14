@@ -33,6 +33,7 @@ import (
 	"github.com/latch/backend/internal/config"
 	db "github.com/latch/backend/internal/db/generated"
 	"github.com/latch/backend/internal/deployment"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/handler"
 	webapphandler "github.com/latch/backend/internal/handler/webapp"
 	"github.com/latch/backend/internal/middleware"
@@ -49,6 +50,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	// Every handler resolves a request's network against this, so an omitted
+	// network means this deployment's and the other one is rejected.
+	deploynet.Set(cfg.Network)
 
 	isProd := strings.EqualFold(cfg.AppEnv, "production")
 	if isProd {
@@ -356,7 +360,6 @@ func main() {
 	r.Use(timeoutMiddleware(30 * time.Second))
 	r.Use(middleware.MaxBodySize(256 * 1024)) // 256 KB global cap; backup endpoint is the largest payload
 	r.Use(generalLimiter)
-	r.Use(deployment.RequestNetwork(cfg.Network))
 
 	// Swagger UI is only available in non-production environments.
 	if !isProd {
