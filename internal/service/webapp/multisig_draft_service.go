@@ -444,6 +444,28 @@ func (s *MultisigDraftService) DeleteMember(ctx context.Context, draftID, member
 
 // ── predict / deploy ─────────────────────────────────────────────────────────
 
+// checkDraftNetworkOverride validates a predict/deploy request's optional
+// network override against a draft's persisted network. "" means no
+// override (accepts whatever the draft already is). A non-empty override is
+// parsed through ParseNetwork first — matching the normalization Create
+// already applies to the network it persists — so a case- or
+// whitespace-variant match (e.g. "Mainnet") against an agreeing draft
+// doesn't spuriously fail, and a garbage value is rejected as
+// ErrInvalidNetwork (400) rather than ErrMultisigNetworkMismatch (409).
+func checkDraftNetworkOverride(override, draftNetwork string) error {
+	if override == "" {
+		return nil
+	}
+	parsed, err := ParseNetwork(override)
+	if err != nil {
+		return err
+	}
+	if string(parsed) != draftNetwork {
+		return ErrMultisigNetworkMismatch
+	}
+	return nil
+}
+
 // PredictAddress computes and persists a collecting draft's deterministic
 // smart account address from its current valid members, using the factory
 // for the draft's own persisted network. network is the client's optional
@@ -456,8 +478,8 @@ func (s *MultisigDraftService) PredictAddress(ctx context.Context, draftID, user
 	if err != nil {
 		return "", "", SerializedDraft{}, err
 	}
-	if network != "" && network != draft.Network {
-		return "", "", SerializedDraft{}, ErrMultisigNetworkMismatch
+	if err := checkDraftNetworkOverride(network, draft.Network); err != nil {
+		return "", "", SerializedDraft{}, err
 	}
 	factory, err := s.factoryFor(draft.Network)
 	if err != nil {
@@ -521,8 +543,8 @@ func (s *MultisigDraftService) Deploy(ctx context.Context, draftID, userID, netw
 	if err != nil {
 		return "", false, SerializedDraft{}, err
 	}
-	if network != "" && network != draft.Network {
-		return "", false, SerializedDraft{}, ErrMultisigNetworkMismatch
+	if err := checkDraftNetworkOverride(network, draft.Network); err != nil {
+		return "", false, SerializedDraft{}, err
 	}
 	factory, err := s.factoryFor(draft.Network)
 	if err != nil {
