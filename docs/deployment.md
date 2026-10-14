@@ -95,7 +95,7 @@ git push -u origin master
    | **Dockerfile path** | `./Dockerfile`           |
    | **Instance Type**   | **Free**                 |
 
-5. Scroll down to **Environment Variables**. Each deployment serves exactly one Stellar network ([network-per-deployment.md](network-per-deployment.md)): set `STELLAR_NETWORK` and only that network's variables, with its **own** database, Redis and `JWT_SECRET`. Never copy one deployment's env into another. A production (mainnet) deployment looks like:
+5. Scroll down to **Environment Variables**. Each deployment serves exactly one Stellar network ([network-per-deployment.md](network-per-deployment.md)): set `STELLAR_NETWORK` and one unsuffixed set of variables for that network, with its **own** database, Redis and `JWT_SECRET`. Never copy one deployment's env into another. A production (mainnet) deployment looks like:
 
    ```
    STELLAR_NETWORK                               mainnet
@@ -105,20 +105,24 @@ git push -u origin master
    JWT_SECRET                                    <unique to this deployment>
    SERVER_PEPPER                                 <unique; never change once users exist>
    RESEND_API_KEY                                <your key>
-   SOROBAN_RPC_URL_MAINNET                       <mainnet RPC>
-   NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET           <mainnet factory>
-   NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH_MAINNET   <mainnet account WASM hash>
-   NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS_MAINNET <mainnet verifier>
-   BUNDLER_SECRET_MAINNET                        <mainnet bundler secret>
+   SOROBAN_RPC_URL                               <mainnet RPC>
+   HORIZON_URL                                   <mainnet Horizon>
+   NATIVE_SAC_ID                                 <mainnet native XLM SAC>
+   BUNDLER_SECRET                                <mainnet bundler secret>
+   NEXT_PUBLIC_FACTORY_ADDRESS                   <mainnet factory>
+   NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS         <mainnet WebAuthn verifier>
+   NEXT_PUBLIC_VERIFIER_ADDRESS                  <mainnet Ed25519 verifier>
+   NEXT_PUBLIC_USDC_SAC_ADDRESS                  <mainnet USDC SAC>
+   NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH           <mainnet account WASM hash>
+   RELAYER_URL / RELAYER_API_KEY                 <the mainnet relayer>
+   WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN              <passkey ceremony config>
    ```
 
-   Staging is the same with `STELLAR_NETWORK=testnet` and the unsuffixed testnet variables (`BUNDLER_SECRET`, `NEXT_PUBLIC_FACTORY_ADDRESS`, `RELAYER_URL`, ...).
+   Every variable above from `SOROBAN_RPC_URL` to `NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH` is required on mainnet; there are no mainnet defaults. Staging uses the same names with `STELLAR_NETWORK=testnet`, where the RPC, Horizon, native and USDC SACs and account WASM hash default to the public testnet values. The network passphrase and the on-ramp pool's network both follow `STELLAR_NETWORK` and are not configured.
 
    The server refuses to start when:
    - `STELLAR_NETWORK` is missing or not `testnet`/`mainnet`;
-   - `STELLAR_NETWORK=mainnet` without `APP_ENV=production`;
-   - any of the other network's bundler, factory or relayer variables is set;
-   - `POOL_NETWORK` names the other network (it defaults to `STELLAR_NETWORK`);
+   - `STELLAR_NETWORK=mainnet` without `APP_ENV=production`, or without one of the required mainnet variables;
    - the database or Redis was first used by the other network;
    - the Soroban RPC serves the other network.
 

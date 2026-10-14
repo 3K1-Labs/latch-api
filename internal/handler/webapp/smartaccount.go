@@ -24,62 +24,24 @@ func isValidGAddress(g string) bool {
 const minKeyDataHexLen = 132
 
 type SmartAccountHandler struct {
-	smartAccountSvc        smartAccountService // testnet; route group is gated on this being non-nil
-	smartAccountSvcMainnet smartAccountService // mainnet; nil if BUNDLER_SECRET_MAINNET/NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET aren't configured
-	contextRulesSvc        contextRulesService // always non-nil: pure read, no bundler dependency
-	contextRulesSvcMainnet contextRulesService
-	balancesSvc            balancesService // always non-nil: pure read, no bundler dependency
-	balancesSvcMainnet     balancesService
-	cfg                    *config.Config
+	smartAccountSvc smartAccountService
+	contextRulesSvc contextRulesService // pure read, no bundler dependency
+	balancesSvc     balancesService     // pure read, no bundler dependency
+	cfg             *config.Config
 }
 
 func NewSmartAccountHandler(
-	smartAccountSvc, smartAccountSvcMainnet smartAccountService,
-	contextRulesSvc, contextRulesSvcMainnet contextRulesService,
-	balancesSvc, balancesSvcMainnet balancesService,
+	smartAccountSvc smartAccountService,
+	contextRulesSvc contextRulesService,
+	balancesSvc balancesService,
 	cfg *config.Config,
 ) *SmartAccountHandler {
 	return &SmartAccountHandler{
-		smartAccountSvc:        smartAccountSvc,
-		smartAccountSvcMainnet: smartAccountSvcMainnet,
-		contextRulesSvc:        contextRulesSvc,
-		contextRulesSvcMainnet: contextRulesSvcMainnet,
-		balancesSvc:            balancesSvc,
-		balancesSvcMainnet:     balancesSvcMainnet,
-		cfg:                    cfg,
+		smartAccountSvc: smartAccountSvc,
+		contextRulesSvc: contextRulesSvc,
+		balancesSvc:     balancesSvc,
+		cfg:             cfg,
 	}
-}
-
-// SmartAccountServiceOrNil boxes a possibly-nil *webapp.SmartAccountService
-// into the smartAccountService interface for NewSmartAccountHandler's
-// smartAccountSvcMainnet parameter, avoiding the classic Go trap where a nil
-// concrete pointer boxed into an interface produces a non-nil interface value
-// (which would make resolveNetwork's h.smartAccountSvcMainnet == nil check
-// always false).
-func SmartAccountServiceOrNil(svc *webapp.SmartAccountService) smartAccountService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-// resolveNetwork parses a request's network value and selects the matching
-// smart-account service instance. Empty/"testnet" always resolves to
-// h.smartAccountSvc (identical to pre-mainnet-support behavior); "mainnet"
-// resolves to h.smartAccountSvcMainnet or fails with errMainnetNotConfigured
-// if that's nil.
-func (h *SmartAccountHandler) resolveNetwork(raw string) (smartAccountService, webapp.Network, error) {
-	network, err := webapp.ParseNetwork(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	if network == webapp.NetworkMainnet {
-		if h.smartAccountSvcMainnet == nil {
-			return nil, "", errMainnetNotConfigured
-		}
-		return h.smartAccountSvcMainnet, network, nil
-	}
-	return h.smartAccountSvc, network, nil
 }
 
 // Query godoc
@@ -102,13 +64,13 @@ func (h *SmartAccountHandler) Query(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(c.Query("network"))
+	network, err := webapp.ParseNetwork(c.Query("network"))
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	address, deployed, err := svc.Query(c.Request.Context(), keyDataHex)
+	address, deployed, err := h.smartAccountSvc.Query(c.Request.Context(), keyDataHex)
 	if err != nil {
 		slog.Error("query smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -149,13 +111,13 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	address, alreadyDeployed, err := svc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
+	address, alreadyDeployed, err := h.smartAccountSvc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
 	if err != nil {
 		slog.Error("deploy smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -186,13 +148,13 @@ func (h *SmartAccountHandler) QueryFreighter(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(c.Query("network"))
+	network, err := webapp.ParseNetwork(c.Query("network"))
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	address, deployed, err := svc.QueryFreighter(c.Request.Context(), gAddress)
+	address, deployed, err := h.smartAccountSvc.QueryFreighter(c.Request.Context(), gAddress)
 	if err != nil {
 		slog.Error("query freighter smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -234,7 +196,7 @@ func (h *SmartAccountHandler) DeployFreighter(c *gin.Context) {
 		return
 	}
 	if network == webapp.NetworkMainnet {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrMainnetNotConfigured, "DeployFreighter funds via testnet friendbot, which doesn't exist on mainnet")
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, "DeployFreighter funds via testnet friendbot, which doesn't exist on mainnet")
 		return
 	}
 
@@ -274,7 +236,7 @@ func (h *SmartAccountHandler) ConnectPhantom(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
@@ -282,12 +244,8 @@ func (h *SmartAccountHandler) ConnectPhantom(c *gin.Context) {
 
 	verifierAddress := h.cfg.WebAppEd25519VerifierAddress
 	wasmHash := h.cfg.WebAppSmartAccountWasmHash
-	if network == webapp.NetworkMainnet {
-		verifierAddress = h.cfg.WebAppEd25519VerifierAddressMainnet
-		wasmHash = h.cfg.WebAppSmartAccountWasmHashMainnet
-	}
 
-	result, err := svc.ConnectPhantom(c.Request.Context(), req.PublicKeyHex, verifierAddress, wasmHash)
+	result, err := h.smartAccountSvc.ConnectPhantom(c.Request.Context(), req.PublicKeyHex, verifierAddress, wasmHash)
 	if err != nil {
 		slog.Error("connect phantom smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -320,9 +278,6 @@ func (h *SmartAccountHandler) PhantomConfig(c *gin.Context) {
 	}
 
 	verifierAddress := h.cfg.WebAppEd25519VerifierAddress
-	if network == webapp.NetworkMainnet {
-		verifierAddress = h.cfg.WebAppEd25519VerifierAddressMainnet
-	}
 
 	webappx.Success(c, http.StatusOK, gin.H{
 		"verifierAddress": verifierAddress,
@@ -353,12 +308,8 @@ func (h *SmartAccountHandler) ContextRules(c *gin.Context) {
 		failNetworkResolution(c, err)
 		return
 	}
-	contextRulesSvc := h.contextRulesSvc
-	if network == webapp.NetworkMainnet {
-		contextRulesSvc = h.contextRulesSvcMainnet
-	}
 
-	rules, err := contextRulesSvc.ListContextRules(c.Request.Context(), address)
+	rules, err := h.contextRulesSvc.ListContextRules(c.Request.Context(), address)
 	if err != nil {
 		slog.Error("list context rules", "address", address, "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
@@ -417,19 +368,15 @@ func (h *SmartAccountHandler) Balances(c *gin.Context) {
 		failNetworkResolution(c, err)
 		return
 	}
-	balancesSvc := h.balancesSvc
-	if network == webapp.NetworkMainnet {
-		balancesSvc = h.balancesSvcMainnet
-	}
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, network))
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
 	if err != nil {
 		slog.Error("load asset catalog", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 
-	balances, err := balancesSvc.FetchBalancesForCatalog(c.Request.Context(), address, catalog, includeZero)
+	balances, err := h.balancesSvc.FetchBalancesForCatalog(c.Request.Context(), address, catalog, includeZero)
 	if err != nil {
 		slog.Error("fetch balances", "smartAccountAddress", address, "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")

@@ -16,11 +16,9 @@ import (
 // WebAuthn credential as an on-chain signer of an existing solo smart
 // account. Kept separate from TransactionHandler (which owns the far more
 // numerous build-tx/submit routes) purely so this file's routes and their
-// tests stay easy to find; it shares the same transactionService pair and
-// network resolution.
+// tests stay easy to find; it shares the same transactionService.
 type AccountSignerHandler struct {
-	txSvc            transactionService // testnet
-	txSvcMainnet     transactionService // mainnet; nil if not configured
+	txSvc            transactionService
 	accountSignerSvc accountSignerService
 	credentialSvc    passkeyCredentialIndexService
 	webauthnSvc      webauthnService
@@ -29,10 +27,9 @@ type AccountSignerHandler struct {
 	notifSvc         notificationService
 }
 
-func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSignerSvc accountSignerService, credentialSvc passkeyCredentialIndexService, webauthnSvc webauthnService, sessionSvc sessionService, auditSvc auditService, notifSvc notificationService) *AccountSignerHandler {
+func NewAccountSignerHandler(txSvc transactionService, accountSignerSvc accountSignerService, credentialSvc passkeyCredentialIndexService, webauthnSvc webauthnService, sessionSvc sessionService, auditSvc auditService, notifSvc notificationService) *AccountSignerHandler {
 	return &AccountSignerHandler{
 		txSvc:            txSvc,
-		txSvcMainnet:     txSvcMainnet,
 		accountSignerSvc: accountSignerSvc,
 		credentialSvc:    credentialSvc,
 		webauthnSvc:      webauthnSvc,
@@ -40,10 +37,6 @@ func NewAccountSignerHandler(txSvc, txSvcMainnet transactionService, accountSign
 		auditSvc:         auditSvc,
 		notifSvc:         notifSvc,
 	}
-}
-
-func (h *AccountSignerHandler) resolveNetwork(raw string) (transactionService, webapp.Network, error) {
-	return resolveNetworkFor(h.txSvc, h.txSvcMainnet, raw)
 }
 
 // failAccountSignerBuild maps AddSigner/RemoveSigner's sentinel errors to
@@ -111,8 +104,7 @@ func (h *AccountSignerHandler) AddSigner(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -121,7 +113,7 @@ func (h *AccountSignerHandler) AddSigner(c *gin.Context) {
 		return
 	}
 
-	result, err := txSvc.AddSigner(c.Request.Context(), webapp.AddSignerInput{
+	result, err := h.txSvc.AddSigner(c.Request.Context(), webapp.AddSignerInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		KeyDataHex:          req.KeyDataHex,
 	})
@@ -187,8 +179,7 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -197,7 +188,7 @@ func (h *AccountSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		return
 	}
 
-	contextRuleID, err := txSvc.ConfirmAddSignerRule(c.Request.Context(), webapp.ConfirmAddSignerRuleInput{
+	contextRuleID, err := h.txSvc.ConfirmAddSignerRule(c.Request.Context(), webapp.ConfirmAddSignerRuleInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		KeyDataHex:          req.KeyDataHex,
 		TxHash:              req.TxHash,
@@ -268,8 +259,7 @@ func (h *AccountSignerHandler) RemoveSigner(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -303,7 +293,7 @@ func (h *AccountSignerHandler) RemoveSigner(c *gin.Context) {
 		return
 	}
 
-	result, err := txSvc.RemoveSigner(c.Request.Context(), webapp.RemoveSignerInput{
+	result, err := h.txSvc.RemoveSigner(c.Request.Context(), webapp.RemoveSignerInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		ContextRuleID:       contextRuleID,
 	})
@@ -353,8 +343,7 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -380,7 +369,7 @@ func (h *AccountSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		return
 	}
 
-	if err := txSvc.ConfirmRemoveSignerRule(c.Request.Context(), webapp.ConfirmRemoveSignerRuleInput{
+	if err := h.txSvc.ConfirmRemoveSignerRule(c.Request.Context(), webapp.ConfirmRemoveSignerRuleInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		ContextRuleID:       contextRuleID,
 		TxHash:              req.TxHash,

@@ -92,15 +92,15 @@ Each trustline costs 0.5 XLM of reserve on the account holding it.
 
 ### Then wire the backend
 
-On `latch-api` (`srv-d848r7jtqb8s73f58vu0`):
+On the production (mainnet) latch-api deployment, which serves mainnet only
+([network-per-deployment.md](network-per-deployment.md)):
 
 ```
-RELAYER_URL_MAINNET=https://<new-relayer>.onrender.com
-RELAYER_API_KEY_MAINNET=<the new relayer's key>   # omit if it shares RELAYER_API_KEY
+RELAYER_URL=https://<new-relayer>.onrender.com
+RELAYER_API_KEY=<the new relayer's key>
 ```
 
-`RELAYER_API_KEY_MAINNET` falls back to `RELAYER_API_KEY`, so one shared secret
-across both relayers needs only the URL.
+The staging (testnet) deployment keeps pointing at the testnet relayer.
 
 ### And the mobile app
 
@@ -120,7 +120,7 @@ testnet-only behavior.
 2. Fund it (reserves + fee headroom) and add the USDC trustline.
 3. Create the Neon database for the mainnet relayer.
 4. Deploy the relayer service with the environment above; confirm `/health`.
-5. Merge PR #66, set `RELAYER_URL_MAINNET`, redeploy latch-api.
+5. Set `RELAYER_URL` and `RELAYER_API_KEY` on the production latch-api deployment and redeploy.
 6. Set `EXPO_PUBLIC_RELAYER_NETWORKS=testnet,mainnet` and rebuild the app.
 7. Smoke test with a **small** real deposit: mint an intent on mainnet, send
    XLM to the pool with `memo_id` as a **MEMO_ID** (numeric — a text memo is
@@ -137,7 +137,7 @@ with a ~5 minute TTL — consider a paid instance before real traffic.
 PR #65 adds Transak but keeps it closed behind two more gates. Once a mainnet
 pool exists, opening it takes:
 
-- `POOL_NETWORK=mainnet`
+- a mainnet deployment (`STELLAR_NETWORK=mainnet`); the pool follows the deployment's network
 - `TRANSAK_API_KEY` / `TRANSAK_API_SECRET`, `TRANSAK_ENV`, `TRANSAK_REFERRER_DOMAIN`
 - lifting `devOnlyGuard` on the on-ramp routes, which still 403 in production
 - Transak's own dashboard work: referrer domain allowlisted, egress IPs

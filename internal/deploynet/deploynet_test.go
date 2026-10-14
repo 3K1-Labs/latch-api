@@ -55,3 +55,12 @@ func TestSetRejectsInvalid(t *testing.T) {
 	}()
 	Set("futurenet")
 }
+
+func TestPassphrase(t *testing.T) {
+	if got := Passphrase(Mainnet); got != "Public Global Stellar Network ; September 2015" {
+		t.Errorf("Passphrase(mainnet) = %q", got)
+	}
+	if got := Passphrase(Testnet); got != "Test SDF Network ; September 2015" {
+		t.Errorf("Passphrase(testnet) = %q", got)
+	}
+}

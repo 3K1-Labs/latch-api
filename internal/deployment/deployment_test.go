@@ -18,11 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPassphrase(t *testing.T) {
-	assert.Equal(t, "Public Global Stellar Network ; September 2015", Passphrase("mainnet"))
-	assert.Equal(t, "Test SDF Network ; September 2015", Passphrase("testnet"))
-}
-
 func TestToPgx5URL(t *testing.T) {
 	assert.Equal(t, "pgx5://u:p@h/db", ToPgx5URL("postgres://u:p@h/db"))
 	assert.Equal(t, "pgx5://u:p@h/db?sslmode=require", ToPgx5URL("postgresql://u:p@h/db?sslmode=require"))

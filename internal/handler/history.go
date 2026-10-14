@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
-	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
@@ -59,15 +58,13 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		}
 	}
 
-	sorobanURL, horizonURL, nativeSACID := h.networkURLs(network)
-
 	txs, err := h.historySvc.GetHistory(c.Request.Context(), service.HistoryParams{
 		GAddress:      gAddress,
 		CAddress:      cAddress,
 		Network:       network,
-		SorobanRPCURL: sorobanURL,
-		HorizonURL:    horizonURL,
-		NativeSACID:   nativeSACID,
+		SorobanRPCURL: h.cfg.SorobanRPCURL,
+		HorizonURL:    h.cfg.HorizonURL,
+		NativeSACID:   h.cfg.NativeSACID,
 		Limit:         limit,
 	})
 	if err != nil {
@@ -79,11 +76,4 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		"transactions": txs,
 		"network":      network,
 	})
-}
-
-func (h *HistoryHandler) networkURLs(network string) (sorobanURL, horizonURL, nativeSACID string) {
-	if network == deploynet.Mainnet {
-		return h.cfg.SorobanRPCURLMainnet, h.cfg.HorizonURLMainnet, h.cfg.NativeSACIDMainnet
-	}
-	return h.cfg.SorobanRPCURLTestnet, h.cfg.HorizonURLTestnet, h.cfg.NativeSACIDTestnet
 }

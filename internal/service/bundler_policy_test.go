@@ -54,33 +54,23 @@ func testContractID(t *testing.T, fill byte) string {
 }
 
 func TestBundlerPolicy_EmptyAllowlistPermitsEverything(t *testing.T) {
-	p := NewBundlerPolicy(nil, nil)
-	assert.False(t, p.Configured("testnet"))
-	require.NoError(t, p.CheckEnvelope(invokeEnvelope(t, testContractID(t, 0x01)), "testnet"))
+	p := NewBundlerPolicy(nil)
+	assert.False(t, p.Configured())
+	require.NoError(t, p.CheckEnvelope(invokeEnvelope(t, testContractID(t, 0x01))))
 }
 
 func TestBundlerPolicy_AllowsListedContract(t *testing.T) {
 	allowed := testContractID(t, 0x02)
-	p := NewBundlerPolicy([]string{allowed}, nil)
-	assert.True(t, p.Configured("testnet"))
-	require.NoError(t, p.CheckEnvelope(invokeEnvelope(t, allowed), "testnet"))
+	p := NewBundlerPolicy([]string{allowed})
+	assert.True(t, p.Configured())
+	require.NoError(t, p.CheckEnvelope(invokeEnvelope(t, allowed)))
 }
 
 func TestBundlerPolicy_RejectsUnlistedContract(t *testing.T) {
-	p := NewBundlerPolicy([]string{testContractID(t, 0x02)}, nil)
-	err := p.CheckEnvelope(invokeEnvelope(t, testContractID(t, 0x03)), "testnet")
+	p := NewBundlerPolicy([]string{testContractID(t, 0x02)})
+	err := p.CheckEnvelope(invokeEnvelope(t, testContractID(t, 0x03)))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrContractNotAllowed)
-}
-
-// The allowlists are per network: a contract cleared on testnet must not be
-// cleared on mainnet, where the fees are real.
-func TestBundlerPolicy_NetworksAreIndependent(t *testing.T) {
-	contract := testContractID(t, 0x04)
-	p := NewBundlerPolicy([]string{contract}, []string{testContractID(t, 0x05)})
-
-	require.NoError(t, p.CheckEnvelope(invokeEnvelope(t, contract), "testnet"))
-	require.ErrorIs(t, p.CheckEnvelope(invokeEnvelope(t, contract), "mainnet"), ErrContractNotAllowed)
 }
 
 func TestInvokedContractID_RoundTrip(t *testing.T) {
@@ -149,6 +139,6 @@ func TestInvokedContractID_RejectsMixedContractBatch(t *testing.T) {
 
 func TestBundlerPolicy_AllowsSameContractBatch(t *testing.T) {
 	contract := testContractID(t, 0x0A)
-	p := NewBundlerPolicy([]string{contract}, nil)
-	require.NoError(t, p.CheckEnvelope(multiInvokeEnvelope(t, contract, contract), "testnet"))
+	p := NewBundlerPolicy([]string{contract})
+	require.NoError(t, p.CheckEnvelope(multiInvokeEnvelope(t, contract, contract)))
 }

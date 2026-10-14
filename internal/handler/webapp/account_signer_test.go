@@ -11,15 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestAccountSignerHandler(txSvc, txSvcMainnet *stubTransaction, accountSignerSvc *stubAccountSigner, credentialSvc *stubCredentialIndex, webauthnSvc *stubWebauthn) *AccountSignerHandler {
-	var mainnet transactionService
-	if txSvcMainnet != nil {
-		mainnet = txSvcMainnet
-	}
+func newTestAccountSignerHandler(txSvc *stubTransaction, accountSignerSvc *stubAccountSigner, credentialSvc *stubCredentialIndex, webauthnSvc *stubWebauthn) *AccountSignerHandler {
 	// proved == nil means every callerCredentialId is treated as proved —
 	// these tests exercise IsSignerOfAccount/HasOtherSignerCredential, not
 	// session-proof itself (see webauthn_test.go for that).
-	return NewAccountSignerHandler(txSvc, mainnet, accountSignerSvc, credentialSvc, webauthnSvc, &stubSessionIssuer{}, &stubAudit{}, &stubNotification{})
+	return NewAccountSignerHandler(txSvc, accountSignerSvc, credentialSvc, webauthnSvc, &stubSessionIssuer{}, &stubAudit{}, &stubNotification{})
 }
 
 // ── AddSigner ────────────────────────────────────────────────────────────────
@@ -27,7 +23,7 @@ func newTestAccountSignerHandler(txSvc, txSvcMainnet *stubTransaction, accountSi
 func TestAccountSignerHandler_AddSigner_Success(t *testing.T) {
 	txStub := &stubTransaction{addSignerResult: webapp.AddSignerResult{ContextRuleID: 0, BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "AAAA"}}}
 	signerStub := &stubAccountSigner{callerOwns: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/add-signer", h.AddSigner)
 
@@ -44,7 +40,7 @@ func TestAccountSignerHandler_AddSigner_Success(t *testing.T) {
 func TestAccountSignerHandler_AddSigner_AlreadyConfigured(t *testing.T) {
 	txStub := &stubTransaction{addSignerResult: webapp.AddSignerResult{AlreadyConfigured: true, Message: "already there"}}
 	signerStub := &stubAccountSigner{callerOwns: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/add-signer", h.AddSigner)
 
@@ -60,7 +56,7 @@ func TestAccountSignerHandler_AddSigner_AlreadyConfigured(t *testing.T) {
 
 func TestAccountSignerHandler_AddSigner_NotASigner(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwns: false}
-	h := newTestAccountSignerHandler(&stubTransaction{}, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(&stubTransaction{}, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/add-signer", h.AddSigner)
 
@@ -75,7 +71,7 @@ func TestAccountSignerHandler_AddSigner_NotASigner(t *testing.T) {
 
 func TestAccountSignerHandler_AddSigner_UnknownAccount(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwnsErr: webapp.ErrAccountSignerUnknownAccount}
-	h := newTestAccountSignerHandler(&stubTransaction{}, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(&stubTransaction{}, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/add-signer", h.AddSigner)
 
@@ -91,7 +87,7 @@ func TestAccountSignerHandler_AddSigner_UnknownAccount(t *testing.T) {
 func TestAccountSignerHandler_AddSigner_LastSignerMapping(t *testing.T) {
 	txStub := &stubTransaction{addSignerErr: webapp.ErrNoDefaultRule}
 	signerStub := &stubAccountSigner{callerOwns: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/add-signer", h.AddSigner)
 
@@ -104,28 +100,12 @@ func TestAccountSignerHandler_AddSigner_LastSignerMapping(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 }
 
-func TestAccountSignerHandler_AddSigner_MainnetNotConfigured(t *testing.T) {
-	signerStub := &stubAccountSigner{callerOwns: true}
-	h := newTestAccountSignerHandler(&stubTransaction{}, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
-	r := gin.New()
-	r.POST("/add-signer", h.AddSigner)
-
-	req := withSessionUserID(httptest.NewRequest(http.MethodPost, "/add-signer", postJSONBody(map[string]any{
-		"smartAccountAddress": "CADDR", "callerCredentialId": "cred-caller", "keyDataHex": "aabbcc", "network": "mainnet",
-	})), "user-1")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "mainnet_not_configured")
-}
-
 // ── ConfirmAddSigner ─────────────────────────────────────────────────────────
 
 func TestAccountSignerHandler_ConfirmAddSigner_Success(t *testing.T) {
 	txStub := &stubTransaction{confirmAddSignerID: 9}
 	signerStub := &stubAccountSigner{callerOwns: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmAddSigner)
 
@@ -142,7 +122,7 @@ func TestAccountSignerHandler_ConfirmAddSigner_Success(t *testing.T) {
 
 func TestAccountSignerHandler_ConfirmAddSigner_NotSuccessful(t *testing.T) {
 	txStub := &stubTransaction{confirmAddSignerErr: webapp.ErrChainCallNotSuccessful}
-	h := newTestAccountSignerHandler(txStub, nil, &stubAccountSigner{callerOwns: true}, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, &stubAccountSigner{callerOwns: true}, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmAddSigner)
 
@@ -158,7 +138,7 @@ func TestAccountSignerHandler_ConfirmAddSigner_NotSuccessful(t *testing.T) {
 func TestAccountSignerHandler_ConfirmAddSigner_IndexFailure(t *testing.T) {
 	txStub := &stubTransaction{confirmAddSignerID: 9}
 	signerStub := &stubAccountSigner{callerOwns: true, markSignerOnChainErr: assertErr}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmAddSigner)
 
@@ -177,7 +157,7 @@ func TestAccountSignerHandler_ConfirmAddSigner_IndexFailure(t *testing.T) {
 func TestAccountSignerHandler_RemoveSigner_Success(t *testing.T) {
 	txStub := &stubTransaction{removeSignerResult: webapp.RemoveSignerResult{ContextRuleID: 0, BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "AAAA"}}}
 	signerStub := &stubAccountSigner{callerOwns: true, callerHasOther: true, signerID: 2, signerIDOK: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/remove-signer", h.RemoveSigner)
 
@@ -193,7 +173,7 @@ func TestAccountSignerHandler_RemoveSigner_Success(t *testing.T) {
 
 func TestAccountSignerHandler_RemoveSigner_LockedOut(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwns: true, callerHasOther: false}
-	h := newTestAccountSignerHandler(&stubTransaction{}, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(&stubTransaction{}, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/remove-signer", h.RemoveSigner)
 
@@ -209,7 +189,7 @@ func TestAccountSignerHandler_RemoveSigner_LockedOut(t *testing.T) {
 
 func TestAccountSignerHandler_RemoveSigner_SignerIDUnknown(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwns: true, callerHasOther: true, signerIDOK: false}
-	h := newTestAccountSignerHandler(&stubTransaction{}, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(&stubTransaction{}, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/remove-signer", h.RemoveSigner)
 
@@ -226,7 +206,7 @@ func TestAccountSignerHandler_RemoveSigner_SignerIDUnknown(t *testing.T) {
 func TestAccountSignerHandler_RemoveSigner_LastSigner(t *testing.T) {
 	txStub := &stubTransaction{removeSignerErr: webapp.ErrLastSigner}
 	signerStub := &stubAccountSigner{callerOwns: true, callerHasOther: true, signerID: 1, signerIDOK: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/remove-signer", h.RemoveSigner)
 
@@ -247,7 +227,7 @@ func TestAccountSignerHandler_ConfirmRemoveSigner_Success(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwns: true, signerID: 2, signerIDOK: true}
 	credStub := &stubCredentialIndex{}
 	webauthnStub := &stubWebauthn{keyDataHex: "aabbcc"}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, credStub, webauthnStub)
+	h := newTestAccountSignerHandler(txStub, signerStub, credStub, webauthnStub)
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmRemoveSigner)
 
@@ -264,7 +244,7 @@ func TestAccountSignerHandler_ConfirmRemoveSigner_Success(t *testing.T) {
 
 func TestAccountSignerHandler_ConfirmRemoveSigner_AlreadyRemoved(t *testing.T) {
 	signerStub := &stubAccountSigner{callerOwns: true, getSignerIDErr: webapp.ErrAccountSignerNotFound}
-	h := newTestAccountSignerHandler(&stubTransaction{}, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(&stubTransaction{}, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmRemoveSigner)
 
@@ -281,7 +261,7 @@ func TestAccountSignerHandler_ConfirmRemoveSigner_AlreadyRemoved(t *testing.T) {
 func TestAccountSignerHandler_ConfirmRemoveSigner_Mismatch(t *testing.T) {
 	txStub := &stubTransaction{confirmRemoveErr: webapp.ErrChainCallMismatch}
 	signerStub := &stubAccountSigner{callerOwns: true, signerID: 2, signerIDOK: true}
-	h := newTestAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
+	h := newTestAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{})
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmRemoveSigner)
 
@@ -300,7 +280,7 @@ func TestAccountSignerHandler_ConfirmAddSigner_RecordsNotification(t *testing.T)
 	txStub := &stubTransaction{confirmAddSignerID: 9}
 	signerStub := &stubAccountSigner{callerOwns: true}
 	notif := &stubNotification{}
-	h := NewAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{}, &stubSessionIssuer{}, &stubAudit{}, notif)
+	h := NewAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{}, &stubSessionIssuer{}, &stubAudit{}, notif)
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmAddSigner)
 
@@ -319,7 +299,7 @@ func TestAccountSignerHandler_ConfirmRemoveSigner_RecordsNotification(t *testing
 	txStub := &stubTransaction{}
 	signerStub := &stubAccountSigner{callerOwns: true, signerID: 2, signerIDOK: true}
 	notif := &stubNotification{}
-	h := NewAccountSignerHandler(txStub, nil, signerStub, &stubCredentialIndex{}, &stubWebauthn{keyDataHex: "aabbcc"}, &stubSessionIssuer{}, &stubAudit{}, notif)
+	h := NewAccountSignerHandler(txStub, signerStub, &stubCredentialIndex{}, &stubWebauthn{keyDataHex: "aabbcc"}, &stubSessionIssuer{}, &stubAudit{}, notif)
 	r := gin.New()
 	r.POST("/confirm", h.ConfirmRemoveSigner)
 
