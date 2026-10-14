@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func newBackupSignerHandler(txSvc *stubBackupSignerConfirm, cred *stubPasskeyCre
 	if audit == nil {
 		audit = &stubAudit{}
 	}
-	return NewBackupSignerHandler(txSvc, nil, cred, audit, &stubNotification{})
+	return NewBackupSignerHandler(txSvc, cred, audit, &stubNotification{})
 }
 
 func TestBackupSignerHandler_ConfirmAddSigner_Success(t *testing.T) {
@@ -105,7 +106,8 @@ func TestBackupSignerHandler_ConfirmAddSigner_IndexFailure(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "SIGNER_INDEX_FAILED")
 }
 
-func TestBackupSignerHandler_ConfirmAddSigner_MainnetNotConfigured(t *testing.T) {
+func TestBackupSignerHandler_ConfirmAddSigner_OtherNetwork(t *testing.T) {
+	deploynet.SetForTest(t, deploynet.Testnet)
 	h := newBackupSignerHandler(&stubBackupSignerConfirm{}, nil, nil)
 	r := gin.New()
 	r.POST("/confirm-add", h.ConfirmAddSigner)
@@ -120,7 +122,7 @@ func TestBackupSignerHandler_ConfirmAddSigner_MainnetNotConfigured(t *testing.T)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "mainnet is not configured")
+	assert.Contains(t, w.Body.String(), "NETWORK_MISMATCH")
 }
 
 func TestBackupSignerHandler_ConfirmRemoveSigner_Success(t *testing.T) {
@@ -185,7 +187,7 @@ func TestBackupSignerHandler_ConfirmRemoveSigner_DeregisterFailureIsBestEffort(t
 
 func TestBackupSignerHandler_ConfirmAddSigner_RecordsNotification(t *testing.T) {
 	notif := &stubNotification{}
-	h := NewBackupSignerHandler(&stubBackupSignerConfirm{confirmAddSignerID: 7}, nil, &stubPasskeyCredentialRegister{}, &stubAudit{}, notif)
+	h := NewBackupSignerHandler(&stubBackupSignerConfirm{confirmAddSignerID: 7}, &stubPasskeyCredentialRegister{}, &stubAudit{}, notif)
 	r := gin.New()
 	r.POST("/confirm-add", h.ConfirmAddSigner)
 
@@ -205,7 +207,7 @@ func TestBackupSignerHandler_ConfirmAddSigner_RecordsNotification(t *testing.T) 
 
 func TestBackupSignerHandler_ConfirmRemoveSigner_RecordsNotification(t *testing.T) {
 	notif := &stubNotification{}
-	h := NewBackupSignerHandler(&stubBackupSignerConfirm{}, nil, &stubPasskeyCredentialRegister{}, &stubAudit{}, notif)
+	h := NewBackupSignerHandler(&stubBackupSignerConfirm{}, &stubPasskeyCredentialRegister{}, &stubAudit{}, notif)
 	r := gin.New()
 	r.POST("/confirm-remove", h.ConfirmRemoveSigner)
 

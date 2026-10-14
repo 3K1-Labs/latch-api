@@ -18,10 +18,10 @@ var (
 	ErrTransakCryptoInvalid = errors.New(`cryptoCurrency must be "XLM" or "USDC"`)
 
 	// ErrTransakRequiresMainnet guards the one failure mode that costs real
-	// money: Transak delivers to Stellar mainnet only, so a session built
-	// against a testnet pool sends a real purchase to an address no relayer
-	// is watching. See docs/transak-integration-plan.md §1.
-	ErrTransakRequiresMainnet = errors.New("transak on-ramp requires a mainnet pool (POOL_NETWORK=mainnet)")
+	// money: Transak delivers to Stellar mainnet only, so a session built on
+	// a testnet deployment sends a real purchase to an address no relayer is
+	// watching. See docs/transak-integration-plan.md §1.
+	ErrTransakRequiresMainnet = errors.New("transak on-ramp requires a mainnet deployment")
 )
 
 // TransakAPIError wraps a non-2xx Transak partner API response, preserving the

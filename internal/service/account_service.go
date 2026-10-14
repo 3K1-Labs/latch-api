@@ -22,35 +22,14 @@ type AccountRegistration struct {
 // not per-user.
 type AccountService struct {
 	q db.Querier
-	// One relayer per Stellar network. Each latch-relayer deployment is bound
-	// to a single network and watches one pool address on it, so they are
-	// separate clients rather than one client taking a network argument. A nil
-	// entry means that network has no relayer configured and funding on it is
-	// unsupported — which is mainnet's state until one is deployed.
-	relayerTestnet *RelayerService
-	relayerMainnet *RelayerService
+	// relayer mints and reports funding intents. It is the latch-relayer
+	// deployment bound to this deployment's network, watching one pool
+	// address on it.
+	relayer *RelayerService
 }
 
-func NewAccountService(q db.Querier, relayerTestnet, relayerMainnet *RelayerService) *AccountService {
-	return &AccountService{q: q, relayerTestnet: relayerTestnet, relayerMainnet: relayerMainnet}
-}
-
-// relayerFor returns the relayer serving network. network must already have
-// passed ParseWalletNetwork.
-//
-// The two networks fail differently on purpose. Testnet is the service's
-// baseline: a missing RELAYER_URL there is a misconfigured deployment, and the
-// relayer call itself reports ErrRelayerNotConfigured. Mainnet is opt-in — an
-// unset RELAYER_URL_MAINNET means nobody has deployed a mainnet relayer yet, so
-// funding on it is genuinely unsupported rather than broken.
-func (s *AccountService) relayerFor(network string) (*RelayerService, error) {
-	if network == NetworkMainnet {
-		if !s.relayerMainnet.configured() {
-			return nil, ErrNetworkUnsupported
-		}
-		return s.relayerMainnet, nil
-	}
-	return s.relayerTestnet, nil
+func NewAccountService(q db.Querier, relayer *RelayerService) *AccountService {
+	return &AccountService{q: q, relayer: relayer}
 }
 
 // Register records that smartAccountAddress belongs to userID. Idempotent:
@@ -107,13 +86,8 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // RELAYER_URL is unset — the fund flow has nothing to fall back to without a
 // memo, so callers should surface this as a hard error, not a silent no-op.
 //
-// network selects which relayer deployment mints the intent; empty means the
-// deployment's network (ParseWalletNetwork). Mainnet returns ErrNetworkUnsupported until RELAYER_URL_MAINNET
-// points at a mainnet relayer — see relayerFor for why the two networks fail
-// differently. There is deliberately no fallback to the testnet relayer: it
-// mints memos against one pool account whose keypair exists on mainnet too, so
-// a mainnet intent served from it would hand back a pool address nothing is
-// watching, and a real deposit sent there would never be forwarded.
+// network is the client's network field, validated against the
+// deployment's (ParseWalletNetwork); it does not select anything.
 //
 // Wallet-scoped callers (scope == ScopeWallet, e.g. the browser extension's
 // SEP-10-style sign-in) have no users row and so can never appear in
@@ -122,14 +96,10 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // against smartAccountAddress instead of going through the registration
 // table.
 func (s *AccountService) CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string, opts FundingIntentOptions) (Intent, error) {
-	network, err := ParseWalletNetwork(network)
-	if err != nil {
+	if _, err := ParseWalletNetwork(network); err != nil {
 		return Intent{}, err
 	}
-	relayer, err := s.relayerFor(network)
-	if err != nil {
-		return Intent{}, err
-	}
+	relayer := s.relayer
 
 	if scope == ScopeWallet {
 		if userID != smartAccountAddress {
@@ -223,18 +193,12 @@ func (o FundingIntentOptions) toInput(cAddress string) CreateIntentInput {
 // Wallet-scoped callers (see CreateFundingIntent) have no registration row;
 // ownership is verified by comparing userID (the wallet's own address)
 // directly against the intent's c_address instead.
-// The network selects which relayer holds the intent: memo IDs are allocated
-// per relayer deployment, so the same memo_id can exist on both and a lookup
-// against the wrong one returns another user's intent or nothing at all.
+// network is validated against the deployment's, as in CreateFundingIntent.
 func (s *AccountService) GetFundingStatus(ctx context.Context, userID, scope, memoID, network string) (DepositStatus, error) {
-	network, err := ParseWalletNetwork(network)
-	if err != nil {
+	if _, err := ParseWalletNetwork(network); err != nil {
 		return DepositStatus{}, err
 	}
-	relayer, err := s.relayerFor(network)
-	if err != nil {
-		return DepositStatus{}, err
-	}
+	relayer := s.relayer
 
 	if scope == ScopeWallet {
 		status, err := relayer.DepositStatus(ctx, memoID)

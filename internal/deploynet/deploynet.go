@@ -20,6 +20,14 @@ const (
 	Mainnet = "mainnet"
 )
 
+// Passphrase returns the Stellar network passphrase for "testnet" or "mainnet".
+func Passphrase(network string) string {
+	if network == Mainnet {
+		return "Public Global Stellar Network ; September 2015"
+	}
+	return "Test SDF Network ; September 2015"
+}
+
 // ErrInvalid is returned by Resolve for a value other than empty, "testnet"
 // or "mainnet" (case-insensitive).
 var ErrInvalid = errors.New(`network must be "testnet" or "mainnet"`)

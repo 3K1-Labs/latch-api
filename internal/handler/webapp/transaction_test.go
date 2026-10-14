@@ -12,20 +12,6 @@ import (
 
 // ── TransactionServiceOrNil ──────────────────────────────────────────────────
 
-func TestTransactionServiceOrNil_NilPointerYieldsTrueNilInterface(t *testing.T) {
-	var svc *webapp.TransactionService
-	got := TransactionServiceOrNil(svc)
-	// A naive `transactionService(svc)` conversion would produce a non-nil
-	// interface wrapping a nil pointer; this must be a true nil.
-	assert.Nil(t, got)
-}
-
-func TestTransactionServiceOrNil_NonNilPointerPreserved(t *testing.T) {
-	svc := &webapp.TransactionService{}
-	got := TransactionServiceOrNil(svc)
-	assert.NotNil(t, got)
-}
-
 // ── BuildSend ────────────────────────────────────────────────────────────────
 
 func TestBuildSend_Success(t *testing.T) {
@@ -41,7 +27,7 @@ func TestBuildSend_Success(t *testing.T) {
 		Amount:    "1.5",
 		AmountRaw: "15000000",
 	}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -62,7 +48,7 @@ func TestBuildSend_Success(t *testing.T) {
 
 func TestBuildSend_NumericAmount(t *testing.T) {
 	stub := &stubTransaction{buildSendResult: webapp.BuildSendResult{}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -80,7 +66,7 @@ func TestBuildSend_NumericAmount(t *testing.T) {
 }
 
 func TestBuildSend_InvalidBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -94,7 +80,7 @@ func TestBuildSend_InvalidBody(t *testing.T) {
 }
 
 func TestBuildSend_FreighterMissingSignerG(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -112,7 +98,7 @@ func TestBuildSend_FreighterMissingSignerG(t *testing.T) {
 }
 
 func TestBuildSend_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSendErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSendErr: assertErr}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -132,7 +118,7 @@ func TestBuildSend_ServiceError(t *testing.T) {
 func TestBuildSend_BadAssetAllowlistJSON(t *testing.T) {
 	cfg := testCfg()
 	cfg.WebAppAssetAllowlistJSON = "{not json"
-	h := NewTransactionHandler(&stubTransaction{}, nil, cfg)
+	h := NewTransactionHandler(&stubTransaction{}, cfg)
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -150,7 +136,7 @@ func TestBuildSend_BadAssetAllowlistJSON(t *testing.T) {
 }
 
 func TestBuildSend_AssetNotFound(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{buildSendErr: webapp.ErrAssetNotFound}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{buildSendErr: webapp.ErrAssetNotFound}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -168,79 +154,8 @@ func TestBuildSend_AssetNotFound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"asset_not_found"`)
 }
 
-func TestBuildSend_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{buildSendResult: webapp.BuildSendResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
-	}}
-	mainnetStub := &stubTransaction{buildSendResult: webapp.BuildSendResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
-	}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/build-send", h.BuildSend)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/build-send", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "webauthn",
-		"assetId":             "native",
-		"recipient":           "GRECIPIENT",
-		"amount":              "1.5",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"txXdr":"MAINNET_TX"`)
-}
-
-func TestBuildSend_NetworkTestnetOmitted_UsesTestnetService(t *testing.T) {
-	testnetStub := &stubTransaction{buildSendResult: webapp.BuildSendResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
-	}}
-	mainnetStub := &stubTransaction{buildSendResult: webapp.BuildSendResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
-	}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/build-send", h.BuildSend)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/build-send", postJSONBody(map[string]any{
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "webauthn",
-		"assetId":             "native",
-		"recipient":           "GRECIPIENT",
-		"amount":              "1.5",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"txXdr":"TESTNET_TX"`)
-}
-
-func TestBuildSend_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/build-send", h.BuildSend)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/build-send", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"signerType":          "webauthn",
-		"assetId":             "native",
-		"recipient":           "GRECIPIENT",
-		"amount":              "1.5",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 func TestBuildSend_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
@@ -263,7 +178,7 @@ func TestBuildSend_NetworkInvalid(t *testing.T) {
 
 func TestSubmitWebAuthn_Success(t *testing.T) {
 	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -283,7 +198,7 @@ func TestSubmitWebAuthn_Success(t *testing.T) {
 }
 
 func TestSubmitWebAuthn_InvalidBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -297,7 +212,7 @@ func TestSubmitWebAuthn_InvalidBody(t *testing.T) {
 }
 
 func TestSubmitWebAuthn_MissingAuthEntry(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -314,7 +229,7 @@ func TestSubmitWebAuthn_MissingAuthEntry(t *testing.T) {
 
 func TestSubmitWebAuthn_AuthEntriesXdrAccepted(t *testing.T) {
 	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -331,7 +246,7 @@ func TestSubmitWebAuthn_AuthEntriesXdrAccepted(t *testing.T) {
 }
 
 func TestSubmitWebAuthn_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitErr: assertErr}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -347,50 +262,8 @@ func TestSubmitWebAuthn_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestSubmitWebAuthn_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "TESTNET_HASH", Status: "SUCCESS"}}
-	mainnetStub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "MAINNET_HASH", Status: "SUCCESS"}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-webauthn", postJSONBody(map[string]any{
-		"network":       "mainnet",
-		"txXdr":         "AAAAtx==",
-		"authEntryXdr":  "AAAAauth==",
-		"sigDataXdr":    "AAAAsig==",
-		"keyDataHex":    "aabbcc",
-		"contextRuleId": 1,
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"hash":"MAINNET_HASH"`)
-}
-
-func TestSubmitWebAuthn_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-webauthn", postJSONBody(map[string]any{
-		"network":       "mainnet",
-		"txXdr":         "AAAAtx==",
-		"authEntryXdr":  "AAAAauth==",
-		"sigDataXdr":    "AAAAsig==",
-		"keyDataHex":    "aabbcc",
-		"contextRuleId": 1,
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 func TestSubmitWebAuthn_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-webauthn", h.SubmitWebAuthn)
 
@@ -413,7 +286,7 @@ func TestSubmitWebAuthn_NetworkInvalid(t *testing.T) {
 
 func TestSubmitDelegated_Success(t *testing.T) {
 	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -433,7 +306,7 @@ func TestSubmitDelegated_Success(t *testing.T) {
 
 func TestSubmitDelegated_ContextRuleIDAsString(t *testing.T) {
 	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "deadbeef", Status: "SUCCESS"}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -455,7 +328,7 @@ func TestSubmitDelegated_ContextRuleIDAsString(t *testing.T) {
 }
 
 func TestSubmitDelegated_InvalidBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -469,7 +342,7 @@ func TestSubmitDelegated_InvalidBody(t *testing.T) {
 }
 
 func TestSubmitDelegated_MissingAuthEntry(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -486,7 +359,7 @@ func TestSubmitDelegated_MissingAuthEntry(t *testing.T) {
 }
 
 func TestSubmitDelegated_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: assertErr}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -504,7 +377,7 @@ func TestSubmitDelegated_ServiceError(t *testing.T) {
 }
 
 func TestSubmitDelegated_ContextRuleIDRequired(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: webapp.ErrContextRuleIDRequired}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitDelegatedErr: webapp.ErrContextRuleIDRequired}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -523,50 +396,8 @@ func TestSubmitDelegated_ContextRuleIDRequired(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "could not determine contextRuleId")
 }
 
-func TestSubmitDelegated_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "TESTNET_HASH", Status: "SUCCESS"}}
-	mainnetStub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "MAINNET_HASH", Status: "SUCCESS"}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
-		"network":                  "mainnet",
-		"txXdr":                    "AAAAtx==",
-		"smartAccountAuthEntryXdr": "AAAAauth==",
-		"gAddressEntryTemplateXdr": "AAAAdeleg==",
-		"signedAuthEntryBase64":    "AAAAsig==",
-		"signerAddress":            "GSIGNER",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"hash":"MAINNET_HASH"`)
-}
-
-func TestSubmitDelegated_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit-delegated", postJSONBody(map[string]any{
-		"network":                  "mainnet",
-		"txXdr":                    "AAAAtx==",
-		"smartAccountAuthEntryXdr": "AAAAauth==",
-		"gAddressEntryTemplateXdr": "AAAAdeleg==",
-		"signedAuthEntryBase64":    "AAAAsig==",
-		"signerAddress":            "GSIGNER",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 func TestSubmitDelegated_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit-delegated", h.SubmitDelegated)
 
@@ -589,7 +420,7 @@ func TestSubmitDelegated_NetworkInvalid(t *testing.T) {
 
 func TestSubmitPhantom_Success(t *testing.T) {
 	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "cafebabe", Status: "SUCCESS"}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit", h.SubmitPhantom)
 
@@ -607,7 +438,7 @@ func TestSubmitPhantom_Success(t *testing.T) {
 }
 
 func TestSubmitPhantom_InvalidBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit", h.SubmitPhantom)
 
@@ -621,7 +452,7 @@ func TestSubmitPhantom_InvalidBody(t *testing.T) {
 }
 
 func TestSubmitPhantom_MissingAuthEntry(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit", h.SubmitPhantom)
 
@@ -637,7 +468,7 @@ func TestSubmitPhantom_MissingAuthEntry(t *testing.T) {
 }
 
 func TestSubmitPhantom_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitPhantomErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{submitPhantomErr: assertErr}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit", h.SubmitPhantom)
 
@@ -651,50 +482,10 @@ func TestSubmitPhantom_ServiceError(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSubmitPhantom_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "TESTNET_HASH", Status: "SUCCESS"}}
-	mainnetStub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "MAINNET_HASH", Status: "SUCCESS"}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"network":          "mainnet",
-		"txXdr":            "AAAAtx==",
-		"authEntryXdr":     "AAAAauth==",
-		"authSignatureHex": "aabbcc",
-		"publicKeyHex":     "ddeeff",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"hash":"MAINNET_HASH"`)
-}
-
-func TestSubmitPhantom_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"network":          "mainnet",
-		"txXdr":            "AAAAtx==",
-		"authEntryXdr":     "AAAAauth==",
-		"authSignatureHex": "aabbcc",
-		"publicKeyHex":     "ddeeff",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
 }
 
 func TestSubmitPhantom_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/submit", h.SubmitPhantom)
 
@@ -722,7 +513,7 @@ func TestPrepareSign_Success(t *testing.T) {
 			SubmitMethod: "webauthn",
 		},
 	}}
-	h := NewTransactionHandler(stub, nil, testCfg())
+	h := NewTransactionHandler(stub, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -740,51 +531,8 @@ func TestPrepareSign_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"network":"testnet"`)
 }
 
-func TestPrepareSign_NetworkMainnet_RoutesToMainnetService(t *testing.T) {
-	testnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
-	}}
-	mainnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
-	}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/prepare-sign", h.PrepareSign)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"unsignedTxXdr":       "AAAAunsigned==",
-		"signerType":          "passkey",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"txXdr":"MAINNET_TX"`)
-	assert.Contains(t, w.Body.String(), `"network":"mainnet"`)
-}
-
-func TestPrepareSign_NetworkMainnet_NotConfigured(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
-	r := gin.New()
-	r.POST("/transaction/prepare-sign", h.PrepareSign)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
-		"network":             "mainnet",
-		"smartAccountAddress": "CADDRESS",
-		"unsignedTxXdr":       "AAAAunsigned==",
-		"signerType":          "passkey",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"mainnet_not_configured"`)
-}
-
 func TestPrepareSign_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -801,31 +549,8 @@ func TestPrepareSign_NetworkInvalid(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
 }
 
-func TestPrepareSign_NetworkTestnetOmitted_UsesTestnetService(t *testing.T) {
-	testnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "TESTNET_TX"},
-	}}
-	mainnetStub := &stubTransaction{prepareSignResult: webapp.PrepareSignResult{
-		BuildAuthTransactionResult: webapp.BuildAuthTransactionResult{TxXdr: "MAINNET_TX"},
-	}}
-	h := NewTransactionHandler(testnetStub, mainnetStub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/prepare-sign", h.PrepareSign)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
-		"smartAccountAddress": "CADDRESS",
-		"unsignedTxXdr":       "AAAAunsigned==",
-		"signerType":          "passkey",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"txXdr":"TESTNET_TX"`)
-}
-
 func TestPrepareSign_InvalidBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -839,7 +564,7 @@ func TestPrepareSign_InvalidBody(t *testing.T) {
 }
 
 func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -855,7 +580,7 @@ func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
 }
 
 func TestPrepareSign_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{prepareSignErr: assertErr}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: assertErr}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -872,7 +597,7 @@ func TestPrepareSign_ServiceError(t *testing.T) {
 }
 
 func TestPrepareSign_NoContextRuleError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignNoContextRule}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignNoContextRule}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -889,7 +614,7 @@ func TestPrepareSign_NoContextRuleError(t *testing.T) {
 }
 
 func TestPrepareSign_SignerMismatchError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignSignerMismatch}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignSignerMismatch}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 
@@ -907,7 +632,7 @@ func TestPrepareSign_SignerMismatchError(t *testing.T) {
 }
 
 func TestPrepareSign_ValidationError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignValidation}, nil, testCfg())
+	h := NewTransactionHandler(&stubTransaction{prepareSignErr: webapp.ErrPrepareSignValidation}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
 

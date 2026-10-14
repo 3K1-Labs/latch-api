@@ -11,27 +11,27 @@ import (
 // These branches fail before touching Redis/DB, so nil deps are safe.
 
 func TestWalletAuthServiceChallenge_BadShape(t *testing.T) {
-	svc := NewWalletAuthService(nil, nil, nil, SorobanURLs{}, nil)
+	svc := NewWalletAuthService(nil, nil, nil, "", nil)
 	_, _, _, err := svc.Challenge(context.Background(), "not-a-wallet", KeyTypeEd25519, "")
 	require.ErrorIs(t, err, ErrInvalidWallet)
 }
 
 func TestWalletAuthServiceChallenge_BadNetwork(t *testing.T) {
 	gAddr, _ := newTestWallet(t)
-	svc := NewWalletAuthService(nil, nil, nil, SorobanURLs{}, nil)
+	svc := NewWalletAuthService(nil, nil, nil, "", nil)
 	_, _, _, err := svc.Challenge(context.Background(), gAddr, KeyTypeEd25519, "futurenet")
 	require.ErrorIs(t, err, ErrInvalidNetwork)
 }
 
 func TestWalletAuthServiceSignIn_BadShape(t *testing.T) {
-	svc := NewWalletAuthService(nil, nil, nil, SorobanURLs{}, nil)
+	svc := NewWalletAuthService(nil, nil, nil, "", nil)
 	_, _, err := svc.SignIn(context.Background(), WalletSignInInput{Wallet: "nope", KeyType: KeyTypeEd25519})
 	require.ErrorIs(t, err, ErrInvalidWallet)
 }
 
 func TestWalletAuthServiceSignIn_BadNetwork(t *testing.T) {
 	gAddr, _ := newTestWallet(t)
-	svc := NewWalletAuthService(nil, nil, nil, SorobanURLs{}, nil)
+	svc := NewWalletAuthService(nil, nil, nil, "", nil)
 	_, _, err := svc.SignIn(context.Background(), WalletSignInInput{
 		Wallet:  gAddr,
 		KeyType: KeyTypeEd25519,
@@ -42,7 +42,7 @@ func TestWalletAuthServiceSignIn_BadNetwork(t *testing.T) {
 
 func TestWalletAuthServiceSignIn_BadNonceEncoding(t *testing.T) {
 	gAddr, _ := newTestWallet(t)
-	svc := NewWalletAuthService(nil, nil, nil, SorobanURLs{}, nil)
+	svc := NewWalletAuthService(nil, nil, nil, "", nil)
 	_, _, err := svc.SignIn(context.Background(), WalletSignInInput{
 		Wallet:      gAddr,
 		KeyType:     KeyTypeEd25519,
@@ -75,10 +75,4 @@ func TestParseWalletNetwork(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestSorobanURLsForNetwork(t *testing.T) {
-	urls := SorobanURLs{Testnet: "http://testnet", Mainnet: "http://mainnet"}
-	assert.Equal(t, "http://mainnet", urls.forNetwork(NetworkMainnet))
-	assert.Equal(t, "http://testnet", urls.forNetwork(NetworkTestnet))
 }

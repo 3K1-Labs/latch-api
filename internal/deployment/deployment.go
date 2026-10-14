@@ -18,20 +18,13 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/migrations"
 	"github.com/redis/go-redis/v9"
 )
 
 // RedisNetworkKey holds the network a Redis instance was first used with.
 const RedisNetworkKey = "latch:deployment:network"
-
-// Passphrase returns the Stellar network passphrase for "testnet" or "mainnet".
-func Passphrase(network string) string {
-	if network == "mainnet" {
-		return "Public Global Stellar Network ; September 2015"
-	}
-	return "Test SDF Network ; September 2015"
-}
 
 // Migrate applies every pending embedded migration. golang-migrate takes a
 // Postgres advisory lock, so instances starting together migrate once.
@@ -137,7 +130,7 @@ func StampRedis(ctx context.Context, rdb *redis.Client, network string) error {
 
 // CheckRPC fails unless the Soroban RPC at rpcURL reports network's passphrase.
 func CheckRPC(ctx context.Context, client *http.Client, rpcURL, network string) error {
-	want := Passphrase(network)
+	want := deploynet.Passphrase(network)
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {

@@ -102,7 +102,7 @@ func newRealProofService(t *testing.T) *service.DeployProofService {
 // reach the service, and come back in the envelope the client parses.
 func TestContract_MobileEd25519DeployBody(t *testing.T) {
 	deploy := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, deploy, nil)
+	r := newSmartAccountRouter(t, deploy)
 
 	body := `{
 	  "public_key_hex": "` + fixturePublicKeyHex + `",
@@ -131,7 +131,7 @@ func TestContract_MobileEd25519DeployBody(t *testing.T) {
 // The passkey body, including the base64 WebAuthn assertion parts.
 func TestContract_MobileWebauthnDeployBody(t *testing.T) {
 	deploy := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, deploy, nil)
+	r := newSmartAccountRouter(t, deploy)
 
 	body := `{
 	  "key_data_hex": "` + strings.Repeat("cd", 100) + `",
@@ -152,7 +152,7 @@ func TestContract_MobileWebauthnDeployBody(t *testing.T) {
 // The multisig body, matching toWireSigner()'s output for all three kinds.
 func TestContract_MobileMultisigDeployBody(t *testing.T) {
 	deploy := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, deploy, nil)
+	r := newSmartAccountRouter(t, deploy)
 
 	body := `{
 	  "signers": [
@@ -186,7 +186,7 @@ func TestContract_MobileMultisigDeployBody(t *testing.T) {
 // The challenge body and the envelope mobile parses in requestChallenge().
 func TestContract_MobileChallengeRoundTrip(t *testing.T) {
 	proofSvc := newRealProofService(t)
-	h := NewSmartAccountHandler(&stubSmartAccountDeploy{}, nil, proofSvc, &stubAudit{}, &stubPasskeyCredentialRegister{})
+	h := NewSmartAccountHandler(&stubSmartAccountDeploy{}, proofSvc, &stubAudit{}, &stubPasskeyCredentialRegister{})
 	r := gin.New()
 	r.POST("/smart-account/challenge", h.DeployChallenge)
 

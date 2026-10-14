@@ -32,10 +32,6 @@ const (
 	// ErrNetworkMismatch is returned when a request names the Stellar network
 	// this deployment does not serve (docs/network-per-deployment.md).
 	ErrNetworkMismatch ErrorCode = "network_mismatch"
-	// ErrMainnetNotConfigured is returned when network: "mainnet" is
-	// requested but this server has no mainnet bundler/RPC configured —
-	// never silently falls back to testnet.
-	ErrMainnetNotConfigured ErrorCode = "mainnet_not_configured"
 	// ErrAssetNotFound is returned when assetId/contractId doesn't resolve
 	// against the active network's asset catalog.
 	ErrAssetNotFound ErrorCode = "asset_not_found"

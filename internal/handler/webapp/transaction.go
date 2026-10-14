@@ -15,64 +15,17 @@ import (
 )
 
 type TransactionHandler struct {
-	txSvc        transactionService // testnet; route group is gated on this being non-nil
-	txSvcMainnet transactionService // mainnet; nil if BUNDLER_SECRET_MAINNET isn't configured
-	cfg          *config.Config
+	txSvc transactionService
+	cfg   *config.Config
 }
 
-func NewTransactionHandler(txSvc, txSvcMainnet transactionService, cfg *config.Config) *TransactionHandler {
-	return &TransactionHandler{txSvc: txSvc, txSvcMainnet: txSvcMainnet, cfg: cfg}
+func NewTransactionHandler(txSvc transactionService, cfg *config.Config) *TransactionHandler {
+	return &TransactionHandler{txSvc: txSvc, cfg: cfg}
 }
 
-// TransactionServiceOrNil boxes a possibly-nil *webapp.TransactionService into
-// the transactionService interface for NewTransactionHandler's txSvcMainnet
-// parameter, avoiding the classic Go trap where a nil concrete pointer boxed
-// into an interface produces a non-nil interface value (which would make
-// resolveNetwork's h.txSvcMainnet == nil check always false).
-func TransactionServiceOrNil(svc *webapp.TransactionService) transactionService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-// errMainnetNotConfigured is returned by resolveNetwork when network:
-// "mainnet" is requested but this server has no mainnet transaction service
-// configured — never falls back to testnet.
-var errMainnetNotConfigured = errors.New("mainnet is not configured on this server")
-
-// resolveNetwork parses a request's network field and selects the matching
-// transactionService instance. Empty/"testnet" always resolves to h.txSvc
-// (identical to pre-mainnet-support behavior); "mainnet" resolves to
-// h.txSvcMainnet or fails with errMainnetNotConfigured if that's nil.
-func (h *TransactionHandler) resolveNetwork(raw string) (transactionService, webapp.Network, error) {
-	return resolveNetworkFor(h.txSvc, h.txSvcMainnet, raw)
-}
-
-// resolveNetworkFor is resolveNetwork's testnet/mainnet selection, factored
-// out so other handlers backed by the same transactionService pair (e.g.
-// AccountSignerHandler) share it rather than re-deriving it.
-func resolveNetworkFor(txSvc, txSvcMainnet transactionService, raw string) (transactionService, webapp.Network, error) {
-	network, err := webapp.ParseNetwork(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	if network == webapp.NetworkMainnet {
-		if txSvcMainnet == nil {
-			return nil, "", errMainnetNotConfigured
-		}
-		return txSvcMainnet, network, nil
-	}
-	return txSvc, network, nil
-}
-
-// failNetworkResolution writes the appropriate 400 response for a
-// resolveNetwork error.
+// failNetworkResolution writes the 400 response for a webapp.ParseNetwork
+// error: the other network or an invalid value.
 func failNetworkResolution(c *gin.Context, err error) {
-	if errors.Is(err, errMainnetNotConfigured) {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrMainnetNotConfigured, err.Error())
-		return
-	}
 	if errors.Is(err, deploynet.ErrMismatch) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrNetworkMismatch, err.Error())
 		return
@@ -142,14 +95,11 @@ type buildSendRequest struct {
 	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
-func assetCatalogConfig(cfg *config.Config, network webapp.Network) webapp.AssetCatalogConfig {
+func assetCatalogConfig(cfg *config.Config) webapp.AssetCatalogConfig {
 	return webapp.AssetCatalogConfig{
-		AllowlistJSON:    cfg.WebAppAssetAllowlistJSON,
-		NativeSACTestnet: cfg.NativeSACIDTestnet,
-		USDCSACTestnet:   cfg.WebAppUSDCSACAddressTestnet,
-		NativeSACMainnet: cfg.NativeSACIDMainnet,
-		USDCSACMainnet:   cfg.WebAppUSDCSACAddressMainnet,
-		IsMainnet:        network == webapp.NetworkMainnet,
+		AllowlistJSON: cfg.WebAppAssetAllowlistJSON,
+		NativeSAC:     cfg.NativeSACID,
+		USDCSAC:       cfg.WebAppUSDCSACAddress,
 	}
 }
 
@@ -175,20 +125,19 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, network))
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
 	if err != nil {
 		slog.Error("load asset catalog", "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 
-	result, err := txSvc.BuildSend(c.Request.Context(), webapp.BuildSendInput{
+	result, err := h.txSvc.BuildSend(c.Request.Context(), webapp.BuildSendInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
@@ -274,13 +223,12 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	result, err := txSvc.SubmitWebAuthn(c.Request.Context(), webapp.SubmitWebAuthnInput{
+	result, err := h.txSvc.SubmitWebAuthn(c.Request.Context(), webapp.SubmitWebAuthnInput{
 		TxXdr:                          req.TxXdr,
 		AuthEntryXdr:                   req.AuthEntryXdr,
 		SigDataXdr:                     req.SigDataXdr,
@@ -340,13 +288,12 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	result, err := txSvc.SubmitDelegated(c.Request.Context(), webapp.SubmitDelegatedInput{
+	result, err := h.txSvc.SubmitDelegated(c.Request.Context(), webapp.SubmitDelegatedInput{
 		TxXdr:                          req.TxXdr,
 		SmartAccountAuthEntryXdr:       req.SmartAccountAuthEntryXdr,
 		GAddressEntryTemplateXdr:       req.GAddressEntryTemplateXdr,
@@ -405,8 +352,7 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -415,7 +361,7 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 	// Ed25519PhantomVerifier contract) reconstructs and checks it during the
 	// enforcing-mode re-simulation in submitWithBundler — the same pattern
 	// SubmitWebAuthn already follows for the WebAuthn assertion.
-	result, err := txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
+	result, err := h.txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
 		TxXdr:                      req.TxXdr,
 		AuthEntryXdr:               req.AuthEntryXdr,
 		AuthSignatureHex:           req.AuthSignatureHex,
@@ -473,13 +419,13 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	result, err := txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
+	result, err := h.txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		UnsignedTxXdr:       req.UnsignedTxXdr,
 		SignerType:          req.SignerType,
@@ -544,20 +490,19 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, network))
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
 	if err != nil {
 		slog.Error("load asset catalog", "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 
-	result, err := txSvc.SetupSendRules(c.Request.Context(), webapp.SetupSendRulesInput{
+	result, err := h.txSvc.SetupSendRules(c.Request.Context(), webapp.SetupSendRulesInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		AssetID:             req.AssetID,
@@ -644,7 +589,7 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
@@ -655,7 +600,7 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		providerID = "aquarius"
 	}
 
-	result, err := txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
+	result, err := h.txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		RouterContractID:    req.RouterContractID,
@@ -842,8 +787,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -853,7 +797,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		providerID = "aquarius"
 	}
 
-	result, err := txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
+	result, err := h.txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,

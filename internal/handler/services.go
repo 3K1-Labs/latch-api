@@ -78,7 +78,7 @@ type transactionRelayService interface {
 
 // bundlerPolicyService bounds which contracts the bundler will pay to invoke.
 type bundlerPolicyService interface {
-	CheckEnvelope(txXdrB64, network string) error
+	CheckEnvelope(txXdrB64 string) error
 }
 
 // deployProofService proves a deploy caller holds the key it wants deployed.
