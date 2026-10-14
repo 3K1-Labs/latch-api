@@ -23,7 +23,7 @@ func newTestTransakOnRampService(t *testing.T, stubURL, poolNetwork string) (*On
 
 	svc := NewOnRampService(db.New(sqlDB), &stubRelayer{}, 7*24*time.Hour,
 		"", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
-		"GPOOL", "https://horizon.example.invalid",
+		"GPOOL", "https://horizon.example.invalid", "https://horizon-mainnet.example.invalid",
 		nil, "", "",
 		"25", "USD", TransakConfig{
 			APIKey:         "key_1",
@@ -183,7 +183,7 @@ func TestOnRampService_CreateTransakIntent_Validation(t *testing.T) {
 		t.Cleanup(func() { sqlDB.Close() })
 		svc := NewOnRampService(db.New(sqlDB), &stubRelayer{}, 7*24*time.Hour,
 			"", "sk_test_secret", "pk_test_pub", onRampIntegrationModeWidget, "",
-			"GPOOL", "https://horizon.example.invalid",
+			"GPOOL", "https://horizon.example.invalid", "https://horizon-mainnet.example.invalid",
 			nil, "", "",
 			"25", "USD", TransakConfig{PoolNetwork: "mainnet"})
 

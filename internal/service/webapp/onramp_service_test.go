@@ -53,7 +53,7 @@ func newTestOnRampService(t *testing.T, moonPayServerURL string, mode, widgetBuy
 
 	svc := NewOnRampService(q, &stubRelayer{}, 7*24*time.Hour,
 		moonPayServerURL, "sk_test_secret", "pk_test_pub", mode, widgetBuyURLOverride,
-		testGAddress, "https://horizon.example.invalid",
+		testGAddress, "https://horizon.example.invalid", "https://horizon-mainnet.example.invalid",
 		nil, "", "",
 		"25", "USD", TransakConfig{})
 	if moonPayServerURL != "" {
@@ -356,7 +356,7 @@ func TestOnRampService_PoolSnapshot(t *testing.T) {
 	defer ts.Close()
 
 	svc, _ := newTestOnRampService(t, "", onRampIntegrationModeWidget, "")
-	svc.horizonURL = ts.URL
+	svc.horizonURLTestnet = ts.URL
 	svc.pool.httpClient = ts.Client()
 	// Balance now reads over RPC (docs/horizon-to-rpc-migration-plan.md,
 	// Bucket 2) — only the transaction list above still comes from the

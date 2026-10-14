@@ -150,7 +150,7 @@ func main() {
 	webappOnRampSvc := webapp.NewOnRampService(
 		queries, onRampRelayerSvc, cfg.WebAppOnRampIntentTTL,
 		cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
-		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
+		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet, cfg.HorizonURLMainnet,
 		sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.SorobanRPCURLMainnet,
 		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
 		webapp.TransakConfig{

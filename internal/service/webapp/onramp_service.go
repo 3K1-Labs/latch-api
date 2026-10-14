@@ -115,12 +115,14 @@ type OnRampService struct {
 	secretKey            string
 	publishableKey       string
 	poolAddress          string
-	// horizonURL backs PoolSnapshot's recent-transaction matching only — that
-	// half stays on Horizon pending the retention-window validation described
-	// in docs/horizon-to-rpc-migration-plan.md's Bucket 2. The balance half
-	// of the same snapshot already reads over RPC (soroban/rpcURLTestnet/
+	// horizonURLTestnet/horizonURLMainnet back PoolSnapshot's
+	// recent-transaction matching only — that half stays on Horizon pending
+	// the retention-window validation described in
+	// docs/horizon-to-rpc-migration-plan.md's Bucket 2. The balance half of
+	// the same snapshot already reads over RPC (soroban/rpcURLTestnet/
 	// rpcURLMainnet below).
-	horizonURL        string
+	horizonURLTestnet string
+	horizonURLMainnet string
 	soroban           sorobanRPC
 	rpcURLTestnet     string
 	rpcURLMainnet     string
@@ -132,7 +134,7 @@ func NewOnRampService(
 	q *db.Queries,
 	relayer relayerIntentCreator,
 	intentTTL time.Duration,
-	apiBase, secretKey, publishableKey, integrationMode, widgetBuyURLOverride, poolAddress, horizonURL string,
+	apiBase, secretKey, publishableKey, integrationMode, widgetBuyURLOverride, poolAddress, horizonURLTestnet, horizonURLMainnet string,
 	soroban sorobanRPC, rpcURLTestnet, rpcURLMainnet string,
 	defaultFiatAmount, defaultFiatCode string,
 	transak TransakConfig,
@@ -150,7 +152,8 @@ func NewOnRampService(
 		secretKey:            secretKey,
 		publishableKey:       publishableKey,
 		poolAddress:          poolAddress,
-		horizonURL:           horizonURL,
+		horizonURLTestnet:    horizonURLTestnet,
+		horizonURLMainnet:    horizonURLMainnet,
 		soroban:              soroban,
 		rpcURLTestnet:        rpcURLTestnet,
 		rpcURLMainnet:        rpcURLMainnet,
@@ -484,11 +487,13 @@ func (s *OnRampService) PoolSnapshot(ctx context.Context, memoFilter string) (Po
 	// operator looks to confirm which network they are reconciling against.
 	network := "testnet"
 	rpcURL := s.rpcURLTestnet
+	horizonURL := s.horizonURLTestnet
 	if strings.EqualFold(s.poolNetwork, "mainnet") {
 		network = "mainnet"
 		rpcURL = s.rpcURLMainnet
+		horizonURL = s.horizonURLMainnet
 	}
-	return s.pool.FetchSnapshot(ctx, s.soroban, rpcURL, s.horizonURL, network, s.poolAddress, memoFilter)
+	return s.pool.FetchSnapshot(ctx, s.soroban, rpcURL, horizonURL, network, s.poolAddress, memoFilter)
 }
 
 func isValidOnRampStatus(status string) bool {
