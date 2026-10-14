@@ -238,6 +238,10 @@ type Config struct {
 	// gasless service is unreachable or won't sponsor it. A transition
 	// setting; a sponsorship limit is never bypassed this way.
 	GaslessFallbackToBundler bool
+	// GaslessForwardEnabled makes send and swap user-paid where GASLESS_URL*
+	// is set: wrapped in FeeForwarder.forward() and paid in XLM, or USDC if
+	// the wallet holds no XLM. Off keeps Latch paying through the bundler.
+	GaslessForwardEnabled bool
 }
 
 func Load() (*Config, error) {
@@ -335,6 +339,7 @@ func Load() (*Config, error) {
 		GaslessAPIKeyMainnet:     getEnv("GASLESS_API_KEY_MAINNET", ""),
 		GaslessTimeout:           time.Duration(getEnvInt("GASLESS_TIMEOUT_SEC", 24)) * time.Second,
 		GaslessFallbackToBundler: getEnvBool("GASLESS_FALLBACK_TO_BUNDLER", true),
+		GaslessForwardEnabled:    getEnvBool("GASLESS_FORWARD_ENABLED", false),
 	}
 	if cfg.GaslessTimeout <= 0 || cfg.GaslessTimeout >= 30*time.Second {
 		return nil, fmt.Errorf("GASLESS_TIMEOUT_SEC must be between 1 and 29 (the request timeout is 30s)")

@@ -15,6 +15,9 @@ import (
 type gaslessSubmitter interface {
 	Configured() bool
 	SubmitSponsored(ctx context.Context, wallet, txB64 string) (service.GaslessRecord, error)
+	SubmitForward(ctx context.Context, wallet, txB64 string) (service.GaslessRecord, error)
+	FeeConfig(ctx context.Context) (service.GaslessFeeConfig, error)
+	Quote(ctx context.Context, token string, resourceFee int64) (service.GaslessQuote, error)
 }
 
 var (
@@ -45,9 +48,13 @@ type gaslessRoute struct {
 	// service is unreachable or won't sponsor it. A transition setting:
 	// without it, an outage blocks wallet setup.
 	fallbackToBundler bool
+	// forward makes send and swap user-paid (gasless_forward.go).
+	forward bool
 }
 
 func (r gaslessRoute) enabled() bool { return r.client != nil && r.client.Configured() }
+
+func (r gaslessRoute) forwardEnabled() bool { return r.enabled() && r.forward }
 
 // sponsoredWalletCall returns the wallet a host function sets up, when it is
 // a sponsored setup call on the wallet itself.
@@ -112,18 +119,10 @@ func (r gaslessRoute) submit(ctx context.Context, wallet, source string, hf xdr.
 		}
 	}
 
-	switch rec.Status {
-	case service.GaslessStatusSuccess:
-		return SubmitResult{Hash: rec.TxHash, Status: service.RPCStatusSuccess}, true, nil
-	case service.GaslessStatusFailed:
-		return SubmitResult{}, true, fmt.Errorf("transaction failed: %s", rec.ErrorCode)
-	case service.GaslessStatusRejected:
-		return SubmitResult{}, true, fmt.Errorf("%w (%s: %s)", ErrSponsorshipRetry, rec.ErrorCode, rec.ErrorMessage)
-	default:
-		// pending or unconfirmed: in flight, may still land. The bundler path
-		// reports the same status when its polling runs out.
-		return SubmitResult{Hash: rec.TxHash, Status: service.RPCStatusPending}, true, nil
-	}
+	// pending/unconfirmed map to PENDING: in flight, may still land. The
+	// bundler path reports the same status when its polling runs out.
+	res, err = recordResult(rec)
+	return res, true, err
 }
 
 // UseGasless routes sponsored setup calls (add_context_rule, add_signer on

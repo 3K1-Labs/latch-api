@@ -194,6 +194,9 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		KeyDataHex:          req.KeyDataHex,
 	}, catalog)
 	if err != nil {
+		if failSponsorship(c, err) {
+			return
+		}
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
@@ -223,6 +226,7 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		"signaturePayloadHex":                   result.SignaturePayloadHex,
 		"validUntilLedger":                      result.ValidUntilLedger,
 		"simulationResultXdr":                   result.SimulationResultXdr,
+		"networkFee":                            result.NetworkFee,
 		"submitMethod":                          result.SubmitMethod,
 		"asset": gin.H{
 			"assetId":    result.Asset.AssetID,
@@ -887,6 +891,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		"signaturePayloadHex":                   result.SignaturePayloadHex,
 		"validUntilLedger":                      result.ValidUntilLedger,
 		"simulationResultXdr":                   result.SimulationResultXdr,
+		"networkFee":                            result.NetworkFee,
 		"submitMethod":                          result.SubmitMethod,
 		"smartAccountAuthEntryXdr":              result.SmartAccountAuthEntryXdr,
 		"gAddressPreimageXdr":                   result.GAddressPreimageXdr,
@@ -908,6 +913,9 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // via err.Error() — that's their purpose; anything unrecognized falls back
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	if failSponsorship(c, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, webapp.ErrSignerRuleNotFound):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())

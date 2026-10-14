@@ -84,6 +84,8 @@ func TestGaslessClient_ErrorMapping(t *testing.T) {
 		{http.StatusForbidden, "not_sponsorable", ErrGaslessNotSponsorable},
 		{http.StatusTooManyRequests, "wallet_cap_reached", ErrGaslessLimitReached},
 		{http.StatusTooManyRequests, "daily_budget_reached", ErrGaslessLimitReached},
+		{http.StatusTooManyRequests, "forward_in_flight_limit", ErrGaslessLimitReached},
+		{http.StatusTooManyRequests, "forward_failure_limit", ErrGaslessFailureLimit},
 		{http.StatusUnprocessableEntity, "simulation_failed", ErrGaslessRefused},
 		{http.StatusConflict, "request_id_conflict", ErrGaslessRefused},
 		{http.StatusNotImplemented, "not_implemented", ErrGaslessRefused},

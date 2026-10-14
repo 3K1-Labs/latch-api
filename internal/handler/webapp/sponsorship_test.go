@@ -23,6 +23,9 @@ func TestFailSponsorship(t *testing.T) {
 	}{
 		{fmt.Errorf("%w (cap)", webapp.ErrSponsorshipLimitReached), true, http.StatusTooManyRequests, "sponsorship_limit_reached"},
 		{fmt.Errorf("%w (busy)", webapp.ErrSponsorshipRetry), true, http.StatusServiceUnavailable, "sponsorship_retry"},
+		{fmt.Errorf("%w", webapp.ErrNoFeeToken), true, http.StatusUnprocessableEntity, "insufficient_fee_balance"},
+		{fmt.Errorf("%w (refused)", webapp.ErrFeeQuoteStale), true, http.StatusConflict, "fee_quote_stale"},
+		{fmt.Errorf("%w (limit)", webapp.ErrTooManyFailedTransactions), true, http.StatusTooManyRequests, "too_many_failed_transactions"},
 		{errors.New("something else"), false, 0, ""},
 	}
 	for _, tc := range cases {

@@ -29,6 +29,14 @@ const (
 	// ErrSponsorshipRetry: a sponsored submission didn't go through and
 	// nothing was charged (HTTP 503). Retrying is safe.
 	ErrSponsorshipRetry ErrorCode = "SPONSORSHIP_RETRY"
+	// ErrInsufficientFeeBalance: a user-paid transaction can't cover the
+	// network fee in XLM or USDC (HTTP 422).
+	ErrInsufficientFeeBalance ErrorCode = "INSUFFICIENT_FEE_BALANCE"
+	// ErrFeeQuoteStale: rebuild and sign again (HTTP 409).
+	ErrFeeQuoteStale ErrorCode = "FEE_QUOTE_STALE"
+	// ErrTooManyFailedTransactions: too many of the wallet's user-paid
+	// transactions failed on-chain recently; try again later (HTTP 429).
+	ErrTooManyFailedTransactions ErrorCode = "TOO_MANY_FAILED_TRANSACTIONS"
 
 	// ErrBadGateway is for failures in upstream dependencies (Soroban RPC, Horizon) (HTTP 502).
 	ErrBadGateway ErrorCode = "BAD_GATEWAY"

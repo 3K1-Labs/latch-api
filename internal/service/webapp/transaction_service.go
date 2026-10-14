@@ -58,6 +58,9 @@ type BuildAuthTransactionResult struct {
 	// DelegatedAuthG is set only in bundler-delegated-auth mode: the on-chain
 	// Delegated G-address the smart account's Default rule authorizes.
 	DelegatedAuthG string
+	// NetworkFee is set when the user pays the network fee (forward mode):
+	// the token and the most they agree to pay. Nil when Latch pays.
+	NetworkFee *NetworkFee
 }
 
 type TransactionService struct {
@@ -174,6 +177,19 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 		return BuildSendResult{}, fmt.Errorf("resolve asset contract: %w", err)
 	}
 
+	// User-paid fee: wrap the transfer in forward() when forward mode is on
+	// and this signer has a rule covering every call in the wrapped tree.
+	hostFunction := invokeContractHostFunction(contractID, "transfer", fromVal, toVal, amountVal)
+	plan, err := s.planForward(ctx, in.SmartAccountAddress, in.SignerType, in.KeyDataHex, hostFunction,
+		spend{token: asset.ContractID, amount: i128ToBig(hi, lo)})
+	if err != nil {
+		return BuildSendResult{}, err
+	}
+	if plan.wrapped {
+		hostFunction = plan.wrap.hostFunction
+		contextRuleID, discovery = plan.contextRuleID, plan.discovery
+	}
+
 	bundlerG := s.bundler.PublicKey()
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
@@ -182,7 +198,7 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 
 	buildTx := func(auth []xdr.SorobanAuthorizationEntry, sorobanData *xdr.SorobanTransactionData) (*txnbuild.Transaction, error) {
 		op := &txnbuild.InvokeHostFunction{
-			HostFunction:  invokeContractHostFunction(contractID, "transfer", fromVal, toVal, amountVal),
+			HostFunction:  hostFunction,
 			SourceAccount: bundlerG,
 			Auth:          auth,
 		}
@@ -222,6 +238,8 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 	if err != nil {
 		return BuildSendResult{}, fmt.Errorf("normalize auth entries: %w", err)
 	}
+	// latch-relayer signs its own (executor) entry at submit.
+	entries = dropAuthFor(entries, plan.relayerToDrop())
 	validUntilLedger := setAddressCredentialExpiration(entries, sim.LatestLedger, 60)
 
 	var signerGStr string
@@ -336,6 +354,7 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 			ValidUntilLedger:                      validUntilLedger,
 			SimulationResultXdr:                   string(simResultJSON),
 			SubmitMethod:                          submitMethod,
+			NetworkFee:                            plan.feeOf(),
 		},
 		Asset:     asset,
 		Recipient: in.Recipient,
@@ -909,6 +928,9 @@ func (s *TransactionService) submitWithBundler(ctx context.Context, txXdrB64 str
 	// sources them from its own channel accounts. Falls through to the bundler
 	// only when the route says so (disabled, or fallback after an outage).
 	if s.gasless.enabled() {
+		if wallet, ok := forwardCallWallet(hostFunction); ok {
+			return s.gasless.submitForward(ctx, wallet, bundlerG, hostFunction, entries)
+		}
 		if wallet, ok := sponsoredWalletCall(hostFunction); ok {
 			if res, handled, err := s.gasless.submit(ctx, wallet, bundlerG, hostFunction, entries); handled {
 				return res, err

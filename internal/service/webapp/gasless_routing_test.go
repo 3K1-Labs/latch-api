@@ -17,6 +17,18 @@ type fakeGasless struct {
 	rec        service.GaslessRecord
 	err        error
 	calls      []struct{ wallet, txB64 string }
+
+	// forward mode
+	feeCfg     service.GaslessFeeConfig
+	quotes     map[string]service.GaslessQuote // by fee token
+	quoteErr   map[string]error
+	quoteCalls []struct {
+		token       string
+		resourceFee int64
+	}
+	forwardCalls []struct{ wallet, txB64 string }
+	forwardRec   service.GaslessRecord
+	forwardErr   error
 }
 
 func (f *fakeGasless) Configured() bool { return f.configured }
@@ -24,6 +36,29 @@ func (f *fakeGasless) Configured() bool { return f.configured }
 func (f *fakeGasless) SubmitSponsored(_ context.Context, wallet, txB64 string) (service.GaslessRecord, error) {
 	f.calls = append(f.calls, struct{ wallet, txB64 string }{wallet, txB64})
 	return f.rec, f.err
+}
+
+func (f *fakeGasless) SubmitForward(_ context.Context, wallet, txB64 string) (service.GaslessRecord, error) {
+	f.forwardCalls = append(f.forwardCalls, struct{ wallet, txB64 string }{wallet, txB64})
+	return f.forwardRec, f.forwardErr
+}
+
+func (f *fakeGasless) FeeConfig(context.Context) (service.GaslessFeeConfig, error) {
+	if f.feeCfg.FeeForwarder == "" {
+		return service.GaslessFeeConfig{}, service.ErrGaslessUnavailable
+	}
+	return f.feeCfg, nil
+}
+
+func (f *fakeGasless) Quote(_ context.Context, token string, resourceFee int64) (service.GaslessQuote, error) {
+	f.quoteCalls = append(f.quoteCalls, struct {
+		token       string
+		resourceFee int64
+	}{token, resourceFee})
+	if err := f.quoteErr[token]; err != nil {
+		return service.GaslessQuote{}, err
+	}
+	return f.quotes[token], nil
 }
 
 // bundlerRPC is a soroban fake for the bundler path; bundlerUsed records
