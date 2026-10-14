@@ -32,6 +32,8 @@ import (
 	"github.com/latch/backend/docs"
 	"github.com/latch/backend/internal/config"
 	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/deployment"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/handler"
 	webapphandler "github.com/latch/backend/internal/handler/webapp"
 	"github.com/latch/backend/internal/middleware"
@@ -48,6 +50,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	// Every handler resolves a request's network against this, so an omitted
+	// network means this deployment's and the other one is rejected.
+	deploynet.Set(cfg.Network)
 
 	isProd := strings.EqualFold(cfg.AppEnv, "production")
 	if isProd {
@@ -57,18 +62,39 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Infrastructure
+	// Infrastructure. Each step refuses to start the server against a
+	// database, Redis or RPC that belongs to another network
+	// (docs/network-per-deployment.md).
 	pool, err := store.NewPostgresPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("postgres: %v", err)
 	}
 	defer pool.Close()
+	if err := deployment.CheckDatabase(ctx, pool, cfg.Network); err != nil {
+		log.Fatalf("postgres: %v", err)
+	}
+	version, err := deployment.Migrate(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+	log.Printf("database at migration %d", version)
+	if err := deployment.StampDatabase(ctx, pool, cfg.Network); err != nil {
+		log.Fatalf("postgres: %v", err)
+	}
 
 	redisClient, err := store.NewRedisClient(ctx, cfg.RedisURL)
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}
 	defer redisClient.Close()
+	if err := deployment.StampRedis(ctx, redisClient, cfg.Network); err != nil {
+		log.Fatalf("redis: %v", err)
+	}
+
+	if err := deployment.CheckRPC(ctx, &http.Client{Timeout: 10 * time.Second}, cfg.SorobanRPCURL(), cfg.Network); err != nil {
+		log.Fatalf("soroban rpc: %v", err)
+	}
+	log.Printf("serving %s only", cfg.Network)
 
 	// Store layer — wrap the pgx pool with a database/sql adapter for sqlc
 	sqlDB := stdlib.OpenDBFromPool(pool)
@@ -116,15 +142,15 @@ func main() {
 	webappAuditSvc := webapp.NewAuditService(queries)
 	webappWebauthnSvc := webapp.NewWebAuthnService(sqlDB, queries)
 	webappAccountsSvc := webapp.NewAccountsService(queries)
-	webappContextRulesSvc := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
-	webappBalancesSvc := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURLTestnet)
+	webappContextRulesSvc := webapp.NewContextRulesService(sorobanSvc, cfg.SorobanRPCURL())
+	webappBalancesSvc := webapp.NewBalancesService(sorobanSvc, cfg.SorobanRPCURL())
 
 	// Sign-payload, on-ramp, backup-passkey, and the counter demo are all
 	// pure reads/writes over the webapp schema (or read-only Soroban
 	// simulation) with no bundler dependency, so — unlike the block below —
 	// they're always constructed and their routes always registered.
 	webappSignPayloadSvc := webapp.NewSignPayloadService(queries)
-	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURLTestnet, cfg.WebAppCounterContractAddress)
+	webappCounterSvc := webapp.NewCounterService(sorobanSvc, cfg.SorobanRPCURL(), cfg.WebAppCounterContractAddress)
 	webappBackupPasskeySvc := webapp.NewBackupPasskeyService(queries)
 	// Pure DB bookkeeping for backup passkey signers (attach/index/remove
 	// rows) — no bundler dependency, unlike AddSigner/RemoveSigner's chain
@@ -152,7 +178,7 @@ func main() {
 	webappOnRampSvc := webapp.NewOnRampService(
 		queries, onRampRelayerSvc, cfg.WebAppOnRampIntentTTL,
 		cfg.WebAppMoonPayAPIBase, cfg.WebAppMoonPaySecretKey, cfg.WebAppMoonPayPublishableKey,
-		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURLTestnet,
+		cfg.WebAppMoonPayIntegrationMode, cfg.WebAppMoonPayWidgetBuyURL, cfg.WebAppMoonPayPoolGAddress, cfg.HorizonURL(),
 		cfg.WebAppMoonPayDefaultFiatAmount, cfg.WebAppMoonPayDefaultFiatCode,
 		webapp.TransakConfig{
 			APIKey:         cfg.WebAppTransakAPIKey,
@@ -362,7 +388,7 @@ func main() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "error": "redis unreachable"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "network": cfg.Network})
 	})
 
 	// Not gated behind auth, matching /health above — do not expose this

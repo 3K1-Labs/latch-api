@@ -57,10 +57,15 @@ func (h *CosignHandler) Create(c *gin.Context) {
 		return
 	}
 
+	network, ok := resolveRequestNetwork(c, req.Network)
+	if !ok {
+		return
+	}
+
 	out, err := h.cosignSvc.Create(c.Request.Context(), service.CreateCosignInput{
 		QueueIndex:    req.QueueIndex,
 		UnsignedTxXDR: req.UnsignedTxXDR,
-		Network:       req.Network,
+		Network:       network,
 		Threshold:     req.Threshold,
 	})
 	if err != nil {

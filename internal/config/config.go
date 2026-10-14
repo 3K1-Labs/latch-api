@@ -34,6 +34,10 @@ type Config struct {
 
 	AppEnv string
 
+	// Network is the one Stellar network this deployment serves: "testnet" or
+	// "mainnet", from STELLAR_NETWORK. See docs/network-per-deployment.md.
+	Network string
+
 	// Stellar network endpoints
 	SorobanRPCURLTestnet string
 	SorobanRPCURLMainnet string
@@ -238,6 +242,7 @@ func Load() (*Config, error) {
 		ServerPepper:                getEnv("SERVER_PEPPER", ""),
 		EncryptionMasterKey:         getEnv("ENCRYPTION_MASTER_KEY", ""),
 		AppEnv:                      getEnv("APP_ENV", "development"),
+		Network:                     strings.ToLower(strings.TrimSpace(os.Getenv("STELLAR_NETWORK"))),
 		SorobanRPCURLTestnet:        getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org"),
 		SorobanRPCURLMainnet:        getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com"),
 		HorizonURLTestnet:           getEnv("HORIZON_URL_TESTNET", "https://horizon-testnet.stellar.org"),
@@ -337,6 +342,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ENCRYPTION_MASTER_KEY must be at least 32 bytes when set")
 	}
 
+	if err := validateNetwork(cfg); err != nil {
+		return nil, err
+	}
+
 	// A mainnet relayer sharing the testnet relayer's shared secret is the
 	// common deployment, so an unset mainnet key means "same secret", not
 	// "no auth" — the latter would 401 every mainnet call.
@@ -345,6 +354,57 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// otherNetworkVars are the settings that switch on the other network's
+// transactions, funding or account creation. A deployment refuses to start
+// with any of them set (docs/network-per-deployment.md).
+var otherNetworkVars = map[string][]string{
+	"mainnet": {"BUNDLER_SECRET", "NEXT_PUBLIC_FACTORY_ADDRESS", "RELAYER_URL", "RELAYER_API_KEY"},
+	"testnet": {"BUNDLER_SECRET_MAINNET", "NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET", "RELAYER_URL_MAINNET", "RELAYER_API_KEY_MAINNET"},
+}
+
+func validateNetwork(cfg *Config) error {
+	if cfg.Network != "testnet" && cfg.Network != "mainnet" {
+		return fmt.Errorf(`STELLAR_NETWORK must be "testnet" or "mainnet": each deployment serves exactly one network`)
+	}
+	if cfg.Network == "mainnet" && cfg.AppEnv != "production" {
+		return fmt.Errorf("STELLAR_NETWORK=mainnet requires APP_ENV=production (got %q)", cfg.AppEnv)
+	}
+	var set []string
+	for _, key := range otherNetworkVars[cfg.Network] {
+		if os.Getenv(key) != "" {
+			set = append(set, key)
+		}
+	}
+	if len(set) > 0 {
+		return fmt.Errorf("STELLAR_NETWORK=%s but the other network's settings are set (%s): remove them; that network has its own deployment",
+			cfg.Network, strings.Join(set, ", "))
+	}
+	// The on-ramp pool follows the deployment's network.
+	if os.Getenv("POOL_NETWORK") == "" {
+		cfg.WebAppOnRampPoolNetwork = cfg.Network
+	} else if !strings.EqualFold(cfg.WebAppOnRampPoolNetwork, cfg.Network) {
+		return fmt.Errorf("POOL_NETWORK=%s but STELLAR_NETWORK=%s: the on-ramp pool must be on the deployment's network",
+			cfg.WebAppOnRampPoolNetwork, cfg.Network)
+	}
+	return nil
+}
+
+// SorobanRPCURL returns the Soroban RPC endpoint for the deployment's network.
+func (c *Config) SorobanRPCURL() string {
+	if c.Network == "mainnet" {
+		return c.SorobanRPCURLMainnet
+	}
+	return c.SorobanRPCURLTestnet
+}
+
+// HorizonURL returns the Horizon endpoint for the deployment's network.
+func (c *Config) HorizonURL() string {
+	if c.Network == "mainnet" {
+		return c.HorizonURLMainnet
+	}
+	return c.HorizonURLTestnet
 }
 
 func requireEnv(key string) string {

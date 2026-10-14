@@ -8,6 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain gives every Load test a valid deployment network; tests that
+// exercise the network rules override it with t.Setenv.
+func TestMain(m *testing.M) {
+	os.Setenv("STELLAR_NETWORK", "testnet")
+	os.Exit(m.Run())
+}
+
 func TestGetEnv_UsesEnvVar(t *testing.T) {
 	t.Setenv("TEST_KEY_GETENV", "value_from_env")
 	assert.Equal(t, "value_from_env", getEnv("TEST_KEY_GETENV", "fallback"))
@@ -378,4 +385,98 @@ func TestLoad_EncryptionMasterKeyTooShort(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
+}
+
+func setRequiredEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+}
+
+func TestLoad_StellarNetworkRequired(t *testing.T) {
+	setRequiredEnv(t)
+	for _, v := range []string{"", "futurenet", "both"} {
+		t.Setenv("STELLAR_NETWORK", v)
+		_, err := Load()
+		require.Error(t, err, "STELLAR_NETWORK=%q", v)
+		assert.Contains(t, err.Error(), "STELLAR_NETWORK")
+	}
+}
+
+func TestLoad_TestnetDeployment(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STELLAR_NETWORK", " Testnet ")
+	t.Setenv("SOROBAN_RPC_URL_TESTNET", "http://testnet-rpc")
+	t.Setenv("HORIZON_URL_TESTNET", "http://testnet-horizon")
+	os.Unsetenv("POOL_NETWORK")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "testnet", cfg.Network)
+	assert.Equal(t, "http://testnet-rpc", cfg.SorobanRPCURL())
+	assert.Equal(t, "http://testnet-horizon", cfg.HorizonURL())
+	assert.Equal(t, "testnet", cfg.WebAppOnRampPoolNetwork, "on-ramp pool follows the deployment")
+}
+
+func TestLoad_MainnetDeployment(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STELLAR_NETWORK", "mainnet")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("SOROBAN_RPC_URL_MAINNET", "http://mainnet-rpc")
+	t.Setenv("HORIZON_URL_MAINNET", "http://mainnet-horizon")
+	os.Unsetenv("POOL_NETWORK")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "mainnet", cfg.Network)
+	assert.Equal(t, "http://mainnet-rpc", cfg.SorobanRPCURL())
+	assert.Equal(t, "http://mainnet-horizon", cfg.HorizonURL())
+	assert.Equal(t, "mainnet", cfg.WebAppOnRampPoolNetwork)
+}
+
+func TestLoad_MainnetRequiresProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STELLAR_NETWORK", "mainnet")
+	t.Setenv("APP_ENV", "development")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "APP_ENV=production")
+}
+
+func TestLoad_RejectsOtherNetworkSettings(t *testing.T) {
+	cases := map[string][]string{
+		"mainnet": {"BUNDLER_SECRET", "NEXT_PUBLIC_FACTORY_ADDRESS", "RELAYER_URL", "RELAYER_API_KEY"},
+		"testnet": {"BUNDLER_SECRET_MAINNET", "NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET", "RELAYER_URL_MAINNET", "RELAYER_API_KEY_MAINNET"},
+	}
+	for network, keys := range cases {
+		for _, key := range keys {
+			t.Run(network+"/"+key, func(t *testing.T) {
+				setRequiredEnv(t)
+				t.Setenv("STELLAR_NETWORK", network)
+				t.Setenv("APP_ENV", "production")
+				t.Setenv(key, "set")
+
+				_, err := Load()
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), key)
+			})
+		}
+	}
+}
+
+func TestLoad_PoolNetworkMustMatch(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STELLAR_NETWORK", "testnet")
+	t.Setenv("POOL_NETWORK", "mainnet")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "POOL_NETWORK")
+
+	t.Setenv("POOL_NETWORK", "TESTNET")
+	_, err = Load()
+	require.NoError(t, err)
 }

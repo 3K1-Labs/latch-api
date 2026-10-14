@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
@@ -66,14 +67,18 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 		return
 	}
 
+	network, ok := resolveRequestNetwork(c, req.Network)
+	if !ok {
+		return
+	}
 	rpcURL := h.cfg.SorobanRPCURLTestnet
-	if req.Network == "mainnet" {
+	if network == deploynet.Mainnet {
 		rpcURL = h.cfg.SorobanRPCURLMainnet
 	}
 
 	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR, req.ResourceConfig)
 	if err != nil {
-		slog.Error("simulate transaction", "network", req.Network, "err", err)
+		slog.Error("simulate transaction", "network", network, "err", err)
 		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "simulation failed")
 		return
 	}
@@ -113,14 +118,18 @@ func (h *TransactionHandler) Relay(c *gin.Context) {
 		return
 	}
 
+	network, ok := resolveRequestNetwork(c, req.Network)
+	if !ok {
+		return
+	}
 	rpcURL := h.cfg.SorobanRPCURLTestnet
-	if req.Network == "mainnet" {
+	if network == deploynet.Mainnet {
 		rpcURL = h.cfg.SorobanRPCURLMainnet
 	}
 
 	sent, err := h.sorobanSvc.SendTransaction(c.Request.Context(), rpcURL, req.XDR)
 	if err != nil {
-		slog.Error("relay send transaction", "network", req.Network, "err", err)
+		slog.Error("relay send transaction", "network", network, "err", err)
 		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "failed to submit transaction")
 		return
 	}

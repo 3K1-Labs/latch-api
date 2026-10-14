@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
@@ -167,6 +168,8 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "smart_account_address is not registered to the caller")
 		case errors.Is(err, service.ErrInvalidNetwork):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+		case errors.Is(err, deploynet.ErrMismatch):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 		case errors.Is(err, service.ErrNetworkUnsupported):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is only available on testnet")
 		case errors.Is(err, service.ErrRelayerNotConfigured):
@@ -215,8 +218,8 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 	scope := middleware.ScopeFromContext(c.Request.Context())
 	memoID := c.Param("memo_id")
 
-	// Which relayer holds this memo. Absent means testnet: memo IDs minted
-	// before mainnet existed all live there, and older clients never send it.
+	// Which relayer holds this memo. Absent means the deployment's network,
+	// whose relayer minted every memo this deployment handed out.
 	network := c.Query("network")
 
 	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, scope, memoID, network)
@@ -224,6 +227,10 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrNetworkUnsupported):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is not available on this network")
+		case errors.Is(err, service.ErrInvalidNetwork):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+		case errors.Is(err, deploynet.ErrMismatch):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 		case errors.Is(err, service.ErrValidation):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "memo_id not found")
 		case errors.Is(err, service.ErrIntentNotFound):

@@ -107,8 +107,8 @@ func (s *AccountService) List(ctx context.Context, userID string) ([]AccountRegi
 // RELAYER_URL is unset — the fund flow has nothing to fall back to without a
 // memo, so callers should surface this as a hard error, not a silent no-op.
 //
-// network selects which relayer deployment mints the intent; empty means
-// testnet. Mainnet returns ErrNetworkUnsupported until RELAYER_URL_MAINNET
+// network selects which relayer deployment mints the intent; empty means the
+// deployment's network (ParseWalletNetwork). Mainnet returns ErrNetworkUnsupported until RELAYER_URL_MAINNET
 // points at a mainnet relayer — see relayerFor for why the two networks fail
 // differently. There is deliberately no fallback to the testnet relayer: it
 // mints memos against one pool account whose keypair exists on mainnet too, so
