@@ -11,6 +11,13 @@ type ErrorCode string
 const (
 	// ErrInternal is for unexpected server-side failures (HTTP 500).
 	ErrInternal ErrorCode = "internal_error"
+	// ErrSponsorshipLimit is returned when a wallet setup call would need
+	// sponsorship but the wallet's allowance or Latch's daily budget is
+	// spent (HTTP 429). The user must pay network fees themselves.
+	ErrSponsorshipLimit ErrorCode = "sponsorship_limit_reached"
+	// ErrSponsorshipRetry is returned when a sponsored submission didn't go
+	// through and nothing was charged (HTTP 503). Retrying is safe.
+	ErrSponsorshipRetry ErrorCode = "sponsorship_retry"
 	// ErrNoContextRule is returned by proposal creation when the caller
 	// requires a matched on-chain context rule and none was found.
 	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"

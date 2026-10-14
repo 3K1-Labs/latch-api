@@ -157,6 +157,9 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 
 	address, alreadyDeployed, err := svc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
 	if err != nil {
+		if failSponsorship(c, err) {
+			return
+		}
 		slog.Error("deploy smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return

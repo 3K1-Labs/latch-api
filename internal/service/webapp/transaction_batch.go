@@ -79,6 +79,18 @@ func (s *TransactionService) SubmitBatchAuthEntries(ctx context.Context, txXdrB6
 	}
 
 	bundlerG := s.bundler.PublicKey()
+
+	// A single sponsored setup call goes through the gasless service, exactly
+	// as in submitWithBundler. Batches stay on the bundler: the gasless
+	// service takes one operation per transaction.
+	if len(hostFunctions) == 1 && s.gasless.enabled() {
+		if wallet, ok := sponsoredWalletCall(hostFunctions[0]); ok {
+			if res, handled, err := s.gasless.submit(ctx, wallet, bundlerG, hostFunctions[0], entries); handled {
+				return res, err
+			}
+		}
+	}
+
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("refresh bundler sequence: %w", err)

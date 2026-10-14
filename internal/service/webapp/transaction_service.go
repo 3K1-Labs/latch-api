@@ -72,6 +72,8 @@ type TransactionService struct {
 	// endpoints only (BuildCounter/BuildDelegatedCounter) — unrelated to any
 	// mobile-serving or asset-transfer path.
 	counterContractAddress string
+	// gasless, when enabled, takes sponsored setup calls off the bundler.
+	gasless gaslessRoute
 }
 
 func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string) *TransactionService {
@@ -902,6 +904,18 @@ func (s *TransactionService) submitWithBundler(ctx context.Context, txXdrB64 str
 	hostFunction := op.Body.InvokeHostFunctionOp.HostFunction
 
 	bundlerG := s.bundler.PublicKey()
+
+	// Sponsored setup calls go through latch-relayer's gasless service, which
+	// sources them from its own channel accounts. Falls through to the bundler
+	// only when the route says so (disabled, or fallback after an outage).
+	if s.gasless.enabled() {
+		if wallet, ok := sponsoredWalletCall(hostFunction); ok {
+			if res, handled, err := s.gasless.submit(ctx, wallet, bundlerG, hostFunction, entries); handled {
+				return res, err
+			}
+		}
+	}
+
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("refresh bundler sequence: %w", err)

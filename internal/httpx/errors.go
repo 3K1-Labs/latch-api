@@ -23,6 +23,12 @@ const (
 
 	// ErrInternal is for unexpected server-side failures (HTTP 500).
 	ErrInternal ErrorCode = "INTERNAL_ERROR"
+	// ErrSponsorshipLimit: a wallet setup call needed sponsorship but the
+	// wallet's allowance or Latch's daily budget is spent (HTTP 429).
+	ErrSponsorshipLimit ErrorCode = "SPONSORSHIP_LIMIT_REACHED"
+	// ErrSponsorshipRetry: a sponsored submission didn't go through and
+	// nothing was charged (HTTP 503). Retrying is safe.
+	ErrSponsorshipRetry ErrorCode = "SPONSORSHIP_RETRY"
 
 	// ErrBadGateway is for failures in upstream dependencies (Soroban RPC, Horizon) (HTTP 502).
 	ErrBadGateway ErrorCode = "BAD_GATEWAY"

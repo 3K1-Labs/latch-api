@@ -24,6 +24,9 @@ func isMultisigNoActiveDraft(err error) bool {
 // unrecognized falls back to a generic 500 with no internal detail leaked,
 // per security.md.
 func multisigErrorResponse(c *gin.Context, err error) {
+	if failSponsorship(c, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, webapp.ErrMultisigProposalRefreshed):
 		webappx.Success(c, http.StatusConflict, gin.H{
