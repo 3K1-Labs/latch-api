@@ -55,6 +55,7 @@ Go REST API backend for a Stellar blockchain mobile wallet. Handles auth, encryp
 | POST   | `/v1/recovery/verify`       | None         | Verify recovery OTP → short-lived recovery token  |
 | GET    | `/v1/recovery/blob`         | Recovery JWT | Decrypt and return credential blob                |
 | GET    | `/v1/prices`                | None         | Live prices for Stellar assets in any supported fiat currency (`currency` query param, default `usd`; Redis-cached per currency) |
+| POST   | `/v1/prices/lookup`         | None         | Mainnet USD prices keyed by complete Stellar asset identity   |
 | GET    | `/v1/history`               | Bearer JWT   | Transaction history for the authenticated user    |
 | POST   | `/api/transaction/simulate` | None         | Simulate a Soroban transaction                    |
 

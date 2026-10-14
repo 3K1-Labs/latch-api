@@ -1,5 +1,28 @@
 basePath: /
 definitions:
+  github_com_latch_backend_internal_service.AssetIdentity:
+    properties:
+      code:
+        type: string
+      contract_id:
+        type: string
+      issuer:
+        type: string
+      type:
+        $ref: '#/definitions/github_com_latch_backend_internal_service.AssetKind'
+    required:
+    - type
+    type: object
+  github_com_latch_backend_internal_service.AssetKind:
+    enum:
+    - native
+    - classic
+    - contract
+    type: string
+    x-enum-varnames:
+    - AssetKindNative
+    - AssetKindClassic
+    - AssetKindContract
   github_com_latch_backend_internal_service.PriceData:
     properties:
       change_24h:
@@ -7,6 +30,14 @@ definitions:
         type: number
       price:
         description: price in the requested currency as string, e.g. "0.1423"
+        type: string
+    type: object
+  github_com_latch_backend_internal_service.StellarPriceData:
+    properties:
+      change_24h:
+        type: number
+        x-nullable: true
+      price:
         type: string
     type: object
   github_com_latch_backend_internal_service.PushRegistration:
@@ -386,6 +417,30 @@ definitions:
       message:
         example: OTP sent
         type: string
+    type: object
+  internal_handler.stellarPricesLookupDataResponse:
+    properties:
+      currency:
+        example: usd
+        type: string
+      data:
+        additionalProperties:
+          allOf:
+          - $ref: '#/definitions/github_com_latch_backend_internal_service.StellarPriceData'
+          x-nullable: true
+        description: Data maps canonical identities to prices; unsupported or unavailable values are null.
+        type: object
+    type: object
+  internal_handler.stellarPricesLookupRequest:
+    properties:
+      assets:
+        items:
+          $ref: '#/definitions/github_com_latch_backend_internal_service.AssetIdentity'
+        maxItems: 25
+        minItems: 1
+        type: array
+    required:
+    - assets
     type: object
   internal_handler.pricesDataResponse:
     properties:
@@ -4207,6 +4262,35 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Live prices
+      tags:
+      - market
+  /v1/prices/lookup:
+    post:
+      consumes:
+      - application/json
+      description: Returns Mainnet USD spot prices for complete Stellar asset identities.
+        Valid unsupported assets return null. Contract identities are priced only when
+        their metadata can be verified as a deterministic Mainnet Stellar Asset Contract.
+        change_24h is null because this provider operation does not supply it.
+      parameters:
+      - description: One to 25 native, classic, or contract asset identities
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.stellarPricesLookupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.stellarPricesLookupDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.apiErrorResponse'
+      summary: Identity-aware Stellar prices
       tags:
       - market
   /v1/push-tokens:

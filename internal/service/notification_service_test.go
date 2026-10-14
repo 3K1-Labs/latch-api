@@ -79,7 +79,8 @@ func (s *notificationStubQuerier) MarkAllNotificationsRead(_ context.Context, _ 
 }
 
 type stubPushNotifier struct {
-	err error
+	err      error
+	onNotify func(context.Context)
 
 	gotTokens []string
 	gotTitle  string
@@ -92,10 +93,13 @@ func (s *stubPushNotifier) NotifyCosignUpdated(_ context.Context, _ []string, _ 
 	return nil
 }
 
-func (s *stubPushNotifier) Notify(_ context.Context, tokens []string, title, body string, data map[string]string) error {
+func (s *stubPushNotifier) Notify(ctx context.Context, tokens []string, title, body string, data map[string]string) error {
 	s.gotTokens, s.gotTitle, s.gotBody, s.gotData = tokens, title, body, data
 	if s.done != nil {
 		defer close(s.done)
+	}
+	if s.onNotify != nil {
+		s.onNotify(ctx)
 	}
 	return s.err
 }
@@ -157,6 +161,46 @@ func TestNotificationNotify_Success_DispatchesPush(t *testing.T) {
 	assert.Equal(t, "Backup signer added", notifier.gotTitle)
 	assert.Equal(t, "signer_added", notifier.gotData["type"])
 	assert.Equal(t, id.String(), notifier.gotData["notificationId"])
+}
+
+func TestNotificationNotify_PushContextDetachedWithOwnTimeout(t *testing.T) {
+	type contextKey struct{}
+	parentDeadline := time.Now().Add(time.Minute)
+	ctx, cancel := context.WithDeadline(context.WithValue(context.Background(), contextKey{}, "request-value"), parentDeadline)
+	defer cancel()
+
+	var pushErr error
+	var pushValue any
+	var pushDeadline time.Time
+	var hasDeadline bool
+	notifier := &stubPushNotifier{
+		done: make(chan struct{}),
+		onNotify: func(pushCtx context.Context) {
+			// Inspect the push context only after the request has ended.
+			<-ctx.Done()
+			pushErr = pushCtx.Err()
+			pushValue = pushCtx.Value(contextKey{})
+			pushDeadline, hasDeadline = pushCtx.Deadline()
+		},
+	}
+	q := &notificationStubQuerier{insertID: uuid.New(), tokensOut: []string{"tok"}}
+	svc := NewNotificationService(q, notifier)
+
+	before := time.Now()
+	require.NoError(t, svc.Notify(ctx, testNotificationUserID, NotificationRecord{Type: "x", Title: "t", Body: "b"}))
+	cancel()
+	select {
+	case <-notifier.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("push notifier was not called")
+	}
+
+	require.NoError(t, pushErr)
+	assert.Equal(t, "request-value", pushValue)
+	require.True(t, hasDeadline, "detached push must still be time-bounded")
+	assert.False(t, pushDeadline.Before(before.Add(10*time.Second)))
+	assert.False(t, pushDeadline.After(time.Now().Add(10*time.Second)))
+	assert.True(t, pushDeadline.Before(parentDeadline), "push must use its own timeout")
 }
 
 // A token-lookup failure after a successful insert must be logged, not

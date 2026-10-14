@@ -169,6 +169,10 @@ type priceService interface {
 	GetPrices(ctx context.Context, tokens []string, currency string) map[string]*service.PriceData
 }
 
+type stellarPriceService interface {
+	LookupUSD(ctx context.Context, assets []service.AssetIdentity) (map[string]*service.StellarPriceData, error)
+}
+
 type historyService interface {
 	GetHistory(ctx context.Context, params service.HistoryParams) ([]service.Transaction, error)
 }

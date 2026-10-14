@@ -147,6 +147,12 @@ type pricesDataResponse struct {
 	Currency string                       `json:"currency" example:"usd"`
 }
 
+type stellarPricesLookupDataResponse struct {
+	// Data maps canonical identities to prices; unsupported or unavailable values are null.
+	Data     map[string]*service.StellarPriceData `json:"data"`
+	Currency string                               `json:"currency" example:"usd"`
+}
+
 type historyDataInner struct {
 	Transactions []map[string]any `json:"transactions"`
 	Network      string           `json:"network" example:"testnet"`

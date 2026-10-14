@@ -4237,6 +4237,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/prices/lookup": {
+            "post": {
+                "description": "Returns Mainnet USD spot prices for complete Stellar asset identities. Valid unsupported assets return null. Contract identities are priced only when their metadata can be verified as a deterministic Mainnet Stellar Asset Contract. change_24h is null because this provider operation does not supply it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "market"
+                ],
+                "summary": "Identity-aware Stellar prices",
+                "parameters": [
+                    {
+                        "description": "One to 25 native, classic, or contract asset identities",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.stellarPricesLookupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.stellarPricesLookupDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/push-tokens": {
             "post": {
                 "security": [
@@ -4985,6 +5025,39 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_latch_backend_internal_service.AssetIdentity": {
+            "type": "object",
+            "required": [
+                "type"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "contract_id": {
+                    "type": "string"
+                },
+                "issuer": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/github_com_latch_backend_internal_service.AssetKind"
+                }
+            }
+        },
+        "github_com_latch_backend_internal_service.AssetKind": {
+            "type": "string",
+            "enum": [
+                "native",
+                "classic",
+                "contract"
+            ],
+            "x-enum-varnames": [
+                "AssetKindNative",
+                "AssetKindClassic",
+                "AssetKindContract"
+            ]
+        },
         "github_com_latch_backend_internal_service.PriceData": {
             "type": "object",
             "properties": {
@@ -4994,6 +5067,18 @@ const docTemplate = `{
                 },
                 "price": {
                     "description": "price in the requested currency as string, e.g. \"0.1423\"",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_latch_backend_internal_service.StellarPriceData": {
+            "type": "object",
+            "properties": {
+                "change_24h": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "price": {
                     "type": "string"
                 }
             }
@@ -5535,6 +5620,41 @@ const docTemplate = `{
                 "message": {
                     "type": "string",
                     "example": "OTP sent"
+                }
+            }
+        },
+        "internal_handler.stellarPricesLookupDataResponse": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "usd"
+                },
+                "data": {
+                    "description": "Data maps canonical identities to prices; unsupported or unavailable values are null.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "allOf": [
+                            { "$ref": "#/definitions/github_com_latch_backend_internal_service.StellarPriceData" }
+                        ],
+                        "x-nullable": true
+                    }
+                }
+            }
+        },
+        "internal_handler.stellarPricesLookupRequest": {
+            "type": "object",
+            "required": [
+                "assets"
+            ],
+            "properties": {
+                "assets": {
+                    "type": "array",
+                    "maxItems": 25,
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/github_com_latch_backend_internal_service.AssetIdentity"
+                    }
                 }
             }
         },

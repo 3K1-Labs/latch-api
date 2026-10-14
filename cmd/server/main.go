@@ -105,6 +105,8 @@ func main() {
 	notificationSvc := service.NewNotificationService(queries, expoNotifier)
 	horizonSvc := service.NewHorizonService()
 	priceSvc := service.NewPriceService(redisClient, cfg.CoinGeckoAPIKey)
+	stellarExpertProvider := service.NewStellarExpertProvider()
+	stellarPriceSvc := service.NewStellarPriceService(redisClient, stellarExpertProvider)
 	historySvc := service.NewHistoryService(sorobanSvc, horizonSvc, redisClient)
 
 	// Web app + Chrome extension backend (ported from a separate Next.js
@@ -278,6 +280,7 @@ func main() {
 	recoveryHandler := handler.NewRecoveryHandler(authSvc, backupSvc, otpSvc, emailSvc, auditSvc, notificationSvc,
 		cfg.JWTSecret, cfg.RecoveryTokenTTLMin)
 	pricesHandler := handler.NewPricesHandler(priceSvc)
+	stellarPricesHandler := handler.NewStellarPricesHandler(stellarPriceSvc)
 	historyHandler := handler.NewHistoryHandler(historySvc, cfg)
 	transactionHandler := handler.NewTransactionHandler(sorobanSvc, cfg)
 
@@ -394,6 +397,7 @@ func main() {
 		}
 
 		v1.GET("/prices", pricesHandler.GetPrices)
+		v1.POST("/prices/lookup", stellarPricesHandler.LookupPrices)
 		v1.GET("/history", middleware.RequireAuth(cfg.JWTSecret), authedLimiter, historyHandler.GetHistory)
 
 		cosign := v1.Group("/cosign/requests")
