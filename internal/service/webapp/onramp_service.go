@@ -12,8 +12,21 @@ import (
 
 	"github.com/google/uuid"
 	db "github.com/latch/backend/internal/db/generated"
+	"github.com/latch/backend/internal/metrics"
+	"github.com/latch/backend/internal/service"
 	"github.com/stellar/go-stellar-sdk/strkey"
 )
+
+// relayerIntentCreator mints the memo and pool address a deposit routes on.
+//
+// latch-relayer is the sole memo allocator for the on-ramp. It owns the
+// forwarding side and matches inbound deposits against its own intents table,
+// so a memo it did not mint is one it cannot match: the deposit is swept to
+// the recovery address instead of being credited to the depositor. This
+// service therefore never invents a memo of its own.
+type relayerIntentCreator interface {
+	CreateIntent(ctx context.Context, in service.CreateIntentInput) (service.Intent, error)
+}
 
 const (
 	OnRampStatusCreated   = "created"
@@ -91,6 +104,8 @@ type TransakConfig struct {
 
 type OnRampService struct {
 	q                    *db.Queries
+	relayer              relayerIntentCreator
+	intentTTL            time.Duration
 	moonPay              *moonPayClient
 	transak              *transakClient
 	poolNetwork          string
@@ -107,12 +122,16 @@ type OnRampService struct {
 
 func NewOnRampService(
 	q *db.Queries,
+	relayer relayerIntentCreator,
+	intentTTL time.Duration,
 	apiBase, secretKey, publishableKey, integrationMode, widgetBuyURLOverride, poolAddress, horizonURL,
 	defaultFiatAmount, defaultFiatCode string,
 	transak TransakConfig,
 ) *OnRampService {
 	return &OnRampService{
 		q:                    q,
+		relayer:              relayer,
+		intentTTL:            intentTTL,
 		moonPay:              newMoonPayClient(apiBase, secretKey),
 		transak:              newTransakClient(transak.APIKey, transak.APISecret, transak.Env, transak.ReferrerDomain, transak.APIBase),
 		poolNetwork:          transak.PoolNetwork,
@@ -128,10 +147,17 @@ func NewOnRampService(
 	}
 }
 
-// CreateIntent validates the request, generates a unique memo ID, persists a
-// new on-ramp intent row, and returns either a MoonPay Platform session token
-// or a signed widget URL depending on the configured integration mode.
-// Mirrors app/api/on-ramp/session/route.ts's POST handler.
+// CreateIntent validates the request, registers a funding intent with
+// latch-relayer for the memo and pool address, builds the provider session,
+// and only then persists the on-ramp row. Returns either a MoonPay Platform
+// session token or a signed widget URL depending on the configured
+// integration mode. Mirrors app/api/on-ramp/session/route.ts's POST handler.
+//
+// The relayer call comes first and is not best-effort: without a registered
+// intent the memo in the widget URL is one the relayer cannot match, and the
+// deposit it produces is swept to recovery rather than credited. Failing here
+// costs the caller a retry; succeeding here without registration would cost
+// them their deposit.
 func (s *OnRampService) CreateIntent(ctx context.Context, externalCustomerID, deviceIP, destinationCAddress, fiatAmount, fiatCode string) (OnRampSession, error) {
 	destinationCAddress = strings.TrimSpace(destinationCAddress)
 	if _, err := strkey.Decode(strkey.VersionByteContract, destinationCAddress); err != nil {
@@ -143,35 +169,38 @@ func (s *OnRampService) CreateIntent(ctx context.Context, externalCustomerID, de
 		return OnRampSession{}, err
 	}
 
-	memoID, err := generateUniqueOnRampMemoID(ctx, s.q.OnRampMemoIDExists)
-	if err != nil {
-		return OnRampSession{}, fmt.Errorf("generate on-ramp memo id: %w", err)
-	}
-
 	intentID := uuid.New()
-	if _, err := s.q.InsertOnRampIntent(ctx, db.InsertOnRampIntentParams{
-		ID:                  intentID,
-		MemoID:              memoID,
-		DestinationCAddress: destinationCAddress,
-		ExternalCustomerID:  externalCustomerID,
-		Status:              OnRampStatusCreated,
-		FiatAmount:          fiatAmount,
-		FiatCode:            fiatCode,
-	}); err != nil {
-		return OnRampSession{}, fmt.Errorf("insert on-ramp intent: %w", err)
+	funding, err := s.mintRelayerIntent(ctx, destinationCAddress, intentID.String())
+	if err != nil {
+		return OnRampSession{}, err
 	}
 
+	sess, err := s.moonPaySession(ctx, intentID.String(), funding, destinationCAddress, externalCustomerID, deviceIP, fiatAmount, fiatCode)
+	if err != nil {
+		return OnRampSession{}, err
+	}
+
+	if err := s.insertIntent(ctx, intentID, funding, destinationCAddress, externalCustomerID, fiatAmount, fiatCode); err != nil {
+		return OnRampSession{}, err
+	}
+	return sess, nil
+}
+
+// moonPaySession builds the widget or Platform session for an already-minted
+// funding intent. Split out of CreateIntent so the intent row is written in
+// exactly one place, after the provider has committed to the session.
+func (s *OnRampService) moonPaySession(ctx context.Context, intentID string, funding service.Intent, destinationCAddress, externalCustomerID, deviceIP, fiatAmount, fiatCode string) (OnRampSession, error) {
 	if s.integrationMode == onRampIntegrationModeWidget {
-		return s.buildWidgetSession(intentID.String(), memoID, destinationCAddress, externalCustomerID, fiatAmount, fiatCode, false)
+		return s.buildWidgetSession(intentID, funding, destinationCAddress, externalCustomerID, fiatAmount, fiatCode, false)
 	}
 
 	sessionToken, err := s.moonPay.CreateSession(ctx, externalCustomerID, deviceIP)
 	if err == nil {
 		return OnRampSession{
-			IntentID:            intentID.String(),
-			MemoID:              memoID,
+			IntentID:            intentID,
+			MemoID:              funding.MemoID,
 			DestinationCAddress: destinationCAddress,
-			PoolAddress:         s.poolAddress,
+			PoolAddress:         funding.PoolAddress,
 			FiatAmount:          fiatAmount,
 			FiatCode:            fiatCode,
 			IntegrationMode:     onRampIntegrationModePlatform,
@@ -181,9 +210,52 @@ func (s *OnRampService) CreateIntent(ctx context.Context, externalCustomerID, de
 
 	var mpErr *MoonPayAPIError
 	if s.integrationMode == onRampIntegrationModeAuto && errors.As(err, &mpErr) && mpErr.StatusCode == 404 {
-		return s.buildWidgetSession(intentID.String(), memoID, destinationCAddress, externalCustomerID, fiatAmount, fiatCode, true)
+		return s.buildWidgetSession(intentID, funding, destinationCAddress, externalCustomerID, fiatAmount, fiatCode, true)
 	}
 	return OnRampSession{}, fmt.Errorf("create moonpay session: %w", err)
+}
+
+// mintRelayerIntent registers destinationCAddress with latch-relayer and
+// returns the memo and pool address the deposit must carry.
+//
+// externalID is this service's own intent ID, so a deposit can be traced from
+// either side during reconciliation. ExpiresIn is always set explicitly: the
+// relayer's own default is one hour and its forwarder sweeps late deposits to
+// recovery, which would strand every bank-funded purchase.
+func (s *OnRampService) mintRelayerIntent(ctx context.Context, destinationCAddress, externalID string) (service.Intent, error) {
+	funding, err := s.relayer.CreateIntent(ctx, service.CreateIntentInput{
+		CAddress:   destinationCAddress,
+		ExternalID: externalID,
+		ExpiresIn:  int(s.intentTTL.Seconds()),
+	})
+	if err != nil {
+		metrics.OnRampRelayerRegistrationTotal.WithLabelValues("error").Inc()
+		return service.Intent{}, fmt.Errorf("mint relayer funding intent: %w", err)
+	}
+	metrics.OnRampRelayerRegistrationTotal.WithLabelValues("success").Inc()
+	return funding, nil
+}
+
+// insertIntent persists the on-ramp row once the relayer and the provider have
+// both committed. Storing the relayer's intent ID and pool address (rather
+// than the locally configured pool) is what lets reconciliation join the two
+// services, and records which pool the deposit was actually routed to.
+func (s *OnRampService) insertIntent(ctx context.Context, intentID uuid.UUID, funding service.Intent, destinationCAddress, externalCustomerID, fiatAmount, fiatCode string) error {
+	if _, err := s.q.InsertOnRampIntent(ctx, db.InsertOnRampIntentParams{
+		ID:                  intentID,
+		MemoID:              funding.MemoID,
+		DestinationCAddress: destinationCAddress,
+		ExternalCustomerID:  externalCustomerID,
+		Status:              OnRampStatusCreated,
+		FiatAmount:          fiatAmount,
+		FiatCode:            fiatCode,
+		RelayerIntentID:     sql.NullString{String: funding.IntentID, Valid: funding.IntentID != ""},
+		PoolAddress:         sql.NullString{String: funding.PoolAddress, Valid: funding.PoolAddress != ""},
+		ExpiresAt:           sql.NullTime{Time: funding.ExpiresAt, Valid: !funding.ExpiresAt.IsZero()},
+	}); err != nil {
+		return fmt.Errorf("insert on-ramp intent: %w", err)
+	}
+	return nil
 }
 
 // normalizeFiat applies the configured defaults and validates the result.
@@ -219,13 +291,15 @@ type TransakIntentInput struct {
 // CreateTransakIntent mints an on-ramp intent and returns a Transak widget URL
 // locked to the pool address and this intent's memo.
 //
-// Two deliberate differences from the MoonPay path:
+// One deliberate difference from the MoonPay path: it refuses to run unless
+// the pool is on mainnet. Transak delivers to Stellar mainnet only, so a
+// session built against the testnet pool would send a real purchase to an
+// address no relayer watches.
 //
-//   - It refuses to run unless the pool is on mainnet. Transak delivers to
-//     Stellar mainnet only, so a session built against the testnet pool would
-//     send a real purchase to an address no relayer watches.
-//   - The intent row is written *after* Transak accepts the session, so a
-//     provider failure leaves no orphaned intent behind.
+// Both paths share the same ordering — relayer, then provider, then the intent
+// row — so a failure at any step leaves no session pointing at an unregistered
+// memo and no orphaned row behind. A relayer intent orphaned by a later
+// failure expires on its own TTL.
 func (s *OnRampService) CreateTransakIntent(ctx context.Context, in TransakIntentInput) (OnRampSession, error) {
 	if !strings.EqualFold(s.poolNetwork, "mainnet") {
 		return OnRampSession{}, ErrTransakRequiresMainnet
@@ -249,15 +323,15 @@ func (s *OnRampService) CreateTransakIntent(ctx context.Context, in TransakInten
 		return OnRampSession{}, err
 	}
 
-	memoID, err := generateUniqueOnRampMemoID(ctx, s.q.OnRampMemoIDExists)
-	if err != nil {
-		return OnRampSession{}, fmt.Errorf("generate on-ramp memo id: %w", err)
-	}
 	intentID := uuid.New()
+	funding, err := s.mintRelayerIntent(ctx, destinationCAddress, intentID.String())
+	if err != nil {
+		return OnRampSession{}, err
+	}
 
 	widgetURL, err := s.transak.CreateWidgetURL(ctx, transakSessionInput{
-		PoolAddress:    s.poolAddress,
-		MemoID:         memoID,
+		PoolAddress:    funding.PoolAddress,
+		MemoID:         funding.MemoID,
 		IntentID:       intentID.String(),
 		SmartAccount:   destinationCAddress,
 		CryptoCurrency: cryptoCurrency,
@@ -267,23 +341,15 @@ func (s *OnRampService) CreateTransakIntent(ctx context.Context, in TransakInten
 		return OnRampSession{}, fmt.Errorf("create transak session: %w", err)
 	}
 
-	if _, err := s.q.InsertOnRampIntent(ctx, db.InsertOnRampIntentParams{
-		ID:                  intentID,
-		MemoID:              memoID,
-		DestinationCAddress: destinationCAddress,
-		ExternalCustomerID:  in.ExternalCustomerID,
-		Status:              OnRampStatusCreated,
-		FiatAmount:          fiatAmount,
-		FiatCode:            fiatCode,
-	}); err != nil {
-		return OnRampSession{}, fmt.Errorf("insert on-ramp intent: %w", err)
+	if err := s.insertIntent(ctx, intentID, funding, destinationCAddress, in.ExternalCustomerID, fiatAmount, fiatCode); err != nil {
+		return OnRampSession{}, err
 	}
 
 	return OnRampSession{
 		IntentID:            intentID.String(),
-		MemoID:              memoID,
+		MemoID:              funding.MemoID,
 		DestinationCAddress: destinationCAddress,
-		PoolAddress:         s.poolAddress,
+		PoolAddress:         funding.PoolAddress,
 		FiatAmount:          fiatAmount,
 		FiatCode:            fiatCode,
 		IntegrationMode:     onRampIntegrationModeWidget,
@@ -293,7 +359,7 @@ func (s *OnRampService) CreateTransakIntent(ctx context.Context, in TransakInten
 	}, nil
 }
 
-func (s *OnRampService) buildWidgetSession(intentID, memoID, destinationCAddress, externalCustomerID, fiatAmount, fiatCode string, platformFallback bool) (OnRampSession, error) {
+func (s *OnRampService) buildWidgetSession(intentID string, funding service.Intent, destinationCAddress, externalCustomerID, fiatAmount, fiatCode string, platformFallback bool) (OnRampSession, error) {
 	if err := validateMoonPaySecretKey(s.secretKey); err != nil {
 		return OnRampSession{}, err
 	}
@@ -309,8 +375,8 @@ func (s *OnRampService) buildWidgetSession(intentID, memoID, destinationCAddress
 	}
 
 	widgetURL := buildSignedMoonPayWidgetBuyURL(base, s.secretKey, s.publishableKey, moonPayWidgetBuyURLParams{
-		PoolAddress:           s.poolAddress,
-		MemoID:                memoID,
+		PoolAddress:           funding.PoolAddress,
+		MemoID:                funding.MemoID,
 		FiatAmount:            fiatAmount,
 		FiatCode:              fiatCode,
 		ExternalCustomerID:    externalCustomerID,
@@ -319,9 +385,9 @@ func (s *OnRampService) buildWidgetSession(intentID, memoID, destinationCAddress
 
 	return OnRampSession{
 		IntentID:            intentID,
-		MemoID:              memoID,
+		MemoID:              funding.MemoID,
 		DestinationCAddress: destinationCAddress,
-		PoolAddress:         s.poolAddress,
+		PoolAddress:         funding.PoolAddress,
 		FiatAmount:          fiatAmount,
 		FiatCode:            fiatCode,
 		IntegrationMode:     onRampIntegrationModeWidget,
@@ -359,9 +425,13 @@ func (s *OnRampService) GetIntent(ctx context.Context, id string) (OnRampIntent,
 }
 
 // UpdateIntent applies a partial update (status and/or moonpayTransactionId)
-// to an existing intent. Mirrors intent/[id]/route.ts's PATCH handler; the
-// underlying sqlc query always writes both columns, so this reads the
-// current row first and merges in only the fields the caller supplied.
+// to an existing intent. Mirrors intent/[id]/route.ts's PATCH handler.
+//
+// The merge happens in SQL rather than here. Reading the row and writing it
+// back left a window where two concurrent callers each read the same row and
+// each wrote its own field, silently discarding the other's — a provider
+// webhook setting the transaction ID could erase a status the client had just
+// set, or the reverse.
 func (s *OnRampService) UpdateIntent(ctx context.Context, id string, status, moonpayTransactionID *string) (OnRampIntent, error) {
 	if status == nil && moonpayTransactionID == nil {
 		return OnRampIntent{}, ErrOnRampNoUpdateFields
@@ -375,28 +445,15 @@ func (s *OnRampService) UpdateIntent(ctx context.Context, id string, status, moo
 		return OnRampIntent{}, ErrOnRampIntentNotFound
 	}
 
-	existing, err := s.q.GetOnRampIntentByID(ctx, uid)
-	if errors.Is(err, sql.ErrNoRows) {
-		return OnRampIntent{}, ErrOnRampIntentNotFound
-	}
-	if err != nil {
-		return OnRampIntent{}, fmt.Errorf("get on-ramp intent %s: %w", id, err)
-	}
-
-	newStatus := existing.Status
+	params := db.UpdateOnRampIntentParams{ID: uid}
 	if status != nil {
-		newStatus = *status
+		params.Status = sql.NullString{String: *status, Valid: true}
 	}
-	newMoonpayTxID := existing.MoonpayTransactionID
 	if moonpayTransactionID != nil {
-		newMoonpayTxID = sql.NullString{String: *moonpayTransactionID, Valid: true}
+		params.MoonpayTransactionID = sql.NullString{String: *moonpayTransactionID, Valid: true}
 	}
 
-	updated, err := s.q.UpdateOnRampIntent(ctx, db.UpdateOnRampIntentParams{
-		ID:                   uid,
-		Status:               newStatus,
-		MoonpayTransactionID: newMoonpayTxID,
-	})
+	updated, err := s.q.UpdateOnRampIntent(ctx, params)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OnRampIntent{}, ErrOnRampIntentNotFound
 	}
@@ -410,7 +467,14 @@ func (s *OnRampService) UpdateIntent(ctx context.Context, id string, status, moo
 // transactions, optionally filtered to a single memo. Mirrors
 // app/api/on-ramp/pool/route.ts.
 func (s *OnRampService) PoolSnapshot(ctx context.Context, memoFilter string) (PoolAccountSnapshot, error) {
-	return s.pool.FetchSnapshot(ctx, s.horizonURL, "testnet", s.poolAddress, memoFilter)
+	// Report the network the pool actually lives on. This was hardcoded to
+	// testnet, which mislabelled every mainnet snapshot — the one place an
+	// operator looks to confirm which network they are reconciling against.
+	network := "testnet"
+	if strings.EqualFold(s.poolNetwork, "mainnet") {
+		network = "mainnet"
+	}
+	return s.pool.FetchSnapshot(ctx, s.horizonURL, network, s.poolAddress, memoFilter)
 }
 
 func isValidOnRampStatus(status string) bool {

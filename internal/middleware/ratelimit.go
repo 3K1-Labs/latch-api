@@ -67,6 +67,25 @@ func NewSubjectRateLimiter(redisClient *redis.Client, limit int, window time.Dur
 	return newRateLimiter(redisClient, limit, window, subjectRateLimitKey)
 }
 
+func sessionActionRateLimitKey(action string) func(*gin.Context) string {
+	return func(c *gin.Context) string {
+		// Webapp routes carry a session user, not a JWT subject, so the
+		// subject-keyed limiter would silently fall through to per-IP for every
+		// one of them — and a per-IP bucket puts everyone behind one NAT in the
+		// same queue for a money-moving endpoint.
+		if sub := SessionUserIDFromContext(c.Request.Context()); sub != "" {
+			return fmt.Sprintf("rl:sess-action:%s:%s", action, sub)
+		}
+		return fmt.Sprintf("rl:ip-action:%s:%s", action, c.ClientIP())
+	}
+}
+
+// NewSessionActionRateLimiter limits one webapp action per session user. Must
+// run after EnsureSession so the session is present.
+func NewSessionActionRateLimiter(redisClient *redis.Client, action string, limit int, window time.Duration) gin.HandlerFunc {
+	return newRateLimiter(redisClient, limit, window, sessionActionRateLimitKey(action))
+}
+
 func subjectActionRateLimitKey(action string) func(*gin.Context) string {
 	return func(c *gin.Context) string {
 		if sub := UserIDFromContext(c.Request.Context()); sub != "" {

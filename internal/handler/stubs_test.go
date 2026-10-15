@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 )
 
 // ── authService stub ──────────────────────────────────────────────────────────
@@ -120,6 +121,55 @@ type stubAudit struct{}
 
 func (s *stubAudit) Log(_ context.Context, _, _, _, _ string, _ map[string]any) {}
 
+// ── passkeyCredentialRegisterService stub ─────────────────────────────────────
+
+// stubPasskeyCredentialRegister accepts every registration unless err is set,
+// so smart-account deploy tests stay focused on their own behaviour.
+type stubPasskeyCredentialRegister struct {
+	err error
+
+	gotKeyDataHex string
+	gotAddress    string
+	gotLabel      string
+	gotSeq        int32
+
+	deregisterErr        error
+	gotDeregisterKeyData string
+}
+
+func (s *stubPasskeyCredentialRegister) Register(_ context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error {
+	s.gotKeyDataHex = keyDataHex
+	s.gotAddress = smartAccountAddress
+	s.gotLabel = label
+	s.gotSeq = seq
+	return s.err
+}
+
+func (s *stubPasskeyCredentialRegister) Deregister(_ context.Context, keyDataHex string) error {
+	s.gotDeregisterKeyData = keyDataHex
+	return s.deregisterErr
+}
+
+// ── backupSignerConfirmService stub ───────────────────────────────────────────
+
+type stubBackupSignerConfirm struct {
+	confirmAddSignerID  uint32
+	confirmAddSignerErr error
+	confirmRemoveErr    error
+	gotConfirmAdd       webapp.ConfirmAddSignerInput
+	gotConfirmRemove    webapp.ConfirmRemoveSignerInput
+}
+
+func (s *stubBackupSignerConfirm) ConfirmAddSigner(_ context.Context, in webapp.ConfirmAddSignerInput) (uint32, error) {
+	s.gotConfirmAdd = in
+	return s.confirmAddSignerID, s.confirmAddSignerErr
+}
+
+func (s *stubBackupSignerConfirm) ConfirmRemoveSigner(_ context.Context, in webapp.ConfirmRemoveSignerInput) error {
+	s.gotConfirmRemove = in
+	return s.confirmRemoveErr
+}
+
 // ── wckBundleService stub ─────────────────────────────────────────────────────
 
 type stubWCKBundle struct {
@@ -204,6 +254,63 @@ func (s *stubNotifier) NotifyCosignUpdated(_ context.Context, tokens []string, q
 	return s.err
 }
 
+// ── notificationService / pushDeviceService stubs ─────────────────────────────
+
+type stubNotification struct {
+	notifyErr error
+
+	gotUserID string
+	gotRecord service.NotificationRecord
+	notifyN   int
+
+	listOut       []service.Notification
+	listCursorOut string
+	listErr       error
+
+	unreadCount int
+	unreadErr   error
+
+	markReadErr error
+	markAllErr  error
+}
+
+func (s *stubNotification) Notify(_ context.Context, userID string, rec service.NotificationRecord) error {
+	s.gotUserID = userID
+	s.gotRecord = rec
+	s.notifyN++
+	return s.notifyErr
+}
+
+func (s *stubNotification) List(_ context.Context, _, _ string, _ int) ([]service.Notification, string, error) {
+	return s.listOut, s.listCursorOut, s.listErr
+}
+
+func (s *stubNotification) UnreadCount(_ context.Context, _ string) (int, error) {
+	return s.unreadCount, s.unreadErr
+}
+
+func (s *stubNotification) MarkRead(_ context.Context, _, _ string) error { return s.markReadErr }
+func (s *stubNotification) MarkAllRead(_ context.Context, _ string) error { return s.markAllErr }
+
+type stubPushDevice struct {
+	registerErr error
+	deleteErr   error
+
+	gotUserID   string
+	gotToken    string
+	gotPlatform string
+}
+
+func (s *stubPushDevice) Register(_ context.Context, userID, token, platform string) error {
+	s.gotUserID, s.gotToken, s.gotPlatform = userID, token, platform
+	return s.registerErr
+}
+
+func (s *stubPushDevice) Delete(_ context.Context, userID, token string) error {
+	s.gotUserID, s.gotToken = userID, token
+	return s.deleteErr
+}
+
 // ── backupService stub ────────────────────────────────────────────────────────
 
 type stubBackup struct {
@@ -245,7 +352,8 @@ type stubAccount struct {
 
 	createIntentResult  service.Intent
 	createIntentErr     error
-	intentNetwork       string // network the handler forwarded
+	intentNetwork       string                       // network the handler forwarded
+	intentOpts          service.FundingIntentOptions // options the handler forwarded
 	fundingStatusResult service.DepositStatus
 	fundingStatusErr    error
 	statusNetwork       string // network the handler forwarded on status lookups
@@ -266,8 +374,9 @@ func (s *stubAccount) List(_ context.Context, _ string) ([]service.AccountRegist
 	return s.listResult, nil
 }
 
-func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _, _, network string) (service.Intent, error) {
+func (s *stubAccount) CreateFundingIntent(_ context.Context, _, _, _, network string, opts service.FundingIntentOptions) (service.Intent, error) {
 	s.intentNetwork = network
+	s.intentOpts = opts
 	if s.createIntentErr != nil {
 		return service.Intent{}, s.createIntentErr
 	}
@@ -285,10 +394,12 @@ func (s *stubAccount) GetFundingStatus(_ context.Context, _, _, _, network strin
 // ── priceService stub ─────────────────────────────────────────────────────────
 
 type stubPrice struct {
-	prices map[string]*service.PriceData
+	prices      map[string]*service.PriceData
+	gotCurrency string
 }
 
-func (s *stubPrice) GetPrices(_ context.Context, tokens []string) map[string]*service.PriceData {
+func (s *stubPrice) GetPrices(_ context.Context, tokens []string, currency string) map[string]*service.PriceData {
+	s.gotCurrency = currency
 	if s.prices != nil {
 		return s.prices
 	}

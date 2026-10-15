@@ -259,6 +259,31 @@ checks, golden fixtures for sign-payload and on-ramp intent response shapes.
 
 ---
 
+## Phase 6 — Account identity: passkey, not cookie — ✅ DONE
+
+The ported list endpoints scoped by the anonymous `sid` cookie user, which produced two
+extension-visible bugs: a stale `sid` surfaced unrelated wallets (too many), and a member on
+a new device never got re-linked so their multisig wallets vanished (too few). Fixes:
+
+- **`authentication/finish` no longer relocates a credential onto the cookie.** It resolves
+  the caller to the credential's existing owner (or, for a first-seen mobile passkey, a
+  dedicated new webapp user via `adoptExternalPasskey`) and the handler re-issues the `sid`
+  cookie for that user. `reassignCredentialOwner` + its two `UPDATE … user_id` queries are
+  gone.
+- **`GET /api/accounts`** gains `?credentialId=` to narrow to one proven passkey's wallet.
+- **`GET /api/multisig/accounts`** drops the creator-only (`a.user_id`) visibility branch —
+  member row required.
+- **`RelinkMultisigMembersByCredential`** runs on every successful login, pointing that
+  passkey's member rows at their proven owner (the fix for "missing multisig on a new
+  laptop"). Migration `000027` back-fills it retroactively from `webapp.webauthn_credentials`.
+
+Client contract: [`webapp-account-identity-client.md`](webapp-account-identity-client.md).
+
+**Tests:** session-switch on owner mismatch, dedicated-user adoption, `?credentialId=`
+ownership scoping, login-time re-link (and its mandatory-write failure path).
+
+---
+
 ## Current status summary
 
 Every route in `references/latch/app/api/` has a Go equivalent except `build-sign-demo`

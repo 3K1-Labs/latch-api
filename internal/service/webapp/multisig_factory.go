@@ -47,6 +47,20 @@ func buildMultisigAccountInitParams(threshold uint32, salt []byte, signers []Mul
 				scMapEntry("signer_kind", scVec(scSymbol("WebAuthn"))),
 			)
 			signerVals[i] = scVec(scSymbol("External"), signerStruct)
+		case "ed25519":
+			// Seed-wallet members of a shared wallet. The webapp's own draft
+			// flow never produces these — draftMembersToFactorySigners emits
+			// only delegated/webauthn — but latch-mobile's shared wallets do.
+			// key_data is the raw 32-byte Ed25519 public key.
+			keyData, err := hex.DecodeString(s.KeyDataHex)
+			if err != nil {
+				return xdr.ScVal{}, fmt.Errorf("decode signer %d keyDataHex: %w", i, err)
+			}
+			signerStruct := scMap(
+				scMapEntry("key_data", scBytes(keyData)),
+				scMapEntry("signer_kind", scVec(scSymbol("Ed25519"))),
+			)
+			signerVals[i] = scVec(scSymbol("External"), signerStruct)
 		default:
 			return xdr.ScVal{}, fmt.Errorf("unsupported signer type %q", s.Type)
 		}

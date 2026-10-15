@@ -8,6 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain gives every Load test a valid deployment network; tests that
+// exercise the network rules override it with t.Setenv.
+func TestMain(m *testing.M) {
+	os.Setenv("STELLAR_NETWORK", "testnet")
+	os.Exit(m.Run())
+}
+
 func TestGetEnv_UsesEnvVar(t *testing.T) {
 	t.Setenv("TEST_KEY_GETENV", "value_from_env")
 	assert.Equal(t, "value_from_env", getEnv("TEST_KEY_GETENV", "fallback"))
@@ -61,31 +68,19 @@ func TestLoad_WithRequiredEnvVars(t *testing.T) {
 	assert.Equal(t, "9090", cfg.Port)
 }
 
-func TestLoad_WalletAuthSorobanURLs(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
-	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
-	t.Setenv("RESEND_API_KEY", "re_test_key")
-	t.Setenv("SOROBAN_RPC_URL_TESTNET", "http://testnet-rpc")
-	t.Setenv("SOROBAN_RPC_URL_MAINNET", "http://mainnet-rpc")
+func TestLoad_WalletAuthSorobanURL(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SOROBAN_RPC_URL", "http://rpc")
 	os.Unsetenv("WALLET_AUTH_SOROBAN_URL")
-	os.Unsetenv("WALLET_AUTH_SOROBAN_URL_MAINNET")
 
 	cfg, err := Load()
 	require.NoError(t, err)
+	assert.Equal(t, "http://rpc", cfg.WalletAuthSorobanURL, "defaults to SOROBAN_RPC_URL")
 
-	// Both default to the general per-network Soroban endpoints.
-	assert.Equal(t, "http://testnet-rpc", cfg.WalletAuthSorobanURL)
-	assert.Equal(t, "http://mainnet-rpc", cfg.WalletAuthSorobanURLMainnet)
-
-	t.Setenv("WALLET_AUTH_SOROBAN_URL", "http://override-testnet")
-	t.Setenv("WALLET_AUTH_SOROBAN_URL_MAINNET", "http://override-mainnet")
-
+	t.Setenv("WALLET_AUTH_SOROBAN_URL", "http://override")
 	cfg, err = Load()
 	require.NoError(t, err)
-
-	assert.Equal(t, "http://override-testnet", cfg.WalletAuthSorobanURL)
-	assert.Equal(t, "http://override-mainnet", cfg.WalletAuthSorobanURLMainnet)
+	assert.Equal(t, "http://override", cfg.WalletAuthSorobanURL)
 }
 
 // clientDataJSON.origin always carries a scheme, and origins are matched by
@@ -100,7 +95,7 @@ func TestLoad_WebAuthnAllowedOrigins(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"https://latch.finance"}, cfg.WebAuthnAllowedOrigins)
+	assert.Equal(t, []string{"https://uselatch.app"}, cfg.WebAuthnAllowedOrigins)
 
 	t.Setenv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance,chrome-extension://cgmboajonamcelkfpikbmmpohccmkmog")
 
@@ -151,7 +146,6 @@ func TestLoad_WebAppPhase2Fields(t *testing.T) {
 	t.Setenv("LEGACY_DELEGATED_SIGNER_SECRET", "SLEGACYSECRET")
 	t.Setenv("NEXT_PUBLIC_FACTORY_ADDRESS", "CFACTORYADDRESS")
 	t.Setenv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", "CVERIFIERADDRESS")
-	t.Setenv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Public Global Stellar Network ; September 2015")
 	t.Setenv("WEBAUTHN_RP_ID", "localhost")
 	t.Setenv("WEBAUTHN_ORIGIN", "http://localhost:3000")
 	t.Setenv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "1")
@@ -164,7 +158,7 @@ func TestLoad_WebAppPhase2Fields(t *testing.T) {
 	assert.Equal(t, "SLEGACYSECRET", cfg.WebAppLegacyDelegatedSignerSecret)
 	assert.Equal(t, "CFACTORYADDRESS", cfg.WebAppFactoryAddress)
 	assert.Equal(t, "CVERIFIERADDRESS", cfg.WebAppWebAuthnVerifierAddress)
-	assert.Equal(t, "Public Global Stellar Network ; September 2015", cfg.WebAppNetworkPassphrase)
+	assert.Equal(t, "Test SDF Network ; September 2015", cfg.WebAppNetworkPassphrase, "derived from STELLAR_NETWORK")
 	assert.Equal(t, "localhost", cfg.WebAppWebAuthnRPID)
 	assert.Equal(t, "http://localhost:3000", cfg.WebAppWebAuthnOrigin)
 	assert.True(t, cfg.WebAppWebAuthnDevTrustReqHost)
@@ -219,7 +213,7 @@ func TestLoad_WebAppAssetCatalogFields(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "CUSDCTESTADDRESS", cfg.WebAppUSDCSACAddressTestnet)
+	assert.Equal(t, "CUSDCTESTADDRESS", cfg.WebAppUSDCSACAddress)
 	assert.Equal(t, `[{"assetId":"native"}]`, cfg.WebAppAssetAllowlistJSON)
 }
 
@@ -233,7 +227,7 @@ func TestLoad_WebAppAssetCatalogFields_Defaults(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", cfg.WebAppUSDCSACAddressTestnet)
+	assert.Equal(t, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", cfg.WebAppUSDCSACAddress)
 	assert.Empty(t, cfg.WebAppAssetAllowlistJSON)
 }
 
@@ -378,4 +372,93 @@ func TestLoad_EncryptionMasterKeyTooShort(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
+}
+
+func setRequiredEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-32-chars!")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+}
+
+func TestLoad_StellarNetworkRequired(t *testing.T) {
+	setRequiredEnv(t)
+	for _, v := range []string{"", "futurenet", "both"} {
+		t.Setenv("STELLAR_NETWORK", v)
+		_, err := Load()
+		require.Error(t, err, "STELLAR_NETWORK=%q", v)
+		assert.Contains(t, err.Error(), "STELLAR_NETWORK")
+	}
+}
+
+func TestLoad_TestnetDeployment(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STELLAR_NETWORK", " Testnet ")
+	for _, key := range requiredMainnetVars {
+		os.Unsetenv(key)
+	}
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "testnet", cfg.Network)
+	assert.Equal(t, "Test SDF Network ; September 2015", cfg.WebAppNetworkPassphrase)
+	// Testnet runs on public defaults.
+	assert.Equal(t, "https://soroban-testnet.stellar.org", cfg.SorobanRPCURL)
+	assert.Equal(t, "https://horizon-testnet.stellar.org", cfg.HorizonURL)
+	assert.Equal(t, "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC", cfg.NativeSACID)
+
+	t.Setenv("SOROBAN_RPC_URL", "http://testnet-rpc")
+	t.Setenv("HORIZON_URL", "http://testnet-horizon")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, "http://testnet-rpc", cfg.SorobanRPCURL)
+	assert.Equal(t, "http://testnet-horizon", cfg.HorizonURL)
+}
+
+// setMainnetEnv sets everything a mainnet deployment requires.
+func setMainnetEnv(t *testing.T) {
+	t.Helper()
+	setRequiredEnv(t)
+	t.Setenv("STELLAR_NETWORK", "mainnet")
+	t.Setenv("APP_ENV", "production")
+	for _, key := range requiredMainnetVars {
+		t.Setenv(key, "set-"+key)
+	}
+}
+
+func TestLoad_MainnetDeployment(t *testing.T) {
+	setMainnetEnv(t)
+	t.Setenv("SOROBAN_RPC_URL", "http://mainnet-rpc")
+	t.Setenv("HORIZON_URL", "http://mainnet-horizon")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "mainnet", cfg.Network)
+	assert.Equal(t, "Public Global Stellar Network ; September 2015", cfg.WebAppNetworkPassphrase)
+	assert.Equal(t, "http://mainnet-rpc", cfg.SorobanRPCURL)
+	assert.Equal(t, "http://mainnet-horizon", cfg.HorizonURL)
+	assert.Equal(t, "set-NEXT_PUBLIC_FACTORY_ADDRESS", cfg.WebAppFactoryAddress)
+}
+
+func TestLoad_MainnetRequiresExplicitSettings(t *testing.T) {
+	for _, key := range requiredMainnetVars {
+		t.Run(key, func(t *testing.T) {
+			setMainnetEnv(t)
+			os.Unsetenv(key)
+
+			_, err := Load()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), key)
+		})
+	}
+}
+
+func TestLoad_MainnetRequiresProduction(t *testing.T) {
+	setMainnetEnv(t)
+	t.Setenv("APP_ENV", "development")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "APP_ENV=production")
 }

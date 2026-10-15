@@ -1,0 +1,32 @@
+# Build context exclusions.
+# NOTE: docs/ is a real Go package (docs/docs.go is imported by cmd/server) —
+# it must stay in the context or the production build fails.
+
+.git
+.github
+.gitignore
+
+# Secrets — never bake these into an image layer
+.env
+.env.*
+
+# Reference client repos — not part of the build
+references/
+
+# Build artefacts and local output
+bin/
+tmp/
+build-errors.log
+*.out
+
+# Dev tooling and local infra (the dev image mounts the source instead)
+Dockerfile
+Dockerfile.dev
+docker-compose.yml
+Makefile
+.air.toml
+.golangci.yml
+monitoring/
+.claude/
+
+.DS_Store

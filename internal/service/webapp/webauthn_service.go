@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -362,7 +363,11 @@ type FinishAuthenticationInput struct {
 // authentication.
 type AuthenticatedCredential struct {
 	CredentialID string // base64url
-	UserID       string
+	// UserID is the credential's proven owner — its stored owner for a known
+	// credential, or a freshly-minted user for a first-seen external passkey.
+	// It may differ from the session cookie's user; when it does, the handler
+	// re-issues the session cookie so the caller becomes this user.
+	UserID string
 }
 
 // FinishAuthentication verifies a completed authentication ceremony against
@@ -404,8 +409,17 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 
 	credentialIDB64 := base64.RawURLEncoding.EncodeToString(in.CredentialID)
 	cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credentialIDB64)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A passkey created on another Latch surface — the mobile app writes
+		// only public.passkey_credentials, never webapp.webauthn_credentials —
+		// signing in here for the first time. Verify it against that shared
+		// index and adopt it into the webapp so later sign-ins take the path
+		// below. All ceremony checks (challenge, client data, rpID hash, user
+		// presence) have already passed.
+		return s.adoptExternalPasskey(ctx, in, challenge, authData, credentialIDB64)
+	}
 	if err != nil {
-		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
+		return AuthenticatedCredential{}, fmt.Errorf("get webauthn credential: %w", err)
 	}
 
 	digest := signedDataDigest(in.AuthenticatorData, in.ClientDataJSON)
@@ -432,56 +446,146 @@ func (s *WebAuthnService) FinishAuthentication(ctx context.Context, in FinishAut
 		return AuthenticatedCredential{}, fmt.Errorf("update sign count: %w", err)
 	}
 
-	// A verified signature is the actual proof of ownership here — the
-	// session cookie is secondary and may legitimately not match the
-	// credential's original owner (first login from a new browser context,
-	// cookie cleared, registered via the web app and now signing in via the
-	// extension, etc.). Re-bind the credential and its smart account to the
-	// current session rather than rejecting, mirroring
-	// app/api/webauthn/authentication/finish/route.ts's own reassignment.
-	if cred.UserID.String() != in.UserID {
-		newOwnerID, err := uuid.Parse(in.UserID)
-		if err != nil {
-			return AuthenticatedCredential{}, fmt.Errorf("parse user id: %w", err)
-		}
-		if err := s.reassignCredentialOwner(ctx, credentialIDB64, newOwnerID); err != nil {
-			return AuthenticatedCredential{}, fmt.Errorf("reassign credential owner: %w", err)
-		}
+	// A verified signature is the proof of ownership — the session cookie is
+	// secondary and may legitimately name a different user (first login from a
+	// new browser context, cookie cleared, an anonymous cookie inherited from
+	// a previous user on the same machine). The credential's stored owner is
+	// authoritative and is NOT relocated onto the cookie: the caller instead
+	// resolves to that owner (the handler re-issues the session cookie when
+	// they differ), so signing in with one passkey can never widen the
+	// account list to accounts proven by a different passkey.
+	owner := cred.UserID.String()
+
+	// Re-link every multisig member row for this passkey to its proven owner,
+	// so a member on a fresh device sees their wallets after a single login.
+	if err := s.q.RelinkMultisigMembersByCredential(ctx, db.RelinkMultisigMembersByCredentialParams{
+		UserID:       uuid.NullUUID{UUID: cred.UserID, Valid: true},
+		CredentialID: sql.NullString{String: credentialIDB64, Valid: true},
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("relink multisig members: %w", err)
 	}
 
-	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: in.UserID}, nil
+	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: owner}, nil
 }
 
-// reassignCredentialOwner re-binds a webauthn credential and its associated
-// smart account (if any) to newOwnerID in a single transaction. Called by
-// FinishAuthentication after a successful signature verification when the
-// credential's stored owner no longer matches the current session.
-func (s *WebAuthnService) reassignCredentialOwner(ctx context.Context, credentialIDB64 string, newOwnerID uuid.UUID) error {
+// p256UncompressedHexLen is the hex length of a 65-byte uncompressed P-256
+// point (0x04 || X || Y) — the prefix of a passkey's key_data_hex, the rest
+// being the credential ID (mirrors deploy_proof.go's webauthnPubKeyHexLen).
+const p256UncompressedHexLen = 130
+
+// adoptExternalPasskey completes an authentication ceremony for a passkey
+// that has no webapp.webauthn_credentials row — one registered on another
+// Latch surface (the mobile deploy path writes only
+// public.passkey_credentials). It verifies the assertion against the public
+// key recorded in that shared index, then provisions a dedicated webapp user
+// plus the credential + smart-account rows bound to it, so every later
+// sign-in (any device) takes the normal path and resolves to that same user.
+//
+// A dedicated user — rather than the current session's cookie user — is what
+// keeps the R1 invariant: two people adopting their own mobile passkeys in
+// one browser profile must not both land on the same webapp user and see
+// each other's accounts. The now-orphaned anonymous cookie user (no
+// credentials, no accounts) is left for garbage collection.
+//
+// The caller has already verified the challenge, client data, rpID hash and
+// user-presence flag.
+func (s *WebAuthnService) adoptExternalPasskey(
+	ctx context.Context,
+	in FinishAuthenticationInput,
+	challenge storedChallenge,
+	authData *authenticatorData,
+	credentialIDB64 string,
+) (AuthenticatedCredential, error) {
+	row, err := s.q.GetPasskeyCredential(ctx, hex.EncodeToString(in.CredentialID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: no row for credential id", ErrCredentialNotFound)
+	}
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("get passkey credential index: %w", err)
+	}
+
+	if len(row.KeyDataHex) <= p256UncompressedHexLen {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: indexed key data too short", ErrVerificationFailed)
+	}
+	pubKey, err := hex.DecodeString(row.KeyDataHex[:p256UncompressedHexLen])
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: indexed key data not hex", ErrVerificationFailed)
+	}
+
+	digest := signedDataDigest(in.AuthenticatorData, in.ClientDataJSON)
+	if !verifyP256Signature(pubKey, digest, in.Signature) {
+		return AuthenticatedCredential{}, fmt.Errorf("%w: signature verification failed", ErrVerificationFailed)
+	}
+
+	// Verification succeeded — consume the challenge before the writes, so a
+	// failed write can't leave it replayable (matches the normal path).
+	if err := s.consumeChallenge(ctx, challenge.ID); err != nil {
+		return AuthenticatedCredential{}, err
+	}
+
+	cosePublicKey, err := rawP256ToCoseEC2(pubKey)
+	if err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("encode cose key: %w", err)
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return AuthenticatedCredential{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback on any non-commit path is intentional
-
 	qtx := s.q.WithTx(tx)
 
-	if err := qtx.UpdateWebauthnCredentialUserID(ctx, db.UpdateWebauthnCredentialUserIDParams{
-		CredentialID: credentialIDB64,
-		UserID:       newOwnerID,
-	}); err != nil {
-		return fmt.Errorf("update credential user id: %w", err)
+	now := time.Now().UnixMilli()
+
+	ownerID := uuid.New()
+	if err := qtx.InsertWebappUser(ctx, db.InsertWebappUserParams{ID: ownerID, CreatedAt: now}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("create user for adopted passkey: %w", err)
 	}
-	if err := qtx.UpdateSmartAccountUserIDByCredentialID(ctx, db.UpdateSmartAccountUserIDByCredentialIDParams{
-		CredentialID: credentialIDB64,
-		UserID:       newOwnerID,
+
+	if _, err := qtx.UpsertWebauthnCredential(ctx, db.UpsertWebauthnCredentialParams{
+		ID:                uuid.New(),
+		UserID:            ownerID,
+		CredentialID:      credentialIDB64,
+		CredentialIDBytes: in.CredentialID,
+		CosePublicKey:     cosePublicKey,
+		P256RawPublicKey:  pubKey,
+		SignCount:         int64(authData.SignCount),
+		Transports:        sql.NullString{},
+		DeviceType:        sql.NullString{},
+		BackedUp:          1, // reached us from another surface — a synced passkey by definition
+		CreatedAt:         now,
 	}); err != nil {
-		return fmt.Errorf("update smart account user id: %w", err)
+		return AuthenticatedCredential{}, fmt.Errorf("store adopted webauthn credential: %w", err)
+	}
+
+	if _, err := qtx.UpsertSmartAccount(ctx, db.UpsertSmartAccountParams{
+		ID:                  uuid.New(),
+		UserID:              ownerID,
+		CredentialID:        credentialIDB64,
+		KeyDataHex:          row.KeyDataHex,
+		SaltHex:             hex.EncodeToString(DeriveWebauthnSalt(row.KeyDataHex)),
+		SmartAccountAddress: row.SmartAccountAddress,
+		Deployed:            1,
+		CreatedAt:           now,
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("store adopted smart account: %w", err)
+	}
+
+	// Same login-time member re-link as the normal path — a mobile passkey
+	// that co-signs a multisig wallet becomes visible on this device once its
+	// owner is known.
+	if err := qtx.RelinkMultisigMembersByCredential(ctx, db.RelinkMultisigMembersByCredentialParams{
+		UserID:       uuid.NullUUID{UUID: ownerID, Valid: true},
+		CredentialID: sql.NullString{String: credentialIDB64, Valid: true},
+	}); err != nil {
+		return AuthenticatedCredential{}, fmt.Errorf("relink multisig members: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return AuthenticatedCredential{}, fmt.Errorf("commit: %w", err)
 	}
-	return nil
+
+	return AuthenticatedCredential{CredentialID: credentialIDB64, UserID: ownerID.String()}, nil
 }
 
 // ── credentials list ─────────────────────────────────────────────────────────
@@ -506,6 +610,26 @@ func (s *WebAuthnService) ListCredentials(ctx context.Context, userID string) ([
 		out = append(out, CredentialSummary{CredentialID: r.CredentialID, CreatedAt: r.CreatedAt})
 	}
 	return out, nil
+}
+
+// GetCredentialKeyDataHex returns credentialID's own keyDataHex (its P-256
+// public key followed by its own credential id, matching BuildKeyDataHex's
+// encoding exactly). Used by authentication-finish's backup-signer fallback
+// (R16): a WebAuthn assertion carries no public key, so a client that
+// authenticated with a backup signer credential can't reconstruct its own
+// keyDataHex — the smart_accounts row it would otherwise come from belongs
+// to the account's *original* credential, not this one. Also used to
+// deregister a removed backup signer from the passkey_credentials index
+// (R11), which is keyed by this same value.
+func (s *WebAuthnService) GetCredentialKeyDataHex(ctx context.Context, credentialID string) (string, error) {
+	cred, err := s.q.GetWebauthnCredentialByCredentialID(ctx, credentialID)
+	if err != nil {
+		return "", fmt.Errorf("get webauthn credential %s: %w", credentialID, err)
+	}
+	if len(cred.P256RawPublicKey) == 0 {
+		return "", fmt.Errorf("credential %s has no stored P-256 public key", credentialID)
+	}
+	return BuildKeyDataHex(cred.P256RawPublicKey, cred.CredentialIDBytes), nil
 }
 
 // ── clientDataJSON verification ─────────────────────────────────────────────
@@ -597,6 +721,24 @@ func coseEC2ToRawP256Uncompressed(cosePublicKey []byte) ([]byte, error) {
 	copy(raw[1:33], key.X)
 	copy(raw[33:65], key.Y)
 	return raw, nil
+}
+
+// rawP256ToCoseEC2 is the inverse of coseEC2ToRawP256Uncompressed: it wraps a
+// 65-byte uncompressed P-256 point (0x04 || X || Y) into a CBOR-encoded EC2
+// COSE_Key. Needed when adopting a passkey whose only stored form is the raw
+// point — public.passkey_credentials keeps key_data_hex, not the original
+// COSE bytes, but webapp.webauthn_credentials.cose_public_key is NOT NULL.
+func rawP256ToCoseEC2(rawPubKey []byte) ([]byte, error) {
+	if len(rawPubKey) != 65 || rawPubKey[0] != 0x04 {
+		return nil, fmt.Errorf("expected 65-byte uncompressed P-256 point")
+	}
+	return cbor.Marshal(coseKey{
+		Kty: 2,  // EC2
+		Alg: -7, // ES256
+		Crv: 1,  // P-256
+		X:   rawPubKey[1:33],
+		Y:   rawPubKey[33:65],
+	})
 }
 
 // attestationObjectCBOR is the top-level CBOR structure of the

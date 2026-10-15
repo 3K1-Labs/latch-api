@@ -64,6 +64,38 @@ type CredentialBackup struct {
 	ClientEncryptedBlob sql.NullString `json:"client_encrypted_blob"`
 }
 
+type Notification struct {
+	ID        uuid.UUID             `json:"id"`
+	UserID    uuid.UUID             `json:"user_id"`
+	Type      string                `json:"type"`
+	Title     string                `json:"title"`
+	Body      string                `json:"body"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	DedupeKey sql.NullString        `json:"dedupe_key"`
+	ReadAt    sql.NullTime          `json:"read_at"`
+	CreatedAt time.Time             `json:"created_at"`
+}
+
+type PasskeyCredential struct {
+	ID                  uuid.UUID `json:"id"`
+	CredentialID        string    `json:"credential_id"`
+	KeyDataHex          string    `json:"key_data_hex"`
+	SmartAccountAddress string    `json:"smart_account_address"`
+	Label               string    `json:"label"`
+	Seq                 int32     `json:"seq"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type PushDevice struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	PushToken string    `json:"push_token"`
+	Platform  string    `json:"platform"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type RefreshToken struct {
 	ID            uuid.UUID      `json:"id"`
 	UserID        uuid.NullUUID  `json:"user_id"`
@@ -119,6 +151,8 @@ type WebappAccountSigner struct {
 	CredentialID        sql.NullString `json:"credential_id"`
 	Label               sql.NullString `json:"label"`
 	CreatedAt           int64          `json:"created_at"`
+	SignerID            sql.NullInt32  `json:"signer_id"`
+	ContextRuleID       sql.NullInt32  `json:"context_rule_id"`
 }
 
 type WebappAuditLog struct {
@@ -210,6 +244,18 @@ type WebappMultisigProposal struct {
 	CreatedAt                  int64          `json:"created_at"`
 }
 
+type WebappNotification struct {
+	ID        uuid.UUID             `json:"id"`
+	UserID    uuid.UUID             `json:"user_id"`
+	Type      string                `json:"type"`
+	Title     string                `json:"title"`
+	Body      string                `json:"body"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	DedupeKey sql.NullString        `json:"dedupe_key"`
+	ReadAt    sql.NullTime          `json:"read_at"`
+	CreatedAt time.Time             `json:"created_at"`
+}
+
 type WebappOnRampIntent struct {
 	ID                   uuid.UUID      `json:"id"`
 	MemoID               string         `json:"memo_id"`
@@ -221,6 +267,9 @@ type WebappOnRampIntent struct {
 	FiatCode             string         `json:"fiat_code"`
 	CreatedAt            time.Time      `json:"created_at"`
 	UpdatedAt            time.Time      `json:"updated_at"`
+	RelayerIntentID      sql.NullString `json:"relayer_intent_id"`
+	PoolAddress          sql.NullString `json:"pool_address"`
+	ExpiresAt            sql.NullTime   `json:"expires_at"`
 }
 
 type WebappSession struct {
@@ -228,6 +277,12 @@ type WebappSession struct {
 	UserID    uuid.UUID `json:"user_id"`
 	CreatedAt int64     `json:"created_at"`
 	ExpiresAt int64     `json:"expires_at"`
+}
+
+type WebappSessionProvedCredential struct {
+	SessionID    uuid.UUID `json:"session_id"`
+	CredentialID string    `json:"credential_id"`
+	ProvedAt     int64     `json:"proved_at"`
 }
 
 type WebappSignPayload struct {

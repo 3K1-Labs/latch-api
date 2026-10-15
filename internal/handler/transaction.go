@@ -66,14 +66,15 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 		return
 	}
 
-	rpcURL := h.cfg.SorobanRPCURLTestnet
-	if req.Network == "mainnet" {
-		rpcURL = h.cfg.SorobanRPCURLMainnet
+	network, ok := resolveRequestNetwork(c, req.Network)
+	if !ok {
+		return
 	}
+	rpcURL := h.cfg.SorobanRPCURL
 
 	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR, req.ResourceConfig)
 	if err != nil {
-		slog.Error("simulate transaction", "network", req.Network, "err", err)
+		slog.Error("simulate transaction", "network", network, "err", err)
 		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "simulation failed")
 		return
 	}
@@ -113,14 +114,15 @@ func (h *TransactionHandler) Relay(c *gin.Context) {
 		return
 	}
 
-	rpcURL := h.cfg.SorobanRPCURLTestnet
-	if req.Network == "mainnet" {
-		rpcURL = h.cfg.SorobanRPCURLMainnet
+	network, ok := resolveRequestNetwork(c, req.Network)
+	if !ok {
+		return
 	}
+	rpcURL := h.cfg.SorobanRPCURL
 
 	sent, err := h.sorobanSvc.SendTransaction(c.Request.Context(), rpcURL, req.XDR)
 	if err != nil {
-		slog.Error("relay send transaction", "network", req.Network, "err", err)
+		slog.Error("relay send transaction", "network", network, "err", err)
 		httpx.Fail(c, http.StatusBadGateway, httpx.ErrBadGateway, "failed to submit transaction")
 		return
 	}

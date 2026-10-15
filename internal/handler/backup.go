@@ -15,10 +15,11 @@ type BackupHandler struct {
 	backupSvc  backupService
 	accountSvc accountService
 	auditSvc   auditService
+	notifSvc   notificationService
 }
 
-func NewBackupHandler(backupSvc backupService, accountSvc accountService, auditSvc auditService) *BackupHandler {
-	return &BackupHandler{backupSvc: backupSvc, accountSvc: accountSvc, auditSvc: auditSvc}
+func NewBackupHandler(backupSvc backupService, accountSvc accountService, auditSvc auditService, notifSvc notificationService) *BackupHandler {
+	return &BackupHandler{backupSvc: backupSvc, accountSvc: accountSvc, auditSvc: auditSvc, notifSvc: notifSvc}
 }
 
 type storeBackupRequest struct {
@@ -79,12 +80,19 @@ func (h *BackupHandler) Store(c *gin.Context) {
 	}
 
 	action := service.ActionBackupStored
+	notifBody := "Your wallet backup was saved."
 	if c.Request.Method == "PUT" {
 		action = service.ActionBackupUpdated
+		notifBody = "Your wallet backup was updated."
 	}
 	h.auditSvc.Log(c.Request.Context(), userID, string(action), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"smart_account": req.SmartAccountAddress,
 	})
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		Type: "backup_stored", Title: "Wallet backup saved", Body: notifBody,
+	}); err != nil {
+		slog.Error("record backup stored notification", "userID", userID, "err", err)
+	}
 
 	httpx.Success(c, http.StatusCreated, gin.H{"message": "backup stored"})
 }

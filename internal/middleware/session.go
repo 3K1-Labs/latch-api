@@ -16,6 +16,12 @@ type webappContextKey string
 
 const SessionUserIDKey webappContextKey = "webappSessionUserID"
 
+// SessionIDKey holds the webapp session's own id (distinct from its user
+// id) — needed to scope session-proved-credential checks
+// (LATCH_BACKEND_SIGNER_IDENTITY.md) to the session that actually completed
+// a WebAuthn ceremony, not the cookie's user row.
+const SessionIDKey webappContextKey = "webappSessionID"
+
 const sessionCookieName = "sid"
 
 // sessionResolver is the subset of webapp.SessionService that EnsureSession
@@ -44,15 +50,21 @@ func EnsureSession(svc sessionResolver, crossSiteCookies bool) gin.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(c, sess.ID, crossSiteCookies)
+		SetSessionCookie(c, sess.ID, crossSiteCookies)
 
 		ctx := context.WithValue(c.Request.Context(), SessionUserIDKey, sess.UserID)
+		ctx = context.WithValue(ctx, SessionIDKey, sess.ID)
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }
 
-func setSessionCookie(c *gin.Context, sessionID string, crossSite bool) {
+// SetSessionCookie writes the "sid" session cookie with the SameSite/Secure
+// attributes appropriate for the deployment. Exported so a handler that
+// re-issues a session mid-request (webapp WebAuthn login resolving to a
+// different user than the cookie names) can refresh the cookie the same way
+// EnsureSession does.
+func SetSessionCookie(c *gin.Context, sessionID string, crossSite bool) {
 	maxAge := int(webapp.SessionTTL.Seconds())
 	if crossSite {
 		c.SetSameSite(http.SameSiteNoneMode)
@@ -67,5 +79,12 @@ func setSessionCookie(c *gin.Context, sessionID string, crossSite bool) {
 // request context. Returns "" if EnsureSession has not run.
 func SessionUserIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(SessionUserIDKey).(string)
+	return id
+}
+
+// SessionIDFromContext retrieves the webapp session's own id from the
+// request context. Returns "" if EnsureSession has not run.
+func SessionIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(SessionIDKey).(string)
 	return id
 }

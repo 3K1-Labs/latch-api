@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type authService interface {
@@ -48,8 +50,77 @@ type backupService interface {
 type accountService interface {
 	Register(ctx context.Context, userID, smartAccountAddress string) error
 	List(ctx context.Context, userID string) ([]service.AccountRegistration, error)
-	CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string) (service.Intent, error)
+	CreateFundingIntent(ctx context.Context, userID, scope, smartAccountAddress, network string, opts service.FundingIntentOptions) (service.Intent, error)
 	GetFundingStatus(ctx context.Context, userID, scope, memoID, network string) (service.DepositStatus, error)
+}
+
+// smartAccountDeployService is the subset of *webapp.SmartAccountService the
+// mobile deploy routes need. The bundler keypair that pays for and signs these
+// deployments lives server-side; latch-mobile used to hold it in
+// EXPO_PUBLIC_BUNDLER_SECRET, which shipped inside the app bundle.
+type smartAccountDeployService interface {
+	DeployByPublicKey(ctx context.Context, publicKeyHex string) (address string, alreadyDeployed bool, err error)
+	DeployByKeyData(ctx context.Context, keyDataHex string) (address string, alreadyDeployed bool, err error)
+	DeployFreighter(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error)
+	DeployMultisig(ctx context.Context, signers []webapp.MultisigSignerInit, threshold uint32, salt []byte) (address string, alreadyDeployed bool, err error)
+}
+
+// transactionRelayService is the submit tail of *webapp.TransactionService:
+// rebuild the caller's invocation with the bundler as fee-paying source,
+// re-simulate in enforcing mode, sign and submit.
+type transactionRelayService interface {
+	// SubmitBatchAuthEntries handles one operation identically to the
+	// single-op path, and additionally allows the small same-contract batches
+	// device pairing needs to land atomically.
+	SubmitBatchAuthEntries(ctx context.Context, txXdrB64 string, entries []xdr.SorobanAuthorizationEntry) (webapp.SubmitResult, error)
+	BundlerAddress() string
+}
+
+// bundlerPolicyService bounds which contracts the bundler will pay to invoke.
+type bundlerPolicyService interface {
+	CheckEnvelope(txXdrB64 string) error
+}
+
+// deployProofService proves a deploy caller holds the key it wants deployed.
+// Deployment is bundler-funded and cannot require a wallet-scope session — a
+// passkey account has no on-chain signer to verify against until it exists.
+type deployProofService interface {
+	Challenge(ctx context.Context, keyRef, keyType, network string) (nonceHex string, ttl time.Duration, err error)
+	Verify(ctx context.Context, in service.DeployProofInput) error
+}
+
+// passkeyCredentialRegisterService records which smart account a passkey
+// deployed, keyed by that passkey's own WebAuthn credential ID, so a device
+// that only has the (synced) passkey — no local state, no session — can later
+// recover the wallet's address and label instead of the user pasting them in.
+// Register is called once, right after a successful passkey deploy;
+// Deregister after a confirmed on-chain remove_signer for a backup signer
+// (see backupSignerConfirmService).
+type passkeyCredentialRegisterService interface {
+	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
+	Deregister(ctx context.Context, keyDataHex string) error
+}
+
+// backupSignerConfirmService is the subset of *webapp.TransactionService the
+// mobile backup-signer confirm routes need: independently re-fetch a
+// submitted transaction by hash and verify it actually invoked
+// add_signer/remove_signer with the expected arguments before trusting its
+// return value. Shared with the web extension's backup-signer work — mobile
+// and the webapp reuse the exact same TransactionService instance (see
+// cmd/server/main.go), so this interface just narrows what this package
+// needs from it.
+type backupSignerConfirmService interface {
+	ConfirmAddSigner(ctx context.Context, in webapp.ConfirmAddSignerInput) (signerID uint32, err error)
+	ConfirmRemoveSigner(ctx context.Context, in webapp.ConfirmRemoveSignerInput) error
+}
+
+// passkeyCredentialLookupService resolves a WebAuthn credential ID to the
+// smart account it deployed, after verifying the caller holds that passkey.
+// Unlike deployProofService, Challenge takes no key reference: the caller
+// doesn't know which credential will answer until the OS ceremony returns one.
+type passkeyCredentialLookupService interface {
+	Challenge(ctx context.Context) (nonceHex string, ttl time.Duration, err error)
+	Lookup(ctx context.Context, credentialID, nonceHex string, authenticatorData, clientDataJSON, signature []byte) (service.PasskeyCredential, error)
 }
 
 type cosignService interface {
@@ -81,8 +152,25 @@ type pushNotifier interface {
 	NotifyCosignUpdated(ctx context.Context, tokens []string, queueIndex string) error
 }
 
+type notificationService interface {
+	Notify(ctx context.Context, userID string, rec service.NotificationRecord) error
+	List(ctx context.Context, userID, cursor string, limit int) ([]service.Notification, string, error)
+	UnreadCount(ctx context.Context, userID string) (int, error)
+	MarkRead(ctx context.Context, userID, notificationID string) error
+	MarkAllRead(ctx context.Context, userID string) error
+}
+
+type pushDeviceService interface {
+	Register(ctx context.Context, userID, token, platform string) error
+	Delete(ctx context.Context, userID, token string) error
+}
+
 type priceService interface {
-	GetPrices(ctx context.Context, tokens []string) map[string]*service.PriceData
+	GetPrices(ctx context.Context, tokens []string, currency string) map[string]*service.PriceData
+}
+
+type stellarPriceService interface {
+	LookupUSD(ctx context.Context, assets []service.AssetIdentity) (map[string]*service.StellarPriceData, error)
 }
 
 type historyService interface {

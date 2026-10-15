@@ -35,6 +35,20 @@ func TestSuccess(t *testing.T) {
 	assert.Equal(t, "value", data["key"])
 }
 
+func TestSuccessWithMeta(t *testing.T) {
+	c, w := newContext()
+	SuccessWithMeta(c, http.StatusOK, gin.H{"key": "value"}, "currency", "usd")
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	data, ok := body["data"].(map[string]any)
+	require.True(t, ok, "data key must be a map")
+	assert.Equal(t, "value", data["key"])
+	assert.Equal(t, "usd", body["currency"])
+}
+
 func TestFail(t *testing.T) {
 	c, w := newContext()
 	Fail(c, http.StatusBadRequest, ErrValidation, "email is required")

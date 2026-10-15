@@ -9,60 +9,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
 
 type TransactionHandler struct {
-	txSvc        transactionService // testnet; route group is gated on this being non-nil
-	txSvcMainnet transactionService // mainnet; nil if BUNDLER_SECRET_MAINNET isn't configured
-	cfg          *config.Config
+	txSvc transactionService
+	cfg   *config.Config
 }
 
-func NewTransactionHandler(txSvc, txSvcMainnet transactionService, cfg *config.Config) *TransactionHandler {
-	return &TransactionHandler{txSvc: txSvc, txSvcMainnet: txSvcMainnet, cfg: cfg}
+func NewTransactionHandler(txSvc transactionService, cfg *config.Config) *TransactionHandler {
+	return &TransactionHandler{txSvc: txSvc, cfg: cfg}
 }
 
-// TransactionServiceOrNil boxes a possibly-nil *webapp.TransactionService into
-// the transactionService interface for NewTransactionHandler's txSvcMainnet
-// parameter, avoiding the classic Go trap where a nil concrete pointer boxed
-// into an interface produces a non-nil interface value (which would make
-// resolveNetwork's h.txSvcMainnet == nil check always false).
-func TransactionServiceOrNil(svc *webapp.TransactionService) transactionService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-// errMainnetNotConfigured is returned by resolveNetwork when network:
-// "mainnet" is requested but this server has no mainnet transaction service
-// configured — never falls back to testnet.
-var errMainnetNotConfigured = errors.New("mainnet is not configured on this server")
-
-// resolveNetwork parses a request's network field and selects the matching
-// transactionService instance. Empty/"testnet" always resolves to h.txSvc
-// (identical to pre-mainnet-support behavior); "mainnet" resolves to
-// h.txSvcMainnet or fails with errMainnetNotConfigured if that's nil.
-func (h *TransactionHandler) resolveNetwork(raw string) (transactionService, webapp.Network, error) {
-	network, err := webapp.ParseNetwork(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	if network == webapp.NetworkMainnet {
-		if h.txSvcMainnet == nil {
-			return nil, "", errMainnetNotConfigured
-		}
-		return h.txSvcMainnet, network, nil
-	}
-	return h.txSvc, network, nil
-}
-
-// failNetworkResolution writes the appropriate 400 response for a
-// resolveNetwork error.
+// failNetworkResolution writes the 400 response for a webapp.ParseNetwork
+// error: the other network or an invalid value.
 func failNetworkResolution(c *gin.Context, err error) {
-	if errors.Is(err, errMainnetNotConfigured) {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrMainnetNotConfigured, err.Error())
+	if errors.Is(err, deploynet.ErrMismatch) {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrNetworkMismatch, err.Error())
 		return
 	}
 	webappx.Fail(c, http.StatusBadRequest, webappx.ErrInvalidNetwork, err.Error())
@@ -123,16 +88,18 @@ type buildSendRequest struct {
 	Recipient           string         `json:"recipient" binding:"required"`
 	Amount              flexibleAmount `json:"amount" binding:"required"`
 	SignerG             string         `json:"signerG,omitempty"`
+	// KeyDataHex identifies which passkey will sign — required to pick the
+	// right context rule once the account has a backup signer (each gets
+	// its own dedicated rule; see webapp.TransactionService.AddSigner).
+	// Optional and ignored for accounts with no backup signer.
+	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
-func assetCatalogConfig(cfg *config.Config, network webapp.Network) webapp.AssetCatalogConfig {
+func assetCatalogConfig(cfg *config.Config) webapp.AssetCatalogConfig {
 	return webapp.AssetCatalogConfig{
-		AllowlistJSON:    cfg.WebAppAssetAllowlistJSON,
-		NativeSACTestnet: cfg.NativeSACIDTestnet,
-		USDCSACTestnet:   cfg.WebAppUSDCSACAddressTestnet,
-		NativeSACMainnet: cfg.NativeSACIDMainnet,
-		USDCSACMainnet:   cfg.WebAppUSDCSACAddressMainnet,
-		IsMainnet:        network == webapp.NetworkMainnet,
+		AllowlistJSON: cfg.WebAppAssetAllowlistJSON,
+		NativeSAC:     cfg.NativeSACID,
+		USDCSAC:       cfg.WebAppUSDCSACAddress,
 	}
 }
 
@@ -158,20 +125,19 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, network))
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
 	if err != nil {
 		slog.Error("load asset catalog", "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 
-	result, err := txSvc.BuildSend(c.Request.Context(), webapp.BuildSendInput{
+	result, err := h.txSvc.BuildSend(c.Request.Context(), webapp.BuildSendInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
@@ -179,11 +145,16 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		ContractID:          req.ContractID,
 		Recipient:           req.Recipient,
 		Amount:              string(req.Amount),
+		KeyDataHex:          req.KeyDataHex,
 	}, catalog)
 	if err != nil {
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
+			return
+		}
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
 		}
 		slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
@@ -252,13 +223,12 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	result, err := txSvc.SubmitWebAuthn(c.Request.Context(), webapp.SubmitWebAuthnInput{
+	result, err := h.txSvc.SubmitWebAuthn(c.Request.Context(), webapp.SubmitWebAuthnInput{
 		TxXdr:                          req.TxXdr,
 		AuthEntryXdr:                   req.AuthEntryXdr,
 		SigDataXdr:                     req.SigDataXdr,
@@ -318,13 +288,12 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	result, err := txSvc.SubmitDelegated(c.Request.Context(), webapp.SubmitDelegatedInput{
+	result, err := h.txSvc.SubmitDelegated(c.Request.Context(), webapp.SubmitDelegatedInput{
 		TxXdr:                          req.TxXdr,
 		SmartAccountAuthEntryXdr:       req.SmartAccountAuthEntryXdr,
 		GAddressEntryTemplateXdr:       req.GAddressEntryTemplateXdr,
@@ -383,8 +352,7 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -393,7 +361,7 @@ func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
 	// Ed25519PhantomVerifier contract) reconstructs and checks it during the
 	// enforcing-mode re-simulation in submitWithBundler — the same pattern
 	// SubmitWebAuthn already follows for the WebAuthn assertion.
-	result, err := txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
+	result, err := h.txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
 		TxXdr:                      req.TxXdr,
 		AuthEntryXdr:               req.AuthEntryXdr,
 		AuthSignatureHex:           req.AuthSignatureHex,
@@ -425,6 +393,9 @@ type prepareSignRequest struct {
 	SignerType          string `json:"signerType,omitempty"`
 	SignerG             string `json:"signerG,omitempty"`
 	FeePayerG           string `json:"feePayerG,omitempty"`
+	// KeyDataHex identifies which passkey will sign — see
+	// buildSendRequest.KeyDataHex's doc comment.
+	KeyDataHex string `json:"keyDataHex,omitempty"`
 }
 
 // PrepareSign godoc
@@ -448,21 +419,21 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	result, err := txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
+	result, err := h.txSvc.PrepareSign(c.Request.Context(), webapp.PrepareSignInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		UnsignedTxXdr:       req.UnsignedTxXdr,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
+		KeyDataHex:          req.KeyDataHex,
 	})
 	if err != nil {
-		slog.Error("prepare sign transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to prepare transaction")
+		prepareSignErrorResponse(c, req.SmartAccountAddress, err)
 		return
 	}
 
@@ -519,20 +490,19 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
 
-	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg, network))
+	catalog, err := webapp.GetAssetCatalog(assetCatalogConfig(h.cfg))
 	if err != nil {
 		slog.Error("load asset catalog", "network", req.Network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
 
-	result, err := txSvc.SetupSendRules(c.Request.Context(), webapp.SetupSendRulesInput{
+	result, err := h.txSvc.SetupSendRules(c.Request.Context(), webapp.SetupSendRulesInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		AssetID:             req.AssetID,
@@ -545,6 +515,10 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
+			return
+		}
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 			return
 		}
 		slog.Error("build setup-send-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
@@ -615,7 +589,7 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		return
 	}
 
-	txSvc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
 		failNetworkResolution(c, err)
 		return
@@ -626,7 +600,7 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		providerID = "aquarius"
 	}
 
-	result, err := txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
+	result, err := h.txSvc.SetupSwapRules(c.Request.Context(), webapp.SetupSwapRulesInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		RouterContractID:    req.RouterContractID,
@@ -635,6 +609,10 @@ func (h *TransactionHandler) SetupSwapRules(c *gin.Context) {
 		GAddress:            req.GAddress,
 	})
 	if err != nil {
+		if errors.Is(err, webapp.ErrSignerRuleNotFound) {
+			webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
+			return
+		}
 		slog.Error("build setup-swap-rules transaction", "smartAccountAddress", req.SmartAccountAddress, "network", network, "err", err)
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to build swap setup transaction")
 		return
@@ -773,11 +751,14 @@ type buildSwapRequest struct {
 	SignerType          string `json:"signerType" binding:"required"`
 	SignerG             string `json:"signerG,omitempty"`
 	RouterContractID    string `json:"routerContractId,omitempty"`
-	SwapChainXdr        string `json:"swapChainXdr" binding:"required"`
-	TokenInContractID   string `json:"tokenInContractId" binding:"required"`
-	AmountInRaw         string `json:"amountInRaw" binding:"required"`
-	AmountOutMinRaw     string `json:"amountOutMinRaw" binding:"required"`
-	ProviderID          string `json:"providerId,omitempty"`
+	// KeyDataHex identifies which passkey will sign — see
+	// buildSendRequest.KeyDataHex's doc comment.
+	KeyDataHex        string `json:"keyDataHex,omitempty"`
+	SwapChainXdr      string `json:"swapChainXdr" binding:"required"`
+	TokenInContractID string `json:"tokenInContractId" binding:"required"`
+	AmountInRaw       string `json:"amountInRaw" binding:"required"`
+	AmountOutMinRaw   string `json:"amountOutMinRaw" binding:"required"`
+	ProviderID        string `json:"providerId,omitempty"`
 }
 
 // BuildSwap godoc
@@ -806,8 +787,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		return
 	}
 
-	txSvc, _, err := h.resolveNetwork(req.Network)
-	if err != nil {
+	if _, err := webapp.ParseNetwork(req.Network); err != nil {
 		failNetworkResolution(c, err)
 		return
 	}
@@ -817,11 +797,12 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		providerID = "aquarius"
 	}
 
-	result, err := txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
+	result, err := h.txSvc.BuildSwap(c.Request.Context(), webapp.BuildSwapInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		SignerType:          req.SignerType,
 		SignerG:             req.SignerG,
 		RouterContractID:    req.RouterContractID,
+		KeyDataHex:          req.KeyDataHex,
 		SwapChainXdr:        req.SwapChainXdr,
 		TokenInContractID:   req.TokenInContractID,
 		AmountInRaw:         req.AmountInRaw,
@@ -868,6 +849,8 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
 	switch {
+	case errors.Is(err, webapp.ErrSignerRuleNotFound):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
 	case errors.Is(err, webapp.ErrSwapSignerMismatch):
 		webappx.Success(c, http.StatusConflict, gin.H{
 			"error":           err.Error(),
@@ -879,5 +862,32 @@ func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err erro
 	default:
 		slog.Error("build swap transaction", "smartAccountAddress", smartAccountAddress, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to build swap transaction")
+	}
+}
+
+// prepareSignErrorResponse maps a PrepareSign service-layer sentinel error
+// to the correct HTTP status and error code, same pattern as
+// buildSwapErrorResponse: a missing Default context rule or a signer
+// mismatch come back as 409s the client can act on (re-run setup-send-rules
+// or setup-swap-rules), a request/XDR validation failure comes back as 400,
+// and anything unrecognized falls back to a generic 500 with no internal
+// detail leaked, per security.md.
+func prepareSignErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	switch {
+	case errors.Is(err, webapp.ErrSignerRuleNotFound):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())
+	case errors.Is(err, webapp.ErrPrepareSignNoContextRule):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrNoContextRule, err.Error())
+	case errors.Is(err, webapp.ErrPrepareSignSignerMismatch):
+		webappx.Success(c, http.StatusConflict, gin.H{
+			"error":           err.Error(),
+			"code":            webappx.ErrSignerMismatch,
+			"suggestedAction": "reconfigure_default_rule",
+		})
+	case errors.Is(err, webapp.ErrPrepareSignValidation):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
+	default:
+		slog.Error("prepare sign transaction", "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "failed to prepare transaction")
 	}
 }

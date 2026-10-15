@@ -34,6 +34,21 @@ func defaultContextRulesService(t *testing.T) *ContextRulesService {
 
 func uint32Ptr(v uint32) *uint32 { return &v }
 
+// contextRulesServiceWithDefaultSigners builds a ContextRulesService whose
+// sole rule is a Default rule with the given signers, serving the rule
+// twice — PrepareSign discovers it via DiscoverDefaultContextRule and then
+// re-fetches it via RuleAtID to check signer authorization, same pattern
+// build_swap_transaction_test.go uses for BuildSwap's identical two-call
+// discover-then-fetch sequence.
+func contextRulesServiceWithDefaultSigners(t *testing.T, signers ...xdr.ScVal) *ContextRulesService {
+	t.Helper()
+	return newContextRulesService(t,
+		scU32(1),
+		buildTestRuleScVal("default", true, "", signers...),
+		buildTestRuleScVal("default", true, "", signers...),
+	)
+}
+
 // ── BuildSend ────────────────────────────────────────────────────────────────
 
 func TestBuildSend_PasskeySuccess(t *testing.T) {
@@ -85,6 +100,78 @@ func TestBuildSend_PasskeySuccess(t *testing.T) {
 	assert.NotEmpty(t, result.TxXdr)
 	assert.Equal(t, "webauthn", result.SubmitMethod)
 	assert.NotEmpty(t, result.SimulationResultXdr)
+}
+
+// A backup signer's own dedicated Default rule (see AddSigner) must be the
+// one a send binds to when its keyDataHex is given — not the original
+// owner's rule, and not a silent fallback to whichever Default rule is
+// found first (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R2).
+func TestBuildSend_BackupSignerBindsToOwnRule(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	assetContractAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+	recipientKp, err := keypair.Random()
+	require.NoError(t, err)
+
+	originalRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	backupRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xbb}))
+	contextRules := newContextRulesService(t, scU32(2), originalRule, backupRule)
+
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 0, "transfer")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+	rpc := &fakeSorobanRPC{
+		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
+		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{
+				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+				TransactionData: minimalSorobanTransactionDataXDR(t),
+				MinResourceFee:  "100",
+				LatestLedger:    1000,
+			}, nil
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
+
+	result, err := svc.BuildSend(context.Background(), BuildSendInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		AssetID:             "USDC",
+		Recipient:           recipientKp.Address(),
+		Amount:              "1",
+		KeyDataHex:          "bb",
+	}, catalog)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(1), result.ContextRuleID)
+	assert.Equal(t, ContextRuleDiscoveryDefault, result.ContextRuleDiscovery)
+}
+
+// A keyDataHex that matches no rule on the account at all must refuse
+// rather than build a transaction bound to a rule it can't sign for
+// (LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R2/R7).
+func TestBuildSend_UnknownSignerKeyRejected(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	assetContractAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+	recipientKp, err := keypair.Random()
+	require.NoError(t, err)
+
+	contextRules := newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})))
+	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
+
+	_, err = svc.BuildSend(context.Background(), BuildSendInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		AssetID:             "USDC",
+		Recipient:           recipientKp.Address(),
+		Amount:              "1",
+		KeyDataHex:          "cc",
+	}, catalog)
+	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
 func TestBuildSend_FreighterSynthesizesDelegatedEntry(t *testing.T) {
@@ -587,6 +674,7 @@ func TestSubmitPhantom_InvalidPublicKeyHex(t *testing.T) {
 
 func TestPrepareSign_PasskeySuccess(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
 	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 0, "transfer")
 	authEntryB64, err := xdr.MarshalBase64(authEntry)
 	require.NoError(t, err)
@@ -601,7 +689,8 @@ func TestPrepareSign_PasskeySuccess(t *testing.T) {
 			}, nil
 		},
 	}
-	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
+	contextRules := contextRulesServiceWithDefaultSigners(t, externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	svc, bundlerKp := newTestTransactionService(t, rpc, contextRules)
 	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
 
 	result, err := svc.PrepareSign(context.Background(), PrepareSignInput{
@@ -614,6 +703,63 @@ func TestPrepareSign_PasskeySuccess(t *testing.T) {
 	assert.Equal(t, "webauthn", result.SubmitMethod)
 	assert.NotEmpty(t, result.TxXdr)
 	assert.Equal(t, uint32(1060), result.ValidUntilLedger)
+}
+
+// See TestBuildSend_BackupSignerBindsToOwnRule — same requirement for
+// prepare-sign.
+func TestPrepareSign_BackupSignerBindsToOwnRule(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 0, "transfer")
+	authEntryB64, err := xdr.MarshalBase64(authEntry)
+	require.NoError(t, err)
+
+	rpc := &fakeSorobanRPC{
+		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{
+				Results:         []service.SimResultEntry{{Auth: []string{authEntryB64}}},
+				TransactionData: minimalSorobanTransactionDataXDR(t),
+				MinResourceFee:  "100",
+				LatestLedger:    1000,
+			}, nil
+		},
+	}
+	originalRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	backupRule := buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xbb}))
+	contextRules := newContextRulesService(t, scU32(2), originalRule, backupRule, backupRule)
+	svc, bundlerKp := newTestTransactionService(t, rpc, contextRules)
+	svc.webauthnVerifierAddress = verifierAddr
+	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
+
+	result, err := svc.PrepareSign(context.Background(), PrepareSignInput{
+		SmartAccountAddress: smartAccountAddr,
+		UnsignedTxXdr:       unsignedTxXdr,
+		SignerType:          "passkey",
+		KeyDataHex:          "bb",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint32(1), result.ContextRuleID)
+	assert.NotEmpty(t, result.TxXdr)
+}
+
+// See TestBuildSend_UnknownSignerKeyRejected — same requirement for
+// prepare-sign.
+func TestPrepareSign_UnknownSignerKeyRejected(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+
+	contextRules := newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, "", externalSignerScVal(t, verifierAddr, []byte{0xaa})))
+	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, contextRules)
+	svc.webauthnVerifierAddress = verifierAddr
+	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
+
+	_, err := svc.PrepareSign(context.Background(), PrepareSignInput{
+		SmartAccountAddress: smartAccountAddr,
+		UnsignedTxXdr:       unsignedTxXdr,
+		SignerType:          "passkey",
+		KeyDataHex:          "cc",
+	})
+	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
 func TestPrepareSign_FreighterSynthesizesDelegatedEntry(t *testing.T) {
@@ -633,7 +779,8 @@ func TestPrepareSign_FreighterSynthesizesDelegatedEntry(t *testing.T) {
 			}, nil
 		},
 	}
-	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
+	contextRules := contextRulesServiceWithDefaultSigners(t, delegatedSignerScVal(t, signerKp.Address()))
+	svc, bundlerKp := newTestTransactionService(t, rpc, contextRules)
 	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
 
 	result, err := svc.PrepareSign(context.Background(), PrepareSignInput{
@@ -655,6 +802,61 @@ func TestPrepareSign_InvalidEnvelope(t *testing.T) {
 		UnsignedTxXdr:       "not-valid-xdr",
 	})
 	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPrepareSignValidation)
+}
+
+func TestPrepareSign_NoDefaultContextRule(t *testing.T) {
+	// count=0: no context rules configured at all, so
+	// DiscoverDefaultContextRule falls back without finding a Default rule.
+	contextRules := newContextRulesService(t, scU32(0))
+	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, contextRules)
+	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
+
+	_, err := svc.PrepareSign(context.Background(), PrepareSignInput{
+		SmartAccountAddress: testContractAddress(t),
+		UnsignedTxXdr:       unsignedTxXdr,
+		SignerType:          "passkey",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPrepareSignNoContextRule)
+}
+
+func TestPrepareSign_SignerMismatch_NoExternalSigner(t *testing.T) {
+	// Default rule exists but has no signers at all, so a passkey signer
+	// isn't authorized on it yet.
+	contextRules := contextRulesServiceWithDefaultSigners(t)
+	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, contextRules)
+	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
+
+	_, err := svc.PrepareSign(context.Background(), PrepareSignInput{
+		SmartAccountAddress: testContractAddress(t),
+		UnsignedTxXdr:       unsignedTxXdr,
+		SignerType:          "passkey",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPrepareSignSignerMismatch)
+}
+
+func TestPrepareSign_SignerMismatch_FreighterWrongG(t *testing.T) {
+	adminKp, err := keypair.Random()
+	require.NoError(t, err)
+	otherKp, err := keypair.Random()
+	require.NoError(t, err)
+
+	// Default rule authorizes only Delegated(adminKp) — a different
+	// Freighter G-address than the one the caller supplies.
+	contextRules := contextRulesServiceWithDefaultSigners(t, delegatedSignerScVal(t, adminKp.Address()))
+	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, contextRules)
+	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
+
+	_, err = svc.PrepareSign(context.Background(), PrepareSignInput{
+		SmartAccountAddress: testContractAddress(t),
+		UnsignedTxXdr:       unsignedTxXdr,
+		SignerType:          "freighter",
+		SignerG:             otherKp.Address(),
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrPrepareSignSignerMismatch)
 }
 
 // ── buildWebAuthnAuthPayload ─────────────────────────────────────────────────

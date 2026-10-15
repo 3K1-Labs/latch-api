@@ -33,10 +33,7 @@ This guide sets up latch-backend on a fully free stack:
 
 4. Save this as your `DATABASE_URL`. Note the `sslmode=require` — Neon requires SSL.
 
-5. Run your migrations against Neon before deploying:
-   ```bash
-   DATABASE_URL="postgres://username:password@ep-xxx..." make migrate-up
-   ```
+5. No manual migration step: the server applies any pending migrations itself at startup (see [Migrations](#migrations)).
 
 ---
 
@@ -98,31 +95,38 @@ git push -u origin master
    | **Dockerfile path** | `./Dockerfile`           |
    | **Instance Type**   | **Free**                 |
 
-5. Scroll down to **Environment Variables**. Add each variable from your `.env` — use the Neon and Upstash URLs for `DATABASE_URL` and `REDIS_URL`:
+5. Scroll down to **Environment Variables**. Each deployment serves exactly one Stellar network ([network-per-deployment.md](network-per-deployment.md)): set `STELLAR_NETWORK` and one unsuffixed set of variables for that network, with its **own** database, Redis and `JWT_SECRET`. Never copy one deployment's env into another. A production (mainnet) deployment looks like:
 
    ```
-   PORT                    8080
-   APP_ENV                 production
-   DATABASE_URL            postgres://...neon.tech/neondb?sslmode=require
-   REDIS_URL               rediss://default:...upstash.io:6379
-   JWT_SECRET              <your secret>
-   ACCESS_TOKEN_TTL_MIN    15
-   REFRESH_TOKEN_TTL_DAY   30
-   RECOVERY_TOKEN_TTL_MIN  15
-   SMTP_HOST               smtp.gmail.com
-   SMTP_PORT               587
-   SMTP_USER               <your gmail>
-   SMTP_PASSWORD           <your app password>
-   EMAIL_FROM_NAME         Latch
-   EMAIL_FROM_ADDR         <your gmail>
-   SERVER_PEPPER           <your pepper or leave empty>
-   SOROBAN_RPC_URL_TESTNET https://soroban-testnet.stellar.org
-   SOROBAN_RPC_URL_MAINNET https://mainnet.sorobanrpc.com
-   HORIZON_URL_TESTNET     https://horizon-testnet.stellar.org
-   HORIZON_URL_MAINNET     https://horizon.stellar.org
-   COINGECKO_API_KEY       <your key>
-   BUNDLER_SECRET          <your stellar keypair>
+   STELLAR_NETWORK                               mainnet
+   APP_ENV                                       production
+   DATABASE_URL                                  <this deployment's own Postgres>
+   REDIS_URL                                     <this deployment's own Redis>
+   JWT_SECRET                                    <unique to this deployment>
+   SERVER_PEPPER                                 <unique; never change once users exist>
+   RESEND_API_KEY                                <your key>
+   SOROBAN_RPC_URL                               <mainnet RPC>
+   HORIZON_URL                                   <mainnet Horizon>
+   NATIVE_SAC_ID                                 <mainnet native XLM SAC>
+   BUNDLER_SECRET                                <mainnet bundler secret>
+   NEXT_PUBLIC_FACTORY_ADDRESS                   <mainnet factory>
+   NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS         <mainnet WebAuthn verifier>
+   NEXT_PUBLIC_VERIFIER_ADDRESS                  <mainnet Ed25519 verifier>
+   NEXT_PUBLIC_USDC_SAC_ADDRESS                  <mainnet USDC SAC>
+   NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH           <mainnet account WASM hash>
+   RELAYER_URL / RELAYER_API_KEY                 <the mainnet relayer>
+   WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN              <passkey ceremony config>
    ```
+
+   Every variable above from `SOROBAN_RPC_URL` to `NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH` is required on mainnet; there are no mainnet defaults. Staging uses the same names with `STELLAR_NETWORK=testnet`, where the RPC, Horizon, native and USDC SACs and account WASM hash default to the public testnet values. The network passphrase and the on-ramp pool's network both follow `STELLAR_NETWORK` and are not configured.
+
+   The server refuses to start when:
+   - `STELLAR_NETWORK` is missing or not `testnet`/`mainnet`;
+   - `STELLAR_NETWORK=mainnet` without `APP_ENV=production`, or without one of the required mainnet variables;
+   - the database or Redis was first used by the other network;
+   - the Soroban RPC serves the other network.
+
+   `/health` reports the deployment's network. A request naming the other network gets `400 NETWORK_MISMATCH`; a request that omits `network` is treated as this deployment's network.
 
    > Do **not** add `DB_USER`, `DB_PASSWORD`, `DB_HOST` etc. — those are only used by docker-compose locally. On Render, set the full `DATABASE_URL` directly.
 
@@ -179,15 +183,11 @@ Or trigger it from the Render dashboard → **Manual Deploy** → **Deploy lates
 
 ---
 
-## Running migrations after schema changes
+## Migrations
 
-Render does not run migrations automatically. After adding a new migration file, run it manually before deploying:
+The migrations are built into the server binary, and the server applies any pending ones at startup, before serving. A new migration file therefore ships with the deploy that contains it: there is nothing to run by hand. golang-migrate takes a Postgres advisory lock, so instances starting together migrate once.
 
-```bash
-DATABASE_URL="postgres://...neon.tech/neondb?sslmode=require" make migrate-up
-```
-
-Or set up a one-off Render job (Render dashboard → **New** → **Cron Job** → run `./bin/migrate up` on deploy).
+If a migration fails, the server refuses to start and logs the error. A failure that leaves the database **dirty** needs fixing by hand, then `go run ./cmd/migrate force <version>` with `DATABASE_URL` set to the external connection URL. `go run ./cmd/migrate version` shows where a database stands.
 
 ---
 

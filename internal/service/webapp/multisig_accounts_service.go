@@ -54,8 +54,11 @@ type MultisigAccountSummary struct {
 	ProposalCount       int64
 	Members             []MultisigAccountMember
 	// MemberID is the calling session user's own member row id on this
-	// account, empty if they can only see it as its creator with no linked
-	// member row (e.g. a legacy account predating session linkage).
+	// account — the field the extension needs for proposal approvals. Since
+	// ListAccounts now only returns accounts the caller holds a member row
+	// for, this is populated for every listed account (a transient empty
+	// value is possible only if the member row is unlinked between the two
+	// queries).
 	MemberID string
 }
 
@@ -79,8 +82,10 @@ func NewMultisigAccountsService(sqlDB *sql.DB, q *db.Queries, factory smartAccou
 	return &MultisigAccountsService{sqlDB: sqlDB, q: q, factory: factory}
 }
 
-// ListAccounts returns every multisig account owned by userID, with each
-// member's presence-only key summary and its proposal count. Ports
+// ListAccounts returns every multisig account userID can sign for — i.e.
+// holds a linked multisig_members row on — with each member's presence-only
+// key summary and its proposal count. An account the caller merely created
+// but holds no signer in is deliberately not returned. Ports
 // GET /api/multisig/accounts.
 func (s *MultisigAccountsService) ListAccounts(ctx context.Context, userID string) ([]MultisigAccountSummary, error) {
 	uid, err := uuid.Parse(userID)

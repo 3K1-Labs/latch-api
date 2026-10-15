@@ -13,27 +13,52 @@ const activeSmartAccountCookieName = "activeSmartAccountAddress"
 
 type AccountsHandler struct {
 	accountsSvc      accountsService
+	sessionSvc       sessionService
 	crossSiteCookies bool
 }
 
-func NewAccountsHandler(accountsSvc accountsService, crossSiteCookies bool) *AccountsHandler {
-	return &AccountsHandler{accountsSvc: accountsSvc, crossSiteCookies: crossSiteCookies}
+func NewAccountsHandler(accountsSvc accountsService, sessionSvc sessionService, crossSiteCookies bool) *AccountsHandler {
+	return &AccountsHandler{accountsSvc: accountsSvc, sessionSvc: sessionSvc, crossSiteCookies: crossSiteCookies}
 }
 
 // List godoc
-// @Summary      List the session user's smart accounts
-// @Description  Returns every smart account (seed and passkey wallets) owned by the session user.
+// @Summary      List the session's proved smart accounts
+// @Description  Returns every smart account this session has proved a signer credential for via a WebAuthn ceremony — never every wallet the cookie's user row happens to own. Pass ?credentialId= to narrow to the single wallet for that passkey; it must itself have been proved by this session (the query param is not treated as proof).
 // @Tags         accounts
 // @Produce      json
+// @Param        credentialId query string false "base64url WebAuthn credential ID to filter by"
 // @Success      200 {object} map[string]any
 // @Failure      500 {object} webappErrorResponse
 // @Router       /api/accounts [get]
 func (h *AccountsHandler) List(c *gin.Context) {
-	userID := middleware.SessionUserIDFromContext(c.Request.Context())
+	sessionID := middleware.SessionIDFromContext(c.Request.Context())
 
-	accounts, err := h.accountsSvc.ListAccounts(c.Request.Context(), userID)
+	var credentialIDs []string
+	if credentialID := c.Query("credentialId"); credentialID != "" {
+		// The query param is never treated as proof on its own — it must
+		// itself be in this session's proved set.
+		proved, err := h.sessionSvc.HasProvedCredential(c.Request.Context(), sessionID, credentialID)
+		if err != nil {
+			slog.Error("check session proved credential", "sessionID", sessionID, "err", err)
+			webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+			return
+		}
+		if proved {
+			credentialIDs = []string{credentialID}
+		}
+	} else {
+		ids, err := h.sessionSvc.ProvedCredentials(c.Request.Context(), sessionID)
+		if err != nil {
+			slog.Error("list session proved credentials", "sessionID", sessionID, "err", err)
+			webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
+			return
+		}
+		credentialIDs = ids
+	}
+
+	accounts, err := h.accountsSvc.ListAccountsForProvedCredentials(c.Request.Context(), credentialIDs)
 	if err != nil {
-		slog.Error("list accounts", "userID", userID, "err", err)
+		slog.Error("list accounts", "sessionID", sessionID, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}

@@ -79,6 +79,33 @@ func TestVerifyWebAuthnAssertion(t *testing.T) {
 	t.Run("disallowed origin", func(t *testing.T) {
 		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, cdj, sig, []string{"evil.example"}), ErrBadSignature)
 	})
+	// Mobile's local passkey spells its origin as a bare host; the OS passkey
+	// APIs and browsers spell the same origin with the https:// scheme. Either
+	// allow-list entry has to accept either spelling, or a client is rejected
+	// for how the origin is written rather than for what it is.
+	t.Run("bare-host origin against https allow-list entry", func(t *testing.T) {
+		_, _, bareCDJ, bareSig := makeAssertion(t, priv, nonce, "latch.finance")
+		require.NoError(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, bareCDJ, bareSig, []string{"https://latch.finance"}))
+	})
+	t.Run("https origin against bare-host allow-list entry", func(t *testing.T) {
+		require.NoError(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, cdj, sig, []string{"latch.finance"}))
+	})
+	t.Run("http origin is not the https origin", func(t *testing.T) {
+		_, _, plainCDJ, plainSig := makeAssertion(t, priv, nonce, "http://latch.finance")
+		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, plainCDJ, plainSig, []string{"https://latch.finance"}), ErrBadSignature)
+	})
+	t.Run("empty origin is never allowed", func(t *testing.T) {
+		_, _, emptyCDJ, emptySig := makeAssertion(t, priv, nonce, "")
+		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, emptyCDJ, emptySig, []string{"https://latch.finance", ""}), ErrBadSignature)
+	})
+	// The Android OS passkey origin is a scheme of its own: it must match
+	// verbatim and must never be reachable by host normalisation.
+	t.Run("android apk-key-hash origin matches verbatim", func(t *testing.T) {
+		const androidOrigin = "android:apk-key-hash:Rk9PQkFSQkFaUVVYMTIzNDU2Nzg5MGFiY2RlZmdo"
+		_, _, androidCDJ, androidSig := makeAssertion(t, priv, nonce, androidOrigin)
+		require.NoError(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, androidCDJ, androidSig, []string{androidOrigin}))
+		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData, androidCDJ, androidSig, []string{"https://latch.finance"}), ErrBadSignature)
+	})
 	t.Run("short authenticator data", func(t *testing.T) {
 		require.ErrorIs(t, VerifyWebAuthnAssertion([][]byte{pub65}, nonce, authData[:20], cdj, sig, []string{testOrigin}), ErrBadSignature)
 	})
@@ -170,7 +197,7 @@ func TestParseP256PubKey(t *testing.T) {
 type stubSignerReader struct {
 	keys [][]byte
 	err  error
-	// gotRPCURL records the endpoint the service selected for the network.
+	// gotRPCURL records the endpoint the service read signers from.
 	gotRPCURL string
 }
 
@@ -179,10 +206,10 @@ func (s *stubSignerReader) WebAuthnSignerKeys(_ context.Context, _, rpcURL strin
 	return s.keys, s.err
 }
 
-var testSorobanURLs = SorobanURLs{Testnet: "http://testnet-rpc", Mainnet: "http://mainnet-rpc"}
+const testSorobanURL = "http://rpc"
 
 func newPasskeyAuthService(reader WebAuthnSignerReader) *WalletAuthService {
-	return NewWalletAuthService(nil, nil, reader, testSorobanURLs, []string{testOrigin})
+	return NewWalletAuthService(nil, nil, reader, testSorobanURL, []string{testOrigin})
 }
 
 func TestVerifyPasskey_Success(t *testing.T) {
@@ -196,23 +223,7 @@ func TestVerifyPasskey_Success(t *testing.T) {
 		AuthenticatorData: authData, ClientDataJSON: cdj, PasskeySignature: sig,
 	}, NetworkTestnet, nonce)
 	require.NoError(t, err)
-	assert.Equal(t, testSorobanURLs.Testnet, reader.gotRPCURL)
-}
-
-// A mainnet-only smart account is invisible on testnet, so the network must
-// pick the RPC the signers are actually read from.
-func TestVerifyPasskey_MainnetReadsMainnetRPC(t *testing.T) {
-	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	nonce := []byte("0123456789abcdef0123456789abcdef")
-	pub65, authData, cdj, sig := makeAssertion(t, priv, nonce, testOrigin)
-
-	reader := &stubSignerReader{keys: [][]byte{pub65}}
-	svc := newPasskeyAuthService(reader)
-	err := svc.verifyPasskey(context.Background(), WalletSignInInput{
-		AuthenticatorData: authData, ClientDataJSON: cdj, PasskeySignature: sig,
-	}, NetworkMainnet, nonce)
-	require.NoError(t, err)
-	assert.Equal(t, testSorobanURLs.Mainnet, reader.gotRPCURL)
+	assert.Equal(t, testSorobanURL, reader.gotRPCURL)
 }
 
 func TestVerifyPasskey_NoSignerMapsToBadSignature(t *testing.T) {

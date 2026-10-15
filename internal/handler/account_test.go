@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,7 +20,7 @@ func newAccountHandler(account *stubAccount, audit *stubAudit) *AccountHandler {
 	if audit == nil {
 		audit = &stubAudit{}
 	}
-	return NewAccountHandler(account, audit)
+	return NewAccountHandler(account, audit, &stubNotification{})
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────
@@ -189,7 +191,7 @@ func TestCreateDepositIntent_NetworkRejected(t *testing.T) {
 		err     error
 		wantMsg string
 	}{
-		{"unsupported network", service.ErrNetworkUnsupported, "funding is only available on testnet"},
+		{"other network", fmt.Errorf("%w: serves testnet only", deploynet.ErrMismatch), "network mismatch: serves testnet only"},
 		{"invalid network", service.ErrInvalidNetwork, "network must be testnet or mainnet"},
 	}
 	for _, tc := range tests {
@@ -301,8 +303,8 @@ func TestDepositStatus_ForwardsNetwork(t *testing.T) {
 	}
 }
 
-func TestDepositStatus_NetworkUnsupported(t *testing.T) {
-	h := newAccountHandler(&stubAccount{fundingStatusErr: service.ErrNetworkUnsupported}, nil)
+func TestDepositStatus_NetworkMismatch(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: fmt.Errorf("%w: serves testnet only", deploynet.ErrMismatch)}, nil)
 	r := gin.New()
 	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
 
@@ -310,7 +312,7 @@ func TestDepositStatus_NetworkUnsupported(t *testing.T) {
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345?network=mainnet", nil), "uid")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "not available on this network")
+	assert.Contains(t, w.Body.String(), "NETWORK_MISMATCH")
 }
 
 func TestDepositStatus_NotOwner(t *testing.T) {
@@ -373,7 +375,8 @@ func TestDepositStatus_Success(t *testing.T) {
 			{TxHash: "hash1", Amount: "5.0000000", Asset: "native", Status: "done", CreatedAt: time.Now().UTC()},
 		},
 	}}
-	h := newAccountHandler(stub, nil)
+	notif := &stubNotification{}
+	h := NewAccountHandler(stub, &stubAudit{}, notif)
 	r := gin.New()
 	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
 
@@ -389,4 +392,65 @@ func TestDepositStatus_Success(t *testing.T) {
 	forwards := data["forwards"].([]any)
 	require.Len(t, forwards, 1)
 	assert.Equal(t, "hash1", forwards[0].(map[string]any)["tx_hash"])
+
+	assert.Equal(t, 1, notif.notifyN, "a completed deposit must record one notification")
+	assert.Equal(t, "funding_completed", notif.gotRecord.Type)
+	assert.Equal(t, "12345", notif.gotRecord.DedupeKey, "dedupe key must be the memo_id so repeated polls don't re-notify")
+}
+
+// A pending deposit must not notify — only the completed transition is a
+// curated activity event.
+func TestDepositStatus_PendingDoesNotNotify(t *testing.T) {
+	stub := &stubAccount{fundingStatusResult: service.DepositStatus{
+		MemoID: "12345", Status: "pending", ExpiresAt: time.Now().Add(time.Hour).UTC(),
+	}}
+	notif := &stubNotification{}
+	h := NewAccountHandler(stub, &stubAudit{}, notif)
+	r := gin.New()
+	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 0, notif.notifyN)
+}
+
+// The bug this guards: expires_in, expected_amt and external_id were absent from
+// the request struct, so Go discarded them silently. Mobile was sending a
+// seven-day TTL for bank-funded deposits and getting the relayer's one-hour
+// default, which sweeps anything arriving later to recovery.
+func TestCreateDepositIntent_ForwardsIntentOptions(t *testing.T) {
+	account := &stubAccount{}
+	h := newAccountHandler(account, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	body := `{"smart_account_address":"CABC","network":"testnet",` +
+		`"expires_in":604800,"expected_amt":"25.0000000","external_id":"order-1"}`
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", strings.NewReader(body)), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, 604800, account.intentOpts.ExpiresIn, "a bank-transfer TTL must reach the relayer")
+	assert.Equal(t, "25.0000000", account.intentOpts.ExpectedAmt)
+	assert.Equal(t, "order-1", account.intentOpts.ExternalID)
+}
+
+// Omitting them stays valid — the relayer applies its own default.
+func TestCreateDepositIntent_OptionsAreOptional(t *testing.T) {
+	account := &stubAccount{}
+	h := newAccountHandler(account, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent",
+		strings.NewReader(`{"smart_account_address":"CABC"}`)), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.NotEqual(t, http.StatusBadRequest, w.Code)
+	assert.Zero(t, account.intentOpts.ExpiresIn)
 }

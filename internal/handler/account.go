@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
@@ -20,10 +21,11 @@ import (
 type AccountHandler struct {
 	accountSvc accountService
 	auditSvc   auditService
+	notifSvc   notificationService
 }
 
-func NewAccountHandler(accountSvc accountService, auditSvc auditService) *AccountHandler {
-	return &AccountHandler{accountSvc: accountSvc, auditSvc: auditSvc}
+func NewAccountHandler(accountSvc accountService, auditSvc auditService, notifSvc notificationService) *AccountHandler {
+	return &AccountHandler{accountSvc: accountSvc, auditSvc: auditSvc, notifSvc: notifSvc}
 }
 
 type registerAccountRequest struct {
@@ -104,11 +106,30 @@ type createDepositIntentRequest struct {
 	// Network is optional; empty means testnet. Only testnet is served today —
 	// see AccountService.CreateFundingIntent.
 	Network string `json:"network"`
+
+	// ExpiresIn is how long the intent stays fundable, in seconds. Omit for
+	// latch-relayer's own default of one hour.
+	//
+	// Anything funded by bank transfer must set this. The relayer sweeps a
+	// deposit arriving against an expired intent to the recovery address, so an
+	// ACH or SEPA payment landing two days after a one-hour intent is not
+	// credited. Clamped to [MinFundingIntentTTL, MaxFundingIntentTTL].
+	ExpiresIn int `json:"expires_in"`
+
+	// ExpectedAmt is the deposit size in the asset's own units — XLM, not fiat.
+	// Advisory only: the relayer logs a mismatch and credits what arrives.
+	ExpectedAmt string `json:"expected_amt"`
+
+	// ExternalID is the on-ramp provider's order ID, so a deposit can be traced
+	// from either side during reconciliation.
+	ExternalID string `json:"external_id"`
 }
 
 // CreateDepositIntent godoc
 // @Summary      Mint a funding intent for the fund-account flow
-// @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry)
+// @Description  Creates a fresh, TTL-bound latch-relayer funding intent (default 1hr expiry;
+// @Description  pass expires_in to cover slower settlement — bank transfers take days, and a
+// @Description  deposit arriving after expiry is swept to recovery, not credited)
 // @Description  for a smart account already associated with the caller. Not idempotent — every call
 // @Description  mints a new intent, matching latch-relayer's "one intent per funding session"
 // @Description  model. The caller must have already registered the address via
@@ -135,15 +156,20 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 		return
 	}
 
-	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress, req.Network)
+	intent, err := h.accountSvc.CreateFundingIntent(c.Request.Context(), userID, scope, req.SmartAccountAddress, req.Network,
+		service.FundingIntentOptions{
+			ExpiresIn:   req.ExpiresIn,
+			ExpectedAmt: req.ExpectedAmt,
+			ExternalID:  req.ExternalID,
+		})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrValidation):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "smart_account_address is not registered to the caller")
 		case errors.Is(err, service.ErrInvalidNetwork):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
-		case errors.Is(err, service.ErrNetworkUnsupported):
-			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is only available on testnet")
+		case errors.Is(err, deploynet.ErrMismatch):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 		case errors.Is(err, service.ErrRelayerNotConfigured):
 			httpx.Fail(c, http.StatusServiceUnavailable, httpx.ErrInternal, "funding is temporarily unavailable")
 		case errors.Is(err, service.ErrRelayerUnavailable):
@@ -190,15 +216,17 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 	scope := middleware.ScopeFromContext(c.Request.Context())
 	memoID := c.Param("memo_id")
 
-	// Which relayer holds this memo. Absent means testnet: memo IDs minted
-	// before mainnet existed all live there, and older clients never send it.
+	// Which relayer holds this memo. Absent means the deployment's network,
+	// whose relayer minted every memo this deployment handed out.
 	network := c.Query("network")
 
 	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, scope, memoID, network)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrNetworkUnsupported):
-			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is not available on this network")
+		case errors.Is(err, service.ErrInvalidNetwork):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
+		case errors.Is(err, deploynet.ErrMismatch):
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
 		case errors.Is(err, service.ErrValidation):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "memo_id not found")
 		case errors.Is(err, service.ErrIntentNotFound):
@@ -211,6 +239,22 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 			httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		}
 		return
+	}
+
+	// Funding completion has no dedicated event/webhook — this poll endpoint
+	// is the only place the server observes the transition. dedupe_key =
+	// memoID makes the write (and therefore the push) idempotent, so repeated
+	// polls after completion are free no-ops.
+	if status.Status == "completed" {
+		h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionFundingCompleted), c.ClientIP(), c.Request.UserAgent(), map[string]any{
+			"memo_id": memoID,
+		})
+		if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+			Type: "funding_completed", Title: "Deposit received", Body: "Your deposit has been credited.",
+			DedupeKey: memoID,
+		}); err != nil {
+			slog.Error("record funding completed notification", "userID", userID, "err", err)
+		}
 	}
 
 	forwards := make([]gin.H, 0, len(status.Forwards))

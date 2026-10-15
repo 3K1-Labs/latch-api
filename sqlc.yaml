@@ -26,6 +26,12 @@ sql:
       - "migrations/000021_smart_account_registrations.up.sql"
       - "migrations/000022_drop_backup_account_columns.up.sql"
       - "migrations/000023_smart_account_registrations_ownership_only.up.sql"
+      - "migrations/000024_on_ramp_intents_relayer_fields.up.sql"
+      - "migrations/000025_passkey_credentials.up.sql"
+      - "migrations/000028_account_signers_signer_id.up.sql"
+      - "migrations/000029_account_signers_context_rule_id.up.sql"
+      - "migrations/000030_webapp_session_proved_credentials.up.sql"
+      - "migrations/000031_notifications.up.sql"
     gen:
       go:
         package: "db"

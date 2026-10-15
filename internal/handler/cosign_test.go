@@ -46,7 +46,7 @@ func (s *stubCosign) MarkSubmitted(_ context.Context, _, _ string) error { retur
 func (s *stubCosign) Cancel(_ context.Context, _ string) error           { return s.cancelErr }
 
 func newCosignHandler(cosign *stubCosign) *CosignHandler {
-	return NewCosignHandler(cosign, &stubAudit{}, &stubPushTokens{}, &stubNotifier{})
+	return NewCosignHandler(cosign, &stubAudit{}, &stubPushTokens{}, &stubNotifier{}, &stubNotification{})
 }
 
 func validCreateBody() *bytes.Reader {
@@ -266,7 +266,7 @@ func TestCosignAddSignature_NotifiesQueueExcludingActor(t *testing.T) {
 	notifier := &stubNotifier{done: make(chan struct{})}
 	h := NewCosignHandler(
 		&stubCosign{addOut: service.CosignRequest{ID: "req-1", QueueIndex: "qidx-1"}},
-		&stubAudit{}, push, notifier,
+		&stubAudit{}, push, notifier, &stubNotification{},
 	)
 	r := gin.New()
 	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
@@ -293,7 +293,7 @@ func TestCosignAddSignature_NotifyFailureDoesNotAffectResponse(t *testing.T) {
 	push := &stubPushTokens{tokensErr: errGeneric, done: make(chan struct{})}
 	h := NewCosignHandler(
 		&stubCosign{addOut: service.CosignRequest{ID: "req-1", QueueIndex: "qidx-1"}},
-		&stubAudit{}, push, &stubNotifier{},
+		&stubAudit{}, push, &stubNotifier{}, &stubNotification{},
 	)
 	r := gin.New()
 	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
@@ -310,7 +310,7 @@ func TestCosignAddSignature_NotifyFailureDoesNotAffectResponse(t *testing.T) {
 
 func TestCosignAddSignature_NoNotifyOnServiceError(t *testing.T) {
 	push := &stubPushTokens{done: make(chan struct{})}
-	h := NewCosignHandler(&stubCosign{addErr: service.ErrCosignNotPending}, &stubAudit{}, push, &stubNotifier{})
+	h := NewCosignHandler(&stubCosign{addErr: service.ErrCosignNotPending}, &stubAudit{}, push, &stubNotifier{}, &stubNotification{})
 	r := gin.New()
 	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
 
@@ -326,4 +326,81 @@ func TestCosignAddSignature_NoNotifyOnServiceError(t *testing.T) {
 		t.Fatal("push lookup must not run when AddSignature fails")
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+// ── self-notifications ───────────────────────────────────────────────────────
+//
+// Cosign's blind queue/signer ids have no server-side user_id link by design
+// (see CosignHandler's type comment), so only the acting user's own
+// create/sign/submit/cancel can ever get an in-app notifications row — never
+// the other queue members, who are reached only by notifyQueue's push above.
+
+func TestCosignCreate_RecordsSelfNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewCosignHandler(&stubCosign{createOut: service.CosignRequest{ID: "req-1", Threshold: 2}}, &stubAudit{}, &stubPushTokens{}, &stubNotifier{}, notif)
+	r := gin.New()
+	r.POST("/cosign/requests", h.Create)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests", validCreateBody()), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "cosign_created", notif.gotRecord.Type)
+	assert.Equal(t, "uid", notif.gotUserID)
+}
+
+func TestCosignMarkSubmitted_RecordsSelfNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewCosignHandler(&stubCosign{}, &stubAudit{}, &stubPushTokens{}, &stubNotifier{}, notif)
+	r := gin.New()
+	r.POST("/cosign/requests/:id/submission", h.MarkSubmitted)
+
+	body := postJSONBody(map[string]any{"tx_hash": "abc123"})
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/submission", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "cosign_submitted", notif.gotRecord.Type)
+}
+
+func TestCosignCancel_RecordsSelfNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewCosignHandler(&stubCosign{}, &stubAudit{}, &stubPushTokens{}, &stubNotifier{}, notif)
+	r := gin.New()
+	r.DELETE("/cosign/requests/:id", h.Cancel)
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodDelete, "/cosign/requests/req-1", nil), "uid")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "cosign_cancelled", notif.gotRecord.Type)
+}
+
+func TestCosignAddSignature_RecordsSelfNotification(t *testing.T) {
+	notif := &stubNotification{}
+	h := NewCosignHandler(
+		&stubCosign{addOut: service.CosignRequest{ID: "req-1", QueueIndex: "qidx-1"}},
+		&stubAudit{}, &stubPushTokens{}, &stubNotifier{}, notif,
+	)
+	r := gin.New()
+	r.POST("/cosign/requests/:id/signatures", h.AddSignature)
+
+	body := postJSONBody(map[string]any{"blind_signer_id": "b1ind", "auth_entry_xdr": "v1:xyz"})
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/cosign/requests/req-1/signatures", body), "uid")
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, notif.notifyN)
+	assert.Equal(t, "cosign_signed", notif.gotRecord.Type)
+	assert.Equal(t, "uid", notif.gotUserID, "only the actor gets an in-app row, never the other queue members")
 }

@@ -59,4 +59,29 @@ var (
 		},
 		[]string{"result"}, // hit, miss
 	)
+
+	// OnRampSessionsTotal counts on-ramp session creations by provider and
+	// outcome. The money path had no instrumentation at all.
+	OnRampSessionsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "onramp_sessions_total",
+			Help: "On-ramp session creations by provider and outcome.",
+		},
+		[]string{"provider", "outcome"},
+	)
+
+	// OnRampRelayerRegistrationTotal counts attempts to register a deposit
+	// reference with latch-relayer.
+	//
+	// This is the metric that matters most on this path. A session issued
+	// without a registered reference produces a deposit the relayer cannot
+	// match, which is swept to recovery instead of credited — the customer pays
+	// and is never paid. Any sustained failure rate here is an incident.
+	OnRampRelayerRegistrationTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "onramp_relayer_registration_total",
+			Help: "Deposit-reference registrations with latch-relayer, by outcome.",
+		},
+		[]string{"outcome"},
+	)
 )

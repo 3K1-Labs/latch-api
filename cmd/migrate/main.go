@@ -15,12 +15,13 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/joho/godotenv"
+	"github.com/latch/backend/internal/deployment"
+	"github.com/latch/backend/migrations"
 )
 
 func main() {
@@ -32,10 +33,12 @@ func main() {
 		log.Fatal("DATABASE_URL is required")
 	}
 
-	// golang-migrate pgx/v5 driver requires the pgx5:// scheme
-	migrateURL := toPgx5URL(dbURL)
-
-	m, err := migrate.New("file://migrations", migrateURL)
+	// The same embedded migrations the server applies at startup.
+	src, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		log.Fatalf("open embedded migrations: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, deployment.ToPgx5URL(dbURL))
 	if err != nil {
 		log.Fatalf("initialise migrate: %v", err)
 	}
@@ -110,17 +113,6 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
-}
-
-// toPgx5URL converts a standard postgres:// URL to the pgx5:// scheme
-// required by golang-migrate's pgx/v5 database driver.
-func toPgx5URL(url string) string {
-	for _, prefix := range []string{"postgres://", "postgresql://"} {
-		if strings.HasPrefix(url, prefix) {
-			return "pgx5://" + url[len(prefix):]
-		}
-	}
-	return url // already pgx5:// or something else
 }
 
 func printUsage() {

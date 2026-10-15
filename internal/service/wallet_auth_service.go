@@ -6,7 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/latch/backend/internal/deploynet"
 )
 
 // Networks a wallet can sign in on. A smart account exists on exactly one
@@ -29,31 +30,15 @@ var (
 	ErrInvalidNetwork = errors.New("network must be testnet or mainnet")
 )
 
-// ParseWalletNetwork normalizes a request's network field. Empty means testnet,
-// matching the pre-mainnet-support behavior of the wallet sign-in flow.
+// ParseWalletNetwork normalizes a request's network field. Empty means the
+// deployment's network, and the network this deployment does not serve fails
+// with an error wrapping deploynet.ErrMismatch (see deploynet.Resolve).
 func ParseWalletNetwork(raw string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", NetworkTestnet:
-		return NetworkTestnet, nil
-	case NetworkMainnet:
-		return NetworkMainnet, nil
-	default:
+	network, err := deploynet.Resolve(raw)
+	if errors.Is(err, deploynet.ErrInvalid) {
 		return "", ErrInvalidNetwork
 	}
-}
-
-// SorobanURLs holds the per-network Soroban RPC endpoints passkey sign-in reads
-// smart-account signers from.
-type SorobanURLs struct {
-	Testnet string
-	Mainnet string
-}
-
-func (u SorobanURLs) forNetwork(network string) string {
-	if network == NetworkMainnet {
-		return u.Mainnet
-	}
-	return u.Testnet
+	return network, err
 }
 
 // WalletAuthService orchestrates SEP-10-style wallet sign-in: issue a single-use
@@ -65,16 +50,16 @@ type WalletAuthService struct {
 	auth           *AuthService
 	nonce          *WalletNonceService
 	signerReader   WebAuthnSignerReader
-	sorobanURLs    SorobanURLs
+	sorobanURL     string
 	allowedOrigins []string
 }
 
-func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, sorobanURLs SorobanURLs, allowedOrigins []string) *WalletAuthService {
+func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, sorobanURL string, allowedOrigins []string) *WalletAuthService {
 	return &WalletAuthService{
 		auth:           auth,
 		nonce:          nonce,
 		signerReader:   signerReader,
-		sorobanURLs:    sorobanURLs,
+		sorobanURL:     sorobanURL,
 		allowedOrigins: allowedOrigins,
 	}
 }
@@ -158,7 +143,7 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 // them. The candidate keys come from chain (not the request), so a caller can't
 // sign in as a wallet whose key it doesn't control.
 func (s *WalletAuthService) verifyPasskey(ctx context.Context, in WalletSignInInput, network string, nonceBytes []byte) error {
-	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet, s.sorobanURLs.forNetwork(network))
+	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet, s.sorobanURL)
 	if err != nil {
 		// Name the network in the wrapped error: "no signer on chain" is most
 		// often a wallet signed in against the network it does not live on, and

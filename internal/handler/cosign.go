@@ -24,10 +24,11 @@ type CosignHandler struct {
 	auditSvc  auditService
 	pushSvc   pushTokenService
 	notifier  pushNotifier
+	notifSvc  notificationService
 }
 
-func NewCosignHandler(cosignSvc cosignService, auditSvc auditService, pushSvc pushTokenService, notifier pushNotifier) *CosignHandler {
-	return &CosignHandler{cosignSvc: cosignSvc, auditSvc: auditSvc, pushSvc: pushSvc, notifier: notifier}
+func NewCosignHandler(cosignSvc cosignService, auditSvc auditService, pushSvc pushTokenService, notifier pushNotifier, notifSvc notificationService) *CosignHandler {
+	return &CosignHandler{cosignSvc: cosignSvc, auditSvc: auditSvc, pushSvc: pushSvc, notifier: notifier, notifSvc: notifSvc}
 }
 
 type createCosignRequest struct {
@@ -56,10 +57,15 @@ func (h *CosignHandler) Create(c *gin.Context) {
 		return
 	}
 
+	network, ok := resolveRequestNetwork(c, req.Network)
+	if !ok {
+		return
+	}
+
 	out, err := h.cosignSvc.Create(c.Request.Context(), service.CreateCosignInput{
 		QueueIndex:    req.QueueIndex,
 		UnsignedTxXDR: req.UnsignedTxXDR,
-		Network:       req.Network,
+		Network:       network,
 		Threshold:     req.Threshold,
 	})
 	if err != nil {
@@ -69,6 +75,7 @@ func (h *CosignHandler) Create(c *gin.Context) {
 	}
 
 	h.audit(c, service.ActionCosignCreated)
+	h.notify(c, "cosign_created", "New approval requested", "A shared wallet transaction needs your approval.")
 	httpx.Success(c, http.StatusCreated, out)
 }
 
@@ -154,6 +161,11 @@ func (h *CosignHandler) AddSignature(c *gin.Context) {
 
 	h.audit(c, service.ActionCosignSigned)
 	h.notifyQueue(out.QueueIndex, req.BlindSignerID)
+	// Self-notification only: cosign's blind queue/signer ids have no
+	// server-side user_id link by design (see the type comment above), so
+	// the in-app notifications row can only ever be recorded for the actor,
+	// never the other queue members who received notifyQueue's push above.
+	h.notify(c, "cosign_signed", "Approval submitted", "Your signature was recorded on a shared wallet transaction.")
 	httpx.Success(c, http.StatusOK, out)
 }
 
@@ -214,6 +226,7 @@ func (h *CosignHandler) MarkSubmitted(c *gin.Context) {
 	}
 
 	h.audit(c, service.ActionCosignSubmitted)
+	h.notify(c, "cosign_submitted", "Transaction submitted", "A shared wallet transaction you approved was submitted on-chain.")
 	httpx.Success(c, http.StatusOK, gin.H{"message": "submission recorded"})
 }
 
@@ -235,6 +248,7 @@ func (h *CosignHandler) Cancel(c *gin.Context) {
 	}
 
 	h.audit(c, service.ActionCosignCancelled)
+	h.notify(c, "cosign_cancelled", "Approval request cancelled", "A shared wallet approval request was cancelled.")
 	httpx.Success(c, http.StatusOK, gin.H{"message": "cancelled"})
 }
 
@@ -243,6 +257,18 @@ func (h *CosignHandler) Cancel(c *gin.Context) {
 func (h *CosignHandler) audit(c *gin.Context, action service.AuditAction) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
 	h.auditSvc.Log(c.Request.Context(), userID, string(action), c.ClientIP(), c.Request.UserAgent(), nil)
+}
+
+// notify records an in-app activity notification for the acting user only —
+// best-effort, logged not returned, since the cosign action itself already
+// succeeded by the time this is called.
+func (h *CosignHandler) notify(c *gin.Context, notifType, title, body string) {
+	userID := middleware.UserIDFromContext(c.Request.Context())
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		Type: notifType, Title: title, Body: body,
+	}); err != nil {
+		slog.Error("record cosign notification", "type", notifType, "err", err)
+	}
 }
 
 // writeServiceErr maps cosign service sentinel errors to HTTP responses.

@@ -43,9 +43,9 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		return
 	}
 
-	network := c.Query("network")
-	if network != "mainnet" {
-		network = "testnet"
+	network, ok := resolveRequestNetwork(c, c.Query("network"))
+	if !ok {
+		return
 	}
 
 	limit := 50
@@ -58,15 +58,13 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		}
 	}
 
-	sorobanURL, horizonURL, nativeSACID := h.networkURLs(network)
-
 	txs, err := h.historySvc.GetHistory(c.Request.Context(), service.HistoryParams{
 		GAddress:      gAddress,
 		CAddress:      cAddress,
 		Network:       network,
-		SorobanRPCURL: sorobanURL,
-		HorizonURL:    horizonURL,
-		NativeSACID:   nativeSACID,
+		SorobanRPCURL: h.cfg.SorobanRPCURL,
+		HorizonURL:    h.cfg.HorizonURL,
+		NativeSACID:   h.cfg.NativeSACID,
 		Limit:         limit,
 	})
 	if err != nil {
@@ -78,11 +76,4 @@ func (h *HistoryHandler) GetHistory(c *gin.Context) {
 		"transactions": txs,
 		"network":      network,
 	})
-}
-
-func (h *HistoryHandler) networkURLs(network string) (sorobanURL, horizonURL, nativeSACID string) {
-	if network == "mainnet" {
-		return h.cfg.SorobanRPCURLMainnet, h.cfg.HorizonURLMainnet, h.cfg.NativeSACIDMainnet
-	}
-	return h.cfg.SorobanRPCURLTestnet, h.cfg.HorizonURLTestnet, h.cfg.NativeSACIDTestnet
 }

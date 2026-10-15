@@ -20,12 +20,6 @@ var ErrRelayerNotConfigured = errors.New("relayer url not configured")
 // memo_id (404 from GET /deposit/status/{memo_id}).
 var ErrIntentNotFound = errors.New("funding intent not found")
 
-// ErrNetworkUnsupported is returned for a funding request on a network this
-// deployment's latch-relayer doesn't serve — see CreateFundingIntent. The
-// request is valid, the capability just isn't there, so it's a hard 400 rather
-// than something a retry can fix.
-var ErrNetworkUnsupported = errors.New("network not supported for funding")
-
 // ErrRelayerUnavailable is returned when latch-relayer is configured and the
 // request is well-formed, but the call didn't reach a healthy relayer —
 // transport error, timeout (it sleeps when idle and takes tens of seconds to
@@ -85,13 +79,6 @@ func NewRelayerService(baseURL, apiKey string, timeout time.Duration) *RelayerSe
 		retryInterval: 2 * time.Second,
 		httpClient:    &http.Client{Timeout: timeout},
 	}
-}
-
-// configured reports whether this relayer has somewhere to call. Callers use it
-// to decide whether a network is served at all, rather than discovering the
-// empty base URL one request later.
-func (s *RelayerService) configured() bool {
-	return s != nil && s.baseURL != ""
 }
 
 // authorize attaches latch-relayer's shared secret. Every route but /health
@@ -171,6 +158,22 @@ func (s *RelayerService) send(ctx context.Context, req *http.Request) (*http.Res
 	}
 }
 
+// relayerReadErr classifies a failure to read the relayer's response body.
+//
+// The relayer answering headers and then stalling mid-body is a real failure
+// mode under load: our own call budget expires part-way through the read and
+// the decode fails with a context error. That is an availability problem the
+// caller should retry, not an internal fault, so it has to carry
+// ErrRelayerUnavailable — otherwise callers surface it as a 500 and the
+// fail-closed path reads as a bug in this service. Anything else is a genuine
+// protocol error and stays as-is.
+func relayerReadErr(what string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %s: %w", ErrRelayerUnavailable, what, err)
+	}
+	return fmt.Errorf("%s: %w", what, err)
+}
+
 // CreateIntentInput are the parameters for a new funding intent. ExpectedAmt,
 // ExternalID, and ExpiresIn are optional passthroughs to latch-relayer.
 type CreateIntentInput struct {
@@ -232,7 +235,7 @@ func (s *RelayerService) CreateIntent(ctx context.Context, in CreateIntentInput)
 
 	var out createIntentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return Intent{}, fmt.Errorf("decode create intent response: %w", err)
+		return Intent{}, relayerReadErr("decode create intent response", err)
 	}
 
 	expiresAt, err := time.Parse(time.RFC3339, out.ExpiresAt)
@@ -304,7 +307,7 @@ func (s *RelayerService) DepositStatus(ctx context.Context, memoID string) (Depo
 
 	var out depositStatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return DepositStatus{}, fmt.Errorf("decode deposit status response: %w", err)
+		return DepositStatus{}, relayerReadErr("decode deposit status response", err)
 	}
 
 	expiresAt, err := time.Parse(time.RFC3339, out.ExpiresAt)

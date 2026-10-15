@@ -127,8 +127,7 @@ LEFT JOIN (
   FROM webapp.multisig_proposals
   GROUP BY multisig_account_id
 ) p ON p.multisig_account_id = a.id
-WHERE a.user_id = $1
-   OR EXISTS (SELECT 1 FROM webapp.multisig_members m WHERE m.multisig_account_id = a.id AND m.user_id = $1)
+WHERE EXISTS (SELECT 1 FROM webapp.multisig_members m WHERE m.multisig_account_id = a.id AND m.user_id = $1::uuid)
 ORDER BY a.created_at DESC
 `
 
@@ -141,11 +140,14 @@ type ListMultisigAccountsWithProposalCountForUserRow struct {
 	ProposalCount       int64     `json:"proposal_count"`
 }
 
-// Visible to a user if they created the account OR they have a member row
-// (established at draft-join time or via register) linked to their session.
-// The caller's own member id (needed by the extension for proposal
-// approvals) is resolved separately in Go from ListMultisigMembersForAccount,
-// since sqlc can't reliably infer nullability for a synthetic joined column.
+// Visible to a user only if they hold a member row (established at draft-join
+// time, via register, or re-linked at login by RelinkMultisigMembersByCredential)
+// linked to their session — i.e. a wallet they can actually sign for. Creator
+// rows (a.user_id) are deliberately NOT a visibility source: a session that
+// merely deployed a wallet it holds no signer in must not appear to own it.
+// The caller's own member id (needed by the extension for proposal approvals)
+// is resolved separately in Go from ListMultisigMembersForAccount, since sqlc
+// can't reliably infer nullability for a synthetic joined column.
 func (q *Queries) ListMultisigAccountsWithProposalCountForUser(ctx context.Context, userID uuid.UUID) ([]ListMultisigAccountsWithProposalCountForUserRow, error) {
 	rows, err := q.db.QueryContext(ctx, listMultisigAccountsWithProposalCountForUser, userID)
 	if err != nil {
@@ -214,6 +216,27 @@ func (q *Queries) ListMultisigMembersForAccount(ctx context.Context, multisigAcc
 		return nil, err
 	}
 	return items, nil
+}
+
+const relinkMultisigMembersByCredential = `-- name: RelinkMultisigMembersByCredential :exec
+UPDATE webapp.multisig_members
+SET user_id = $1
+WHERE credential_id = $2 AND user_id IS DISTINCT FROM $1
+`
+
+type RelinkMultisigMembersByCredentialParams struct {
+	UserID       uuid.NullUUID  `json:"user_id"`
+	CredentialID sql.NullString `json:"credential_id"`
+}
+
+// Re-points every member row for a given passkey at the user who just proved
+// ownership of it in a WebAuthn assertion. This is the same linking rule
+// RegisterAccount applies, triggered at login where it needs no salt and no
+// member list — the fix for "my multisig wallets are missing on a new device".
+// Delegated (g_address) members have no login ceremony and are unaffected.
+func (q *Queries) RelinkMultisigMembersByCredential(ctx context.Context, arg RelinkMultisigMembersByCredentialParams) error {
+	_, err := q.db.ExecContext(ctx, relinkMultisigMembersByCredential, arg.UserID, arg.CredentialID)
+	return err
 }
 
 const upsertMultisigAccount = `-- name: UpsertMultisigAccount :one

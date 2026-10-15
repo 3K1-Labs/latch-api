@@ -18,6 +18,22 @@ import (
 // service would fail that table's foreign key on every call.
 type AuditAction string
 
+// On-ramp actions. These move customer money, so every state change is
+// recorded: which destination a session was created for, and every subsequent
+// status change. Without them a disputed deposit has no trail on our side.
+const (
+	ActionOnRampSessionCreated AuditAction = "onramp_session_created"
+	ActionOnRampIntentUpdated  AuditAction = "onramp_intent_updated"
+)
+
+// Backup-signer actions. Adding or removing a signer changes who can spend
+// from a smart account, so every state change is recorded.
+const (
+	ActionSignerAttached AuditAction = "signer_attached"
+	ActionSignerAdded    AuditAction = "signer_added"
+	ActionSignerRemoved  AuditAction = "signer_removed"
+)
+
 type AuditService struct {
 	q *db.Queries
 }

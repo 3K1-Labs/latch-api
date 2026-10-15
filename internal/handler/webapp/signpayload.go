@@ -49,8 +49,9 @@ func (h *SignPayloadHandler) Create(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.Network != "testnet" && req.Network != "mainnet" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, `network must be "testnet" or "mainnet".`)
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		failNetworkResolution(c, err)
 		return
 	}
 	if err := webapp.ValidateCallbackURL(req.Callback); err != nil {
@@ -63,7 +64,7 @@ func (h *SignPayloadHandler) Create(c *gin.Context) {
 		submit = *req.Submit
 	}
 	body := map[string]any{
-		"network":             req.Network,
+		"network":             string(network),
 		"smartAccountAddress": req.SmartAccountAddress,
 		"unsignedTxXdr":       req.UnsignedTxXdr,
 		"callback":            req.Callback,

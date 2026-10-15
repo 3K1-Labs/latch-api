@@ -13,10 +13,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o latch-backend ./cmd/se
 # Runtime stage — minimal Alpine image (~10 MB total)
 FROM alpine:3.19
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata \
+    && adduser -D -H -u 10001 latch
 
 WORKDIR /app
 COPY --from=builder /app/latch-backend .
+
+USER latch
 
 EXPOSE 8080
 

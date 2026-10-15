@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/latch/backend/internal/deploynet"
 )
 
 type Config struct {
@@ -34,27 +35,38 @@ type Config struct {
 
 	AppEnv string
 
-	// Stellar network endpoints
-	SorobanRPCURLTestnet string
-	SorobanRPCURLMainnet string
-	HorizonURLTestnet    string
-	HorizonURLMainnet    string
-	NativeSACIDTestnet   string
-	NativeSACIDMainnet   string
+	// Network is the one Stellar network this deployment serves: "testnet" or
+	// "mainnet", from STELLAR_NETWORK. See docs/network-per-deployment.md.
+	Network string
+
+	// Stellar endpoints and contracts for Network. On testnet the public SDF
+	// endpoints and known testnet contracts are defaults; on mainnet every one
+	// of these must be set explicitly (see requireMainnetVars).
+	SorobanRPCURL string
+	HorizonURL    string
+	NativeSACID   string
 
 	// Prices
 	CoinGeckoAPIKey string
 
 	// Passkey wallet sign-in: which Soroban RPC to read smart-account signers
-	// from (per network — a smart account exists on exactly one network, so the
-	// sign-in request's network selects the RPC), and which WebAuthn origins
-	// (clientDataJSON.origin) are accepted. Origins are matched by exact string
-	// equality, so each entry must be a full origin including the scheme —
-	// "https://latch.finance", "chrome-extension://<id>". A bare host never
-	// matches anything a browser produces.
-	WalletAuthSorobanURL        string
-	WalletAuthSorobanURLMainnet string
-	WebAuthnAllowedOrigins      []string
+	// from (defaults to SorobanRPCURL), and which WebAuthn origins
+	// (clientDataJSON.origin) are accepted. Entries are matched verbatim, with
+	// the single exception that a bare host and its https:// form are the same
+	// origin ("uselatch.app" == "https://uselatch.app") — see originAllowed.
+	// Everything else must be listed exactly as the client sends it:
+	// "chrome-extension://<id>" for the extension, and
+	// "android:apk-key-hash:<base64url-sha256-of-signing-cert>" for each
+	// Android signing certificate whose build uses OS platform passkeys
+	// (debug, EAS/Play upload, and Play app-signing keys are all distinct).
+	WalletAuthSorobanURL   string
+	WebAuthnAllowedOrigins []string
+
+	// BundlerAllowedContracts bounds which contracts the mobile relay will
+	// spend bundler fees invoking (see service.BundlerPolicy). Empty allows
+	// everything — enabling it blind would break sends for any asset whose SAC
+	// is not listed, so it is opt-in per deployment.
+	BundlerAllowedContracts []string
 
 	// Web app + Chrome extension backend (ported from a separate Next.js
 	// service). WebAppWebAuthnExtensionIDs is distinct from
@@ -66,14 +78,13 @@ type Config struct {
 	WebAppWebAuthnExtensionIDs []string
 
 	// BUNDLER_SECRET pays Soroban transaction fees on behalf of webapp/extension
-	// users and signs bundler-side transactions. Missing or invalid must disable
-	// the dependent route groups (logged at startup), not crash the server —
-	// mobile traffic must keep flowing regardless of webapp config completeness.
+	// users and signs bundler-side transactions. On testnet, missing or invalid
+	// disables the dependent route groups (logged at startup) rather than
+	// crashing the server; on mainnet it is required.
 	WebAppBundlerSecret               string
 	WebAppLegacyDelegatedSignerSecret string
 
 	WebAppFactoryAddress          string
-	WebAppFactoryAddressMainnet   string
 	WebAppWebAuthnVerifierAddress string
 	// WebAppEd25519VerifierAddress is the Ed25519PhantomVerifier contract
 	// address configured as the factory's ed25519_verifier — verifies a
@@ -81,20 +92,8 @@ type Config struct {
 	// lowercase_hex(auth_payload_hash) (see latch-smart-account
 	// ed25519-phantom-verifier). Required only for Phantom-signer routes.
 	WebAppEd25519VerifierAddress string
-	WebAppNetworkPassphrase      string
-
-	// Mainnet counterparts of the bundler/factory/verifier/passphrase fields
-	// above. Empty WebAppBundlerSecretMainnet disables mainnet webapp
-	// transaction routes (they return mainnet_not_configured) without
-	// affecting testnet — see docs/webapp-port.md and
-	// LATCH_GO_BACKEND_MAINNET_SUPPORT.md's compatibility rule. Empty
-	// WebAppFactoryAddressMainnet independently disables mainnet
-	// smart-account creation routes only (transaction routes above don't
-	// need a factory address).
-	WebAppBundlerSecretMainnet           string
-	WebAppWebAuthnVerifierAddressMainnet string
-	WebAppEd25519VerifierAddressMainnet  string
-	WebAppNetworkPassphraseMainnet       string
+	// WebAppNetworkPassphrase is derived from Network, never configured.
+	WebAppNetworkPassphrase string
 
 	// Browser WebAuthn (passkey) ceremony config — distinct from
 	// WebAuthnAllowedOrigins/WalletAuthSorobanURL above, which serve mobile's
@@ -104,12 +103,10 @@ type Config struct {
 	WebAppWebAuthnDevTrustReqHost bool
 	WebAppAllowedDevOrigins       []string
 
-	// Asset catalog for balances/transfers. Native XLM reuses
-	// NativeSACIDTestnet/Mainnet above (same contract regardless of caller);
-	// USDC has no existing mobile equivalent, so it gets its own field.
-	WebAppUSDCSACAddressTestnet string
-	WebAppUSDCSACAddressMainnet string
-	WebAppAssetAllowlistJSON    string
+	// Asset catalog for balances/transfers. Native XLM reuses NativeSACID
+	// above; USDC has no existing mobile equivalent, so it gets its own field.
+	WebAppUSDCSACAddress     string
+	WebAppAssetAllowlistJSON string
 
 	// Demo counter contract used by GET /api/counter and the multisig demo
 	// proposal flow (operationKind "counter_increment").
@@ -118,8 +115,7 @@ type Config struct {
 	// (hex-encoded) POST /api/smart-account (Phantom connect) deploys via a
 	// direct createContractV2 host function — the legacy, pre-factory
 	// deployment path, distinct from WebAppFactoryAddress's create_account.
-	WebAppSmartAccountWasmHash        string
-	WebAppSmartAccountWasmHashMainnet string
+	WebAppSmartAccountWasmHash string
 
 	// MoonPay on-ramp — dev-only, /api/on-ramp/* returns 403 in production
 	// regardless of whether these are configured.
@@ -135,17 +131,37 @@ type Config struct {
 	// Transak on-ramp — a second provider on the same /api/on-ramp/session
 	// route, selected by "provider":"transak". Empty WebAppTransakAPIKey or
 	// WebAppTransakAPISecret disables it. Transak delivers to Stellar mainnet
-	// only, so the service additionally refuses to build a session unless
-	// WebAppOnRampPoolNetwork is "mainnet" — see OnRampService.CreateTransakIntent.
+	// only, so the service additionally refuses to build a session unless the
+	// deployment is on mainnet — see OnRampService.CreateTransakIntent.
 	WebAppTransakAPIKey         string
 	WebAppTransakAPISecret      string
 	WebAppTransakEnv            string // "staging" | "production"
 	WebAppTransakReferrerDomain string
 	WebAppTransakAPIBase        string // override for the Transak hosts, mainly for tests
 
-	// Network the on-ramp pool account lives on. Gates providers that can only
-	// deliver to mainnet; defaults to testnet so the gate is closed by default.
-	WebAppOnRampPoolNetwork string // "testnet" | "mainnet"
+	// WebAppOnRampIntentTTL is how long the relayer keeps the on-ramp's funding
+	// intent alive, sent as `expires_in` on POST /intents. It must cover the
+	// slowest settlement path the providers offer, not the fastest: latch-relayer
+	// defaults to one hour, and its forwarder sweeps any deposit arriving after
+	// expiry to the recovery address instead of crediting it. Card purchases
+	// settle in minutes, but ACH and SEPA take one to three business days, so an
+	// hour would strand every bank-funded purchase. Defaults to 7 days.
+	WebAppOnRampIntentTTL time.Duration
+
+	// WebAppOnRampRelayerTimeout bounds the relayer call made while building an
+	// on-ramp session. It is deliberately shorter than RelayerTimeout: that
+	// budget (25s) is sized for /v1/accounts/deposit-intent, which calls the
+	// relayer and nothing else, whereas the on-ramp calls a provider afterwards
+	// and the global 30s request timeout has to cover both. The provider
+	// clients allow 10s (Transak) and 15s (MoonPay) per call, so 8s is the
+	// relayer's share of what is left.
+	//
+	// A relayer cold start (~14s on a sleeping free-tier instance) exceeds this
+	// and the session fails closed with a 503. That is the intended trade: a
+	// caller retries, rather than receiving a widget URL carrying a memo no
+	// relayer has registered. See docs/mainnet-onramp-runbook.md on moving off
+	// the free tier before real traffic.
+	WebAppOnRampRelayerTimeout time.Duration
 
 	// Retention / GC: a background sweep bounds growth of the multisig tables.
 	CleanupEnabled            bool
@@ -156,9 +172,11 @@ type Config struct {
 
 	// latch-relayer integration: mints per-session funding intents
 	// (POST {RelayerURL}/intents) and proxies their status
-	// (GET {RelayerURL}/deposit/status/{memo_id}). Empty RelayerURL disables
-	// the fund-account flow entirely — logged, not fatal, since mobile
-	// traffic must keep flowing regardless of relayer availability.
+	// (GET {RelayerURL}/deposit/status/{memo_id}). The relayer must be bound
+	// to this deployment's network: it watches one pool address on one
+	// network. Empty RelayerURL disables the fund-account flow entirely —
+	// logged, not fatal, since mobile traffic must keep flowing regardless of
+	// relayer availability.
 	RelayerURL string
 	// RelayerAPIKey is latch-relayer's shared secret, sent as
 	// `Authorization: Bearer <key>` on every call. latch-relayer rejects an
@@ -174,45 +192,43 @@ type Config struct {
 	// into a failure. Keep it comfortably under the global 30s request
 	// timeout.
 	RelayerTimeout time.Duration
-	// RelayerURLMainnet and RelayerAPIKeyMainnet address a *second*
-	// latch-relayer deployment. A relayer is bound to one Stellar network by
-	// its own NETWORK env var and watches one pool address on it, so serving
-	// mainnet deposits takes a second deployment with its own funded pool —
-	// never the testnet one, whose pool key exists on mainnet too and would
-	// silently accept real funds nothing is watching.
-	//
-	// Empty RelayerURLMainnet leaves mainnet funding unsupported, exactly as
-	// it is today. RelayerAPIKeyMainnet falls back to RelayerAPIKey when unset,
-	// for deployments that share one secret across both relayers.
-	RelayerURLMainnet    string
-	RelayerAPIKeyMainnet string
 }
 
 func Load() (*Config, error) {
 	// .env is optional in production (env vars injected directly)
 	_ = godotenv.Load()
 
+	network := strings.ToLower(strings.TrimSpace(os.Getenv("STELLAR_NETWORK")))
+	// testnetDefault is fallback on testnet and "" on mainnet, where the
+	// setting must be configured explicitly (requireMainnetVars).
+	testnetDefault := func(fallback string) string {
+		if network == deploynet.Mainnet {
+			return ""
+		}
+		return fallback
+	}
+	sorobanRPCURL := getEnv("SOROBAN_RPC_URL", testnetDefault("https://soroban-testnet.stellar.org"))
+
 	cfg := &Config{
-		Port:                        getEnv("PORT", "8080"),
-		DatabaseURL:                 requireEnv("DATABASE_URL"),
-		RedisURL:                    requireEnv("REDIS_URL"),
-		JWTSecret:                   requireEnv("JWT_SECRET"),
-		ResendAPIKey:                requireEnv("RESEND_API_KEY"),
-		EmailFromName:               getEnv("EMAIL_FROM_NAME", "Latch"),
-		EmailFromAddr:               getEnv("EMAIL_FROM_ADDR", "noreply@yourdomain.com"),
-		ServerPepper:                getEnv("SERVER_PEPPER", ""),
-		EncryptionMasterKey:         getEnv("ENCRYPTION_MASTER_KEY", ""),
-		AppEnv:                      getEnv("APP_ENV", "development"),
-		SorobanRPCURLTestnet:        getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org"),
-		SorobanRPCURLMainnet:        getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com"),
-		HorizonURLTestnet:           getEnv("HORIZON_URL_TESTNET", "https://horizon-testnet.stellar.org"),
-		HorizonURLMainnet:           getEnv("HORIZON_URL_MAINNET", "https://horizon.stellar.org"),
-		NativeSACIDTestnet:          getEnv("NATIVE_SAC_ID_TESTNET", ""),
-		NativeSACIDMainnet:          getEnv("NATIVE_SAC_ID_MAINNET", "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"),
-		CoinGeckoAPIKey:             getEnv("COINGECKO_API_KEY", ""),
-		WalletAuthSorobanURL:        getEnv("WALLET_AUTH_SOROBAN_URL", getEnv("SOROBAN_RPC_URL_TESTNET", "https://soroban-testnet.stellar.org")),
-		WalletAuthSorobanURLMainnet: getEnv("WALLET_AUTH_SOROBAN_URL_MAINNET", getEnv("SOROBAN_RPC_URL_MAINNET", "https://mainnet.sorobanrpc.com")),
-		WebAuthnAllowedOrigins:      splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://latch.finance")),
+		Port:                   getEnv("PORT", "8080"),
+		DatabaseURL:            requireEnv("DATABASE_URL"),
+		RedisURL:               requireEnv("REDIS_URL"),
+		JWTSecret:              requireEnv("JWT_SECRET"),
+		ResendAPIKey:           requireEnv("RESEND_API_KEY"),
+		EmailFromName:          getEnv("EMAIL_FROM_NAME", "Latch"),
+		EmailFromAddr:          getEnv("EMAIL_FROM_ADDR", "noreply@yourdomain.com"),
+		ServerPepper:           getEnv("SERVER_PEPPER", ""),
+		EncryptionMasterKey:    getEnv("ENCRYPTION_MASTER_KEY", ""),
+		AppEnv:                 getEnv("APP_ENV", "development"),
+		Network:                network,
+		SorobanRPCURL:          sorobanRPCURL,
+		HorizonURL:             getEnv("HORIZON_URL", testnetDefault("https://horizon-testnet.stellar.org")),
+		NativeSACID:            getEnv("NATIVE_SAC_ID", testnetDefault("CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC")),
+		CoinGeckoAPIKey:        getEnv("COINGECKO_API_KEY", ""),
+		WalletAuthSorobanURL:   getEnv("WALLET_AUTH_SOROBAN_URL", sorobanRPCURL),
+		WebAuthnAllowedOrigins: splitCSV(getEnv("WEBAUTHN_ALLOWED_ORIGINS", "https://uselatch.app")),
+
+		BundlerAllowedContracts: splitCSV(getEnv("BUNDLER_ALLOWED_CONTRACTS", "")),
 
 		WebAppCORSAllowedOrigins:   splitCSV(getEnv("API_CORS_ALLOWED_ORIGINS", "")),
 		WebAppWebAuthnExtensionIDs: splitCSV(getEnv("WEBAUTHN_EXTENSION_IDS", "")),
@@ -221,28 +237,20 @@ func Load() (*Config, error) {
 		WebAppLegacyDelegatedSignerSecret: getEnv("LEGACY_DELEGATED_SIGNER_SECRET", getEnv("LEGACY_BUNDLER_SECRET", "")),
 
 		WebAppFactoryAddress:          getEnv("NEXT_PUBLIC_FACTORY_ADDRESS", ""),
-		WebAppFactoryAddressMainnet:   getEnv("NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET", ""),
 		WebAppWebAuthnVerifierAddress: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS", ""),
 		WebAppEd25519VerifierAddress:  getEnv("NEXT_PUBLIC_VERIFIER_ADDRESS", ""),
-		WebAppNetworkPassphrase:       getEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "Test SDF Network ; September 2015"),
-
-		WebAppBundlerSecretMainnet:           getEnv("BUNDLER_SECRET_MAINNET", ""),
-		WebAppWebAuthnVerifierAddressMainnet: getEnv("NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS_MAINNET", ""),
-		WebAppEd25519VerifierAddressMainnet:  getEnv("NEXT_PUBLIC_VERIFIER_ADDRESS_MAINNET", ""),
-		WebAppNetworkPassphraseMainnet:       getEnv("MAINNET_NETWORK_PASSPHRASE", "Public Global Stellar Network ; September 2015"),
+		WebAppNetworkPassphrase:       deploynet.Passphrase(network),
 
 		WebAppWebAuthnRPID:            getEnv("WEBAUTHN_RP_ID", ""),
 		WebAppWebAuthnOrigin:          getEnv("WEBAUTHN_ORIGIN", ""),
 		WebAppWebAuthnDevTrustReqHost: getEnv("WEBAUTHN_DEV_TRUST_REQUEST_HOST", "") != "",
 		WebAppAllowedDevOrigins:       splitCSV(getEnv("ALLOWED_DEV_ORIGINS", "")),
 
-		WebAppUSDCSACAddressTestnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS", "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"),
-		WebAppUSDCSACAddressMainnet: getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS_MAINNET", ""),
-		WebAppAssetAllowlistJSON:    getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
+		WebAppUSDCSACAddress:     getEnv("NEXT_PUBLIC_USDC_SAC_ADDRESS", testnetDefault("CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA")),
+		WebAppAssetAllowlistJSON: getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
 
-		WebAppCounterContractAddress:      getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
-		WebAppSmartAccountWasmHash:        getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH", "c00f972cb8ed5eba151f4cd6e97519db679a7a31cc657838449b405fb9cf53c4"),
-		WebAppSmartAccountWasmHashMainnet: getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH_MAINNET", ""),
+		WebAppCounterContractAddress: getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
+		WebAppSmartAccountWasmHash:   getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH", testnetDefault("c00f972cb8ed5eba151f4cd6e97519db679a7a31cc657838449b405fb9cf53c4")),
 
 		WebAppMoonPaySecretKey:         getEnv("MOONPAY_SECRET_KEY", ""),
 		WebAppMoonPayPublishableKey:    getEnv("MOONPAY_PUBLISHABLE_KEY", ""),
@@ -258,7 +266,8 @@ func Load() (*Config, error) {
 		WebAppTransakEnv:            getEnv("TRANSAK_ENV", "staging"),
 		WebAppTransakReferrerDomain: getEnv("TRANSAK_REFERRER_DOMAIN", "latch.finance"),
 		WebAppTransakAPIBase:        getEnv("TRANSAK_API_BASE", ""),
-		WebAppOnRampPoolNetwork:     getEnv("POOL_NETWORK", "testnet"),
+		WebAppOnRampIntentTTL:       time.Duration(getEnvInt("ONRAMP_INTENT_TTL_SEC", 7*24*60*60)) * time.Second,
+		WebAppOnRampRelayerTimeout:  time.Duration(getEnvInt("ONRAMP_RELAYER_TIMEOUT_SEC", 8)) * time.Second,
 
 		CleanupEnabled:            getEnvBool("CLEANUP_ENABLED", true),
 		CleanupInterval:           time.Duration(getEnvInt("CLEANUP_INTERVAL_MIN", 60)) * time.Minute,
@@ -266,11 +275,9 @@ func Load() (*Config, error) {
 		WCKBundleRetention:        time.Duration(getEnvInt("WCK_BUNDLE_RETENTION_DAYS", 180)) * 24 * time.Hour,
 		WalletMembershipRetention: time.Duration(getEnvInt("WALLET_MEMBERSHIP_RETENTION_DAYS", 180)) * 24 * time.Hour,
 
-		RelayerURL:           getEnv("RELAYER_URL", ""),
-		RelayerAPIKey:        getEnv("RELAYER_API_KEY", ""),
-		RelayerURLMainnet:    getEnv("RELAYER_URL_MAINNET", ""),
-		RelayerAPIKeyMainnet: getEnv("RELAYER_API_KEY_MAINNET", ""),
-		RelayerTimeout:       time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
+		RelayerURL:     getEnv("RELAYER_URL", ""),
+		RelayerAPIKey:  getEnv("RELAYER_API_KEY", ""),
+		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
 	}
 
 	var err error
@@ -297,14 +304,46 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ENCRYPTION_MASTER_KEY must be at least 32 bytes when set")
 	}
 
-	// A mainnet relayer sharing the testnet relayer's shared secret is the
-	// common deployment, so an unset mainnet key means "same secret", not
-	// "no auth" — the latter would 401 every mainnet call.
-	if cfg.RelayerAPIKeyMainnet == "" {
-		cfg.RelayerAPIKeyMainnet = cfg.RelayerAPIKey
+	if err := validateNetwork(cfg); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// requiredMainnetVars must be set explicitly on mainnet, where there are no
+// defaults: production must never run on an endpoint or contract nobody chose.
+var requiredMainnetVars = []string{
+	"SOROBAN_RPC_URL",
+	"HORIZON_URL",
+	"NATIVE_SAC_ID",
+	"BUNDLER_SECRET",
+	"NEXT_PUBLIC_FACTORY_ADDRESS",
+	"NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS",
+	"NEXT_PUBLIC_VERIFIER_ADDRESS",
+	"NEXT_PUBLIC_USDC_SAC_ADDRESS",
+	"NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH",
+}
+
+func validateNetwork(cfg *Config) error {
+	if cfg.Network != deploynet.Testnet && cfg.Network != deploynet.Mainnet {
+		return fmt.Errorf(`STELLAR_NETWORK must be "testnet" or "mainnet": each deployment serves exactly one network`)
+	}
+	if cfg.Network == deploynet.Mainnet && cfg.AppEnv != "production" {
+		return fmt.Errorf("STELLAR_NETWORK=mainnet requires APP_ENV=production (got %q)", cfg.AppEnv)
+	}
+	if cfg.Network == deploynet.Mainnet {
+		var missing []string
+		for _, key := range requiredMainnetVars {
+			if os.Getenv(key) == "" {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("STELLAR_NETWORK=mainnet requires %s: mainnet has no defaults", strings.Join(missing, ", "))
+		}
+	}
+	return nil
 }
 
 func requireEnv(key string) string {

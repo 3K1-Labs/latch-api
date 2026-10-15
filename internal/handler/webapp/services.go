@@ -14,6 +14,7 @@ type webauthnService interface {
 	BeginAuthentication(ctx context.Context, userID, rpID, origin string) (webapp.AuthenticationOptions, error)
 	FinishAuthentication(ctx context.Context, in webapp.FinishAuthenticationInput) (webapp.AuthenticatedCredential, error)
 	ListCredentials(ctx context.Context, userID string) ([]webapp.CredentialSummary, error)
+	GetCredentialKeyDataHex(ctx context.Context, credentialID string) (string, error)
 }
 
 type smartAccountService interface {
@@ -27,7 +28,33 @@ type smartAccountService interface {
 }
 
 type accountsService interface {
-	ListAccounts(ctx context.Context, userID string) ([]webapp.Account, error)
+	ListAccountsForProvedCredentials(ctx context.Context, credentialIDs []string) ([]webapp.Account, error)
+}
+
+// sessionService mints a fresh webapp session bound to an existing user (used
+// by the WebAuthn login handler when a verified assertion resolves to a
+// different user than the caller's "sid" cookie names) and records/reads
+// which credentials the current session has actually proved via a WebAuthn
+// ceremony (LATCH_BACKEND_SIGNER_IDENTITY.md) — the authorization source for
+// signer-changing and account-listing routes, not the cookie's user id.
+type sessionService interface {
+	IssueForUser(ctx context.Context, userID string) (webapp.Session, error)
+	ReplaceProvedCredential(ctx context.Context, sessionID, credentialID string) error
+	AddProvedCredential(ctx context.Context, sessionID, credentialID string) error
+	ProvedCredentials(ctx context.Context, sessionID string) ([]string, error)
+	HasProvedCredential(ctx context.Context, sessionID, credentialID string) (bool, error)
+}
+
+// passkeyCredentialIndexService records which smart account a passkey
+// deployed, keyed by that passkey's own WebAuthn credential ID, so a device
+// that only has the (synced) passkey — no local state, no session — can later
+// recover the wallet's address without the user pasting it in. The mobile
+// deploy path (handler.SmartAccountHandler.DeployWebauthn) already does this;
+// wiring it here closes the gap where an extension-created passkey account is
+// invisible to that recovery lookup.
+type passkeyCredentialIndexService interface {
+	Register(ctx context.Context, keyDataHex, smartAccountAddress, label string, seq int32) error
+	Deregister(ctx context.Context, keyDataHex string) error
 }
 
 type auditService interface {
@@ -45,6 +72,10 @@ type transactionService interface {
 	BuildCounter(ctx context.Context, in webapp.BuildCounterInput) (webapp.BuildCounterResult, error)
 	BuildDelegatedCounter(ctx context.Context, in webapp.BuildDelegatedCounterInput) (webapp.BuildDelegatedCounterResult, error)
 	BuildSwap(ctx context.Context, in webapp.BuildSwapInput) (webapp.BuildSwapResult, error)
+	AddSigner(ctx context.Context, in webapp.AddSignerInput) (webapp.AddSignerResult, error)
+	RemoveSigner(ctx context.Context, in webapp.RemoveSignerInput) (webapp.RemoveSignerResult, error)
+	ConfirmAddSignerRule(ctx context.Context, in webapp.ConfirmAddSignerRuleInput) (contextRuleID uint32, err error)
+	ConfirmRemoveSignerRule(ctx context.Context, in webapp.ConfirmRemoveSignerRuleInput) error
 }
 
 type contextRulesService interface {
@@ -103,6 +134,30 @@ type backupPasskeyService interface {
 	RecordIntent(ctx context.Context, userID, smartAccountAddress, label string) error
 }
 
+// accountSignerService owns the webapp.account_signers rows behind backup
+// passkey signers: attaching a second credential, gating add/remove-signer
+// build to callers who already prove ownership of a signer on the account,
+// and persisting the on-chain signer_id once add_signer succeeds.
+type accountSignerService interface {
+	AttachCredential(ctx context.Context, smartAccountAddress, credentialID, label string) error
+	IsSignerOfAccount(ctx context.Context, credentialID, smartAccountAddress string) (bool, error)
+	HasOtherSignerCredential(ctx context.Context, smartAccountAddress, excludingCredentialID string) (bool, error)
+	MarkSignerContextRule(ctx context.Context, smartAccountAddress, credentialID string, contextRuleID uint32) error
+	GetSignerContextRuleID(ctx context.Context, smartAccountAddress, credentialID string) (contextRuleID uint32, ok bool, err error)
+	RemoveCredential(ctx context.Context, smartAccountAddress, credentialID string) error
+	ResolveByCredentialID(ctx context.Context, credentialID string) (smartAccountAddress string, err error)
+}
+
 type counterService interface {
 	GetValue(ctx context.Context) (uint32, error)
+}
+
+// notificationService records curated activity events for webapp users
+// in-app only (no push — see internal/service/webapp/notification_service.go).
+type notificationService interface {
+	Notify(ctx context.Context, userID string, rec webapp.NotificationRecord) error
+	List(ctx context.Context, userID, cursor string, limit int) ([]webapp.Notification, string, error)
+	UnreadCount(ctx context.Context, userID string) (int, error)
+	MarkRead(ctx context.Context, userID, notificationID string) error
+	MarkAllRead(ctx context.Context, userID string) error
 }

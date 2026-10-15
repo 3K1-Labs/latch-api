@@ -2,13 +2,13 @@ package webapp
 
 import (
 	"errors"
-	"strings"
+
+	"github.com/latch/backend/internal/deploynet"
 )
 
 // Network identifies which Stellar network a webapp transaction/smart-account
-// request targets. Omitted or "testnet" must remain byte-for-byte identical
-// to pre-mainnet-support behavior; "mainnet" must never silently fall back to
-// testnet.
+// request targets. A deployment serves one network, so it is always the
+// deployment's network once ParseNetwork has accepted it.
 type Network string
 
 const (
@@ -20,16 +20,16 @@ const (
 // empty string, "testnet", or "mainnet" (case-insensitive).
 var ErrInvalidNetwork = errors.New(`network must be "testnet" or "mainnet"`)
 
-// ParseNetwork parses a client-supplied network string, defaulting an empty
-// value to testnet for backward compatibility with callers that predate the
-// network field.
+// ParseNetwork parses a client-supplied network string. Empty means the
+// deployment's network, and the network this deployment does not serve fails
+// with an error wrapping deploynet.ErrMismatch (see deploynet.Resolve).
 func ParseNetwork(raw string) (Network, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "testnet":
-		return NetworkTestnet, nil
-	case "mainnet":
-		return NetworkMainnet, nil
-	default:
+	network, err := deploynet.Resolve(raw)
+	if errors.Is(err, deploynet.ErrInvalid) {
 		return "", ErrInvalidNetwork
 	}
+	if err != nil {
+		return "", err
+	}
+	return Network(network), nil
 }
