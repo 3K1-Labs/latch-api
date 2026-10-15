@@ -271,6 +271,106 @@ func TestCreateDepositIntent_Success(t *testing.T) {
 	assert.Equal(t, "GB3POOL", data["pool_address"])
 }
 
+func TestCreateDepositIntent_IdempotentRetryHeader(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC()
+	stub := &stubAccount{createIntentResult: service.Intent{
+		IntentID:    "intent-idem-1",
+		MemoID:      "67890",
+		PoolAddress: "GB3POOL",
+		ExpiresAt:   expiresAt,
+	}}
+	h := newAccountHandler(stub, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	// First request with Idempotency-Key
+	w1 := httptest.NewRecorder()
+	body1 := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req1 := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body1), "uid")
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", "retry-key-abc")
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusCreated, w1.Code)
+	assert.Equal(t, 1, stub.createIntentCalls)
+
+	var resp1 map[string]any
+	require.NoError(t, json.Unmarshal(w1.Body.Bytes(), &resp1))
+	data1 := resp1["data"].(map[string]any)
+	assert.Equal(t, "intent-idem-1", data1["intent_id"])
+	assert.Equal(t, "67890", data1["memo_id"])
+
+	// Second request retried with same Idempotency-Key
+	w2 := httptest.NewRecorder()
+	body2 := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req2 := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body2), "uid")
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", "retry-key-abc")
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusCreated, w2.Code)
+	// Must NOT call underlying service a second time!
+	assert.Equal(t, 1, stub.createIntentCalls)
+
+	var resp2 map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+	data2 := resp2["data"].(map[string]any)
+	assert.Equal(t, "intent-idem-1", data2["intent_id"])
+	assert.Equal(t, "67890", data2["memo_id"])
+	assert.Equal(t, "GB3POOL", data2["pool_address"])
+
+	// Third request with different Idempotency-Key mints new intent
+	w3 := httptest.NewRecorder()
+	body3 := postJSONBody(map[string]any{"smart_account_address": testContractAddr})
+	req3 := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body3), "uid")
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Idempotency-Key", "different-key")
+	r.ServeHTTP(w3, req3)
+	assert.Equal(t, http.StatusCreated, w3.Code)
+	assert.Equal(t, 2, stub.createIntentCalls)
+}
+
+func TestCreateDepositIntent_IdempotentRetryBody(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC()
+	stub := &stubAccount{createIntentResult: service.Intent{
+		IntentID:    "intent-body-1",
+		MemoID:      "99999",
+		PoolAddress: "GB3POOL",
+		ExpiresAt:   expiresAt,
+	}}
+	h := newAccountHandler(stub, nil)
+	r := gin.New()
+	r.POST("/accounts/deposit-intent", h.CreateDepositIntent)
+
+	// First request with idempotency_key in body
+	w1 := httptest.NewRecorder()
+	body1 := postJSONBody(map[string]any{
+		"smart_account_address": testContractAddr,
+		"idempotency_key":       "body-retry-key",
+	})
+	req1 := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body1), "uid")
+	req1.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusCreated, w1.Code)
+	assert.Equal(t, 1, stub.createIntentCalls)
+
+	// Retry with same body idempotency_key
+	w2 := httptest.NewRecorder()
+	body2 := postJSONBody(map[string]any{
+		"smart_account_address": testContractAddr,
+		"idempotency_key":       "body-retry-key",
+	})
+	req2 := withUserID(httptest.NewRequest(http.MethodPost, "/accounts/deposit-intent", body2), "uid")
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusCreated, w2.Code)
+	assert.Equal(t, 1, stub.createIntentCalls)
+
+	var resp2 map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+	data2 := resp2["data"].(map[string]any)
+	assert.Equal(t, "intent-body-1", data2["intent_id"])
+	assert.Equal(t, "99999", data2["memo_id"])
+}
+
 // ── DepositStatus ────────────────────────────────────────────────────────────
 
 // Memo IDs are allocated per relayer deployment, so the network decides which
