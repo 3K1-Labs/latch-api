@@ -168,6 +168,7 @@ Modular AI skill documentation covering Soroban smart contracts, Stellar SDKs, S
 @.claude/rules/golang.md
 @.claude/rules/security.md
 @.claude/rules/api-conventions.md
+@.claude/rules/git-workflow.md
 
 ## Generated Code
 
