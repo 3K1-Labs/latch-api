@@ -17,7 +17,7 @@ require (
 	github.com/resend/resend-go/v2 v2.28.0
 	github.com/sqlc-dev/pqtype v0.3.0
 	github.com/stellar/go-stellar-sdk v0.7.2
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.1
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
