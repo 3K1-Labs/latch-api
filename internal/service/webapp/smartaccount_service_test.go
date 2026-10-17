@@ -188,6 +188,11 @@ func TestContractIDFromAddress_Invalid(t *testing.T) {
 
 func newTestSmartAccountService(t *testing.T, rpc sorobanRPC) (*SmartAccountService, sqlmock.Sqlmock) {
 	t.Helper()
+	return newTestSmartAccountServiceWithGasless(t, rpc, nil)
+}
+
+func newTestSmartAccountServiceWithGasless(t *testing.T, rpc sorobanRPC, g gaslessSubmitter) (*SmartAccountService, sqlmock.Sqlmock) {
+	t.Helper()
 	kp, err := keypair.Random()
 	require.NoError(t, err)
 	bundlerSvc, err := NewBundlerService(kp.Seed(), "")
@@ -199,7 +204,7 @@ func newTestSmartAccountService(t *testing.T, rpc sorobanRPC) (*SmartAccountServ
 	q := db.New(sqlDB)
 
 	factoryAddr := testContractAddress(t)
-	svc := NewSmartAccountService(rpc, bundlerSvc, q, "https://rpc.example.com", "Test SDF Network ; September 2015", factoryAddr)
+	svc := NewSmartAccountService(rpc, bundlerSvc, q, "https://rpc.example.com", "Test SDF Network ; September 2015", factoryAddr, g)
 	return svc, mock
 }
 
@@ -299,26 +304,24 @@ func TestDeploy_AlreadyDeployed_SkipsSubmission(t *testing.T) {
 	assert.Equal(t, predicted, addr)
 }
 
+// deployedAfter reports an account as not deployed for the first n ledger
+// reads (the pre-check), then deployed (the post-submit confirmation).
+func deployedAfter(n int) func(context.Context, string, []string) (*service.GetLedgerEntriesResult, error) {
+	reads := 0
+	return func(context.Context, string, []string) (*service.GetLedgerEntriesResult, error) {
+		reads++
+		if reads <= n {
+			return &service.GetLedgerEntriesResult{}, nil
+		}
+		return &service.GetLedgerEntriesResult{Entries: []service.LedgerEntry{{}}}, nil
+	}
+}
+
 func TestDeploy_FullHappyPath(t *testing.T) {
 	predicted := testContractAddress(t)
-	rpc := &fakeSorobanRPC{
-		ledgerFn: func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error) {
-			return &service.GetLedgerEntriesResult{Entries: nil}, nil // not yet deployed
-		},
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) {
-			return 41, nil
-		},
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			return &service.SimulateResult{TransactionData: minimalSorobanTransactionDataXDR(t)}, nil
-		},
-		sendFn: func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-			return &service.SendTxResult{Status: service.RPCStatusPending, Hash: "abc123"}, nil
-		},
-		getTxFn: func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error) {
-			return &service.GetTxResult{Status: service.RPCStatusSuccess, ResultMetaXdr: resultMetaXDRWithAddress(t, predicted)}, nil
-		},
-	}
-	svc, _ := newTestSmartAccountService(t, rpc)
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1)})
+	g := gaslessSuccess("abc123")
+	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, g)
 	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
 	require.NoError(t, err)
 
@@ -326,91 +329,74 @@ func TestDeploy_FullHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, already)
 	assert.Equal(t, predicted, addr)
+
+	// One sponsored create_account on the factory, for the predicted wallet.
+	require.Len(t, g.calls, 1)
+	sub := g.calls[0]
+	assert.Equal(t, service.GaslessModeSponsored, sub.Mode)
+	assert.Equal(t, predicted, sub.Wallet)
+	var env xdr.TransactionEnvelope
+	require.NoError(t, xdr.SafeUnmarshalBase64(sub.Transaction, &env))
+	invoke := env.V1.Tx.Operations[0].Body.InvokeHostFunctionOp.HostFunction.InvokeContract
+	assert.Equal(t, "create_account", string(invoke.FunctionName))
+	factory, err := invoke.ContractAddress.String()
+	require.NoError(t, err)
+	assert.Equal(t, svc.factoryAddress, factory)
+}
+func TestDeploy_NotDeployedAfterSuccess(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(2)}) // still missing after submit
+	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, gaslessSuccess("abc123"))
+	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
+	require.NoError(t, err)
+
+	_, _, err = svc.Deploy(context.Background(), params, testContractAddress(t))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not deployed")
 }
 
-func TestDeploy_AddressMismatch(t *testing.T) {
-	predicted := testContractAddress(t)
-	actual := testContractAddress(t)
-	rpc := &fakeSorobanRPC{
-		ledgerFn: func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error) {
-			return &service.GetLedgerEntriesResult{Entries: nil}, nil
-		},
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) {
-			return 41, nil
-		},
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			return &service.SimulateResult{TransactionData: minimalSorobanTransactionDataXDR(t)}, nil
-		},
-		sendFn: func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-			return &service.SendTxResult{Status: service.RPCStatusPending, Hash: "abc123"}, nil
-		},
-		getTxFn: func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error) {
-			return &service.GetTxResult{Status: service.RPCStatusSuccess, ResultMetaXdr: resultMetaXDRWithAddress(t, actual)}, nil
-		},
-	}
+func TestDeploy_PendingIsRetryable(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1)})
+	g := &fakeGasless{rec: service.GaslessRecord{Status: service.GaslessStatusUnconfirmed, TxHash: "abc123"}, err: service.ErrGaslessPending}
+	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, g)
+	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
+	require.NoError(t, err)
+
+	_, _, err = svc.Deploy(context.Background(), params, testContractAddress(t))
+	assert.ErrorIs(t, err, service.ErrGaslessPending)
+}
+
+func TestDeploy_NoGaslessConfigured(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1)})
 	svc, _ := newTestSmartAccountService(t, rpc)
 	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
 	require.NoError(t, err)
 
-	_, _, err = svc.Deploy(context.Background(), params, predicted)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mismatch")
+	_, _, err = svc.Deploy(context.Background(), params, testContractAddress(t))
+	assert.ErrorIs(t, err, service.ErrGaslessNotConfigured, "no fallback to the bundler")
 }
-
-func TestDeploy_SendError(t *testing.T) {
-	predicted := testContractAddress(t)
-	rpc := &fakeSorobanRPC{
-		ledgerFn: func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error) {
-			return &service.GetLedgerEntriesResult{Entries: nil}, nil
-		},
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) {
-			return 41, nil
-		},
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			return &service.SimulateResult{TransactionData: minimalSorobanTransactionDataXDR(t)}, nil
-		},
-		sendFn: func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-			return &service.SendTxResult{Status: service.RPCStatusError, ErrorResultXdr: "bad"}, nil
-		},
-	}
-	svc, _ := newTestSmartAccountService(t, rpc)
+func TestDeploy_GaslessUnavailable(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1)})
+	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, &fakeGasless{err: service.ErrGaslessUnavailable})
 	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
 	require.NoError(t, err)
 
-	_, _, err = svc.Deploy(context.Background(), params, predicted)
-	require.Error(t, err)
+	_, _, err = svc.Deploy(context.Background(), params, testContractAddress(t))
+	assert.ErrorIs(t, err, service.ErrGaslessUnavailable)
 }
 
 // ── DeployForCredential (orchestration) ─────────────────────────────────────
 
 func TestDeployForCredential_Success(t *testing.T) {
-	predicted := "" // filled in once we know the params, computed by fake simulate below
-	rpc := &fakeSorobanRPC{
-		ledgerFn: func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error) {
-			return &service.GetLedgerEntriesResult{Entries: nil}, nil
-		},
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) {
-			return 7, nil
-		},
-	}
 	addr := testContractAddress(t)
-	predicted = addr
-	rpc.simulateFn = func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-		// Both the predict call (Results) and the deploy simulate call
-		// (TransactionData) are served from this single fake — populate both.
-		return &service.SimulateResult{
-			Results:         []service.SimResultEntry{{XDR: contractAddressScValXDR(t, addr)}},
-			TransactionData: minimalSorobanTransactionDataXDR(t),
-		}, nil
-	}
-	rpc.sendFn = func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-		return &service.SendTxResult{Status: service.RPCStatusPending, Hash: "h1"}, nil
-	}
-	rpc.getTxFn = func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error) {
-		return &service.GetTxResult{Status: service.RPCStatusSuccess, ResultMetaXdr: resultMetaXDRWithAddress(t, addr)}, nil
-	}
-
-	svc, mock := newTestSmartAccountService(t, rpc)
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{
+		ledgerFn: deployedAfter(1),
+		simulateFn: func(context.Context, string, string, service.RPCResourceConfig) (*service.SimulateResult, error) {
+			// The address prediction.
+			return &service.SimulateResult{Results: []service.SimResultEntry{{XDR: contractAddressScValXDR(t, addr)}}}, nil
+		},
+	})
+	g := gaslessSuccess("h1")
+	svc, mock := newTestSmartAccountServiceWithGasless(t, rpc, g)
 	mock.ExpectQuery("INSERT INTO webapp.smart_accounts").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uuid.New()))
 
@@ -424,9 +410,10 @@ func TestDeployForCredential_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, keyDataHex)
 	assert.NotEmpty(t, saltHex)
-	assert.Equal(t, predicted, smartAccountAddress)
+	assert.Equal(t, addr, smartAccountAddress)
 	assert.True(t, deployed)
 	assert.False(t, alreadyDeployed)
+	assert.Len(t, g.calls, 1)
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 

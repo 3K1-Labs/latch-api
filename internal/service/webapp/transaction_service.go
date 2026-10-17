@@ -72,9 +72,12 @@ type TransactionService struct {
 	// endpoints only (BuildCounter/BuildDelegatedCounter) — unrelated to any
 	// mobile-serving or asset-transfer path.
 	counterContractAddress string
+	// gasless submits the calls Latch sponsors (setup rules, signer changes);
+	// everything else is still sourced and paid for by the bundler.
+	gasless gaslessSubmitter
 }
 
-func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string) *TransactionService {
+func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string, gasless gaslessSubmitter) *TransactionService {
 	return &TransactionService{
 		soroban:                 soroban,
 		bundler:                 bundler,
@@ -84,6 +87,7 @@ func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextR
 		webauthnVerifierAddress: webauthnVerifierAddress,
 		ed25519VerifierAddress:  ed25519VerifierAddress,
 		counterContractAddress:  counterContractAddress,
+		gasless:                 gasless,
 	}
 }
 
@@ -882,9 +886,11 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 
 // ── shared submit pipeline ───────────────────────────────────────────────────
 
-// submitWithBundler refreshes the bundler's on-chain sequence, re-simulates
-// in enforcing mode (which validates the attached auth signatures), signs
-// with the bundler keypair, sends, and polls for confirmation. Ports
+// submitWithBundler re-simulates in enforcing mode (which validates the
+// attached auth signatures), then submits. A sponsored call (setup rules,
+// signer changes) goes to latch-relayer-gasless, which sources it on a
+// channel account; anything else is signed by the bundler at its refreshed
+// on-chain sequence, sent, and polled for confirmation. Ports
 // lib/soroban-transaction-submit.ts's submitWithBundler() +
 // rebuildTxWithAuthEntries().
 func (s *TransactionService) submitWithBundler(ctx context.Context, txXdrB64 string, entries []xdr.SorobanAuthorizationEntry) (SubmitResult, error) {
@@ -900,11 +906,17 @@ func (s *TransactionService) submitWithBundler(ctx context.Context, txXdrB64 str
 		return SubmitResult{}, fmt.Errorf("expected an invoke host function operation")
 	}
 	hostFunction := op.Body.InvokeHostFunctionOp.HostFunction
+	wallet, sponsored := sponsoredWallet(hostFunction)
 
+	// Simulation ignores the sequence number, so a sponsored call never
+	// reads the bundler's: only a transaction the bundler signs needs it.
 	bundlerG := s.bundler.PublicKey()
-	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
-	if err != nil {
-		return SubmitResult{}, fmt.Errorf("refresh bundler sequence: %w", err)
+	var seq int64
+	if !sponsored {
+		var err error
+		if seq, err = s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG); err != nil {
+			return SubmitResult{}, fmt.Errorf("refresh bundler sequence: %w", err)
+		}
 	}
 
 	buildTx := func(sorobanData *xdr.SorobanTransactionData) (*txnbuild.Transaction, error) {
@@ -940,6 +952,9 @@ func (s *TransactionService) submitWithBundler(ctx context.Context, txXdrB64 str
 	}
 	if sim.Error != "" {
 		return SubmitResult{}, fmt.Errorf("auth validation failed: %s", sim.Error)
+	}
+	if sponsored {
+		return submitSponsored(ctx, s.gasless, wallet, hostFunction, entries)
 	}
 
 	var sorobanData xdr.SorobanTransactionData

@@ -239,6 +239,9 @@ func (h *TransactionHandler) SubmitWebAuthn(c *gin.Context) {
 		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
 	})
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
 			return
@@ -305,6 +308,9 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 		DelegatedGAuthEntrySynthesized: req.DelegatedGAuthEntrySynthesized,
 	})
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
 			return

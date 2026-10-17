@@ -210,4 +210,12 @@ Each latch-api deployment talks to the one latch-relayer deployment bound to its
 - `ONRAMP_RELAYER_TIMEOUT_SEC` — tighter budget for the relayer call made while building an on-ramp session (default `8`). Shorter than `RELAYER_TIMEOUT_SEC` because the on-ramp calls a provider afterwards and both must fit the global 30s request timeout
 - `ONRAMP_INTENT_TTL_SEC` — how long the relayer keeps an on-ramp intent alive (default `604800`, 7 days). Must cover the slowest settlement path: the relayer's own default is one hour, and its forwarder sweeps late deposits to recovery, so an hour would strand every bank-funded purchase
 
+### latch-relayer-gasless integration (issue #110)
+
+The bundler is a single Stellar account, so it can source one pending transaction at a time and concurrent submissions collided with `tx_bad_seq`. Sponsored transactions now go to `latch-relayer-gasless` (`POST /gasless/submit`, mode `sponsored`), which sources each on one of its channel accounts and pays the fee by fee-bump: wallet creation (factory `create_account`, in `SmartAccountService.Deploy`) and single calls to a wallet's `add_context_rule`, `add_signer` or `remove_context_rule` (in `submitWithBundler` / `SubmitBatchAuthEntries`). latch-api still runs its own enforce-mode simulation before handing a call off. The list in `internal/service/webapp/gasless.go` must match the gasless deployment's `SPONSORED_CALLS`. User-paid calls (sends, swaps, multisig execute) and multi-op batches (device pairing) are still bundler-sourced until forward mode and batch support land. There is no bundler fallback: an unconfigured or unavailable gasless service answers 503, a sponsorship cap 429. The request id is a hash of the call and its auth entries, so a retried request returns the first outcome and is never paid twice. See [`docs/gasless-integration-plan.md`](docs/gasless-integration-plan.md).
+
+- `GASLESS_URL` — base URL of `latch-relayer-gasless`; empty makes the sponsored flows answer 503 (default unset)
+- `GASLESS_API_KEY` — sent as `Authorization: Bearer <key>`; must match the gasless deployment's `RELAYER_API_KEY` (default unset)
+- `GASLESS_TIMEOUT_SEC` — budget for one submission, including waiting for its outcome (default `25`; stays under the global 30s request timeout)
+
 WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.
