@@ -15,6 +15,10 @@ const (
 	// sponsorship budget refused a free transaction (wallet creation, setup
 	// rules, signer changes).
 	ErrSponsorshipLimit ErrorCode = "sponsorship_limit_reached"
+	// ErrServiceUnavailable is returned (HTTP 503) when the gasless service
+	// that submits sponsored transactions is unreachable, unconfigured, or
+	// hasn't confirmed a submission yet. Retryable.
+	ErrServiceUnavailable ErrorCode = "service_unavailable"
 	// ErrNoContextRule is returned by proposal creation when the caller
 	// requires a matched on-chain context rule and none was found.
 	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"

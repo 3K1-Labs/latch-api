@@ -27,6 +27,15 @@ const deployFee int64 = 1_500_000
 
 const predictTimeoutSeconds = 30
 
+// deployPollAttempts and deployPollInterval bound how long Deploy waits for
+// latch-api's own RPC to see a create_account the gasless service reports
+// as landed. The two read different RPC nodes, so the transaction can be
+// briefly invisible here right after it succeeded there.
+const (
+	deployPollAttempts = 30
+	deployPollInterval = time.Second
+)
+
 // sorobanRPC is the subset of *service.SorobanService the smart-account
 // factory needs to simulate, submit, and poll transactions.
 type sorobanRPC interface {
@@ -209,17 +218,55 @@ func (s *SmartAccountService) Deploy(ctx context.Context, params xdr.ScVal, pred
 		return "", false, fmt.Errorf("create_account %s: %w", result.Hash, service.ErrGaslessPending)
 	}
 
-	// The factory derives the address from its own salt, so it can only
-	// differ from the prediction if the params do; confirm the account is
-	// really there before callers persist or build on it.
-	deployed, err = s.IsDeployed(ctx, predictedAddress)
+	// Read the landed transaction back from latch-api's own RPC: it confirms
+	// the account exists before callers persist or build on it, and the
+	// address create_account returned catches a salt or factory mismatch.
+	actualAddress, err := s.pollDeployResult(ctx, result.Hash)
 	if err != nil {
-		return "", false, fmt.Errorf("confirm deployment: %w", err)
+		return "", false, err
 	}
-	if !deployed {
-		return "", false, fmt.Errorf("create_account %s succeeded but %s is not deployed", result.Hash, predictedAddress)
+	if actualAddress == "" {
+		actualAddress = predictedAddress
 	}
-	return predictedAddress, false, nil
+	if actualAddress != predictedAddress {
+		return "", false, fmt.Errorf("deterministic address mismatch: predicted=%s actual=%s", predictedAddress, actualAddress)
+	}
+	return actualAddress, false, nil
+}
+
+// pollDeployResult waits for txHash — the gasless service's fee-bump hash —
+// to be visible on latch-api's RPC and returns the address create_account
+// returned. Running out of attempts or of the request's deadline is
+// ErrGaslessPending: the account may already exist, and a retry is safe
+// because Deploy returns early for a deployed address.
+func (s *SmartAccountService) pollDeployResult(ctx context.Context, txHash string) (string, error) {
+	for range deployPollAttempts {
+		txResult, err := s.soroban.GetTransaction(ctx, s.rpcURL, txHash)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", fmt.Errorf("create_account %s not yet visible: %w", txHash, service.ErrGaslessPending)
+			}
+			return "", fmt.Errorf("poll create_account tx: %w", err)
+		}
+		switch txResult.Status {
+		case service.RPCStatusSuccess:
+			if txResult.ResultMetaXdr == "" {
+				return "", nil
+			}
+			return extractReturnAddress(txResult.ResultMetaXdr)
+		case service.RPCStatusNotFound:
+			// not visible on this node yet
+		default:
+			return "", fmt.Errorf("create_account %s has status %s on latch-api's RPC", txHash, txResult.Status)
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("create_account %s not yet visible: %w", txHash, service.ErrGaslessPending)
+		case <-time.After(deployPollInterval):
+		}
+	}
+	return "", fmt.Errorf("create_account %s not yet visible: %w", txHash, service.ErrGaslessPending)
 }
 
 // DeployForCredential composes the full smart-account creation flow for a

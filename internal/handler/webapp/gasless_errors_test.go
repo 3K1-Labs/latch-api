@@ -20,14 +20,15 @@ func TestFailGasless(t *testing.T) {
 		err     error
 		handled bool
 		status  int
+		code    string
 	}{
-		{"limit", fmt.Errorf("submit: %w", service.ErrGaslessLimited), true, http.StatusTooManyRequests},
-		{"not configured", service.ErrGaslessNotConfigured, true, http.StatusServiceUnavailable},
-		{"unavailable", fmt.Errorf("submit: %w", service.ErrGaslessUnavailable), true, http.StatusServiceUnavailable},
-		{"pending", fmt.Errorf("submit: %w", service.ErrGaslessPending), true, http.StatusServiceUnavailable},
-		{"refused is left to the caller", service.ErrGaslessRefused, false, 0},
-		{"failed on-chain is left to the caller", service.ErrGaslessFailed, false, 0},
-		{"other errors are left to the caller", errors.New("boom"), false, 0},
+		{"limit", fmt.Errorf("submit: %w", service.ErrGaslessLimited), true, http.StatusTooManyRequests, "sponsorship_limit_reached"},
+		{"not configured", service.ErrGaslessNotConfigured, true, http.StatusServiceUnavailable, "service_unavailable"},
+		{"unavailable", fmt.Errorf("submit: %w", service.ErrGaslessUnavailable), true, http.StatusServiceUnavailable, "service_unavailable"},
+		{"pending", fmt.Errorf("submit: %w", service.ErrGaslessPending), true, http.StatusServiceUnavailable, "service_unavailable"},
+		{"refused is left to the caller", service.ErrGaslessRefused, false, 0, ""},
+		{"failed on-chain is left to the caller", service.ErrGaslessFailed, false, 0, ""},
+		{"other errors are left to the caller", errors.New("boom"), false, 0, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,6 +38,7 @@ func TestFailGasless(t *testing.T) {
 			assert.Equal(t, tc.handled, failGasless(c, tc.err))
 			if tc.handled {
 				assert.Equal(t, tc.status, w.Code)
+				assert.Contains(t, w.Body.String(), `"`+tc.code+`"`)
 			}
 		})
 	}

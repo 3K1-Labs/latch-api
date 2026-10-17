@@ -26,7 +26,7 @@ func failGasless(c *gin.Context, err error) bool {
 		errors.Is(err, service.ErrGaslessUnavailable),
 		errors.Is(err, service.ErrGaslessPending):
 		slog.Error("gasless service unavailable", "path", c.FullPath(), "err", err)
-		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrInternal, "transaction service is temporarily unavailable, please retry")
+		webappx.Fail(c, http.StatusServiceUnavailable, webappx.ErrServiceUnavailable, "transaction service is temporarily unavailable, please retry")
 	default:
 		return false
 	}

@@ -309,13 +309,19 @@ result, err := submitSponsored(ctx, s.gasless, predictedAddress, createFn, nil) 
 if result.Status != service.RPCStatusSuccess {
     return "", false, fmt.Errorf("create_account %s: %w", result.Hash, service.ErrGaslessPending)
 }
-// confirm on-chain before callers persist the address or build setup rules on it
-deployed, err = s.IsDeployed(ctx, predictedAddress)
+// read it back from latch-api's own RPC (up to 30 × 1s, within the request deadline):
+// confirms it landed and returns the address create_account produced
+actualAddress, err := s.pollDeployResult(ctx, result.Hash)
+if actualAddress != predictedAddress {
+    return "", false, fmt.Errorf("deterministic address mismatch: predicted=%s actual=%s", predictedAddress, actualAddress)
+}
 ```
 
 - `wallet` for the relayer's caps is the **predicted** C-address (the account doesn't exist yet).
 - No latch-api simulation here: `create_account` has no user signatures to check; the relayer simulates anyway.
-- Pending → 503: the client retries → `IsDeployed` short-circuits if the first attempt landed meanwhile.
+- Why poll: the relayer and latch-api read **different RPC nodes**, so a transaction the relayer saw land can be briefly `NOT_FOUND` here. The hash is the relayer's **fee-bump** hash; `getTransaction` on it returns the inner execution's meta, which is where the returned address comes from.
+- Not visible before the deadline → `ErrGaslessPending` → 503: the client retries → `IsDeployed` short-circuits if the first attempt landed meanwhile.
+- The validity window of latch-api's envelope doesn't matter here: the relayer builds its own channel transaction with `txValidity = 2 * time.Minute` (latch-relayer `internal/gasless/sponsor/submitter.go:35`).
 
 ---
 

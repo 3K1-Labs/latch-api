@@ -130,6 +130,7 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 			return &service.SimulateResult{Results: []service.SimResultEntry{{XDR: contractAddressScValXDR(t, predictedAddr)}}}, nil
 		},
 		ledgerFn: deployedAfter(1),
+		getTxFn:  landsAfter(t, 0, predictedAddr),
 	})
 	g := gaslessSuccess("abc123")
 	sqlDB, _, err := sqlmock.New()

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
@@ -317,9 +318,25 @@ func deployedAfter(n int) func(context.Context, string, []string) (*service.GetL
 	}
 }
 
+// landsAfter serves getTransaction as NOT_FOUND for the first n reads (our
+// RPC lagging the gasless service's), then SUCCESS returning address.
+func landsAfter(t *testing.T, n int, address string) func(context.Context, string, string) (*service.GetTxResult, error) {
+	t.Helper()
+	reads := 0
+	return func(context.Context, string, string) (*service.GetTxResult, error) {
+		reads++
+		if reads <= n {
+			return &service.GetTxResult{Status: service.RPCStatusNotFound}, nil
+		}
+		return &service.GetTxResult{Status: service.RPCStatusSuccess, ResultMetaXdr: resultMetaXDRWithAddress(t, address)}, nil
+	}
+}
+
 func TestDeploy_FullHappyPath(t *testing.T) {
 	predicted := testContractAddress(t)
-	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1)})
+	// Our RPC doesn't see the transaction on the first read: Deploy must
+	// wait for it rather than fail a real success.
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1), getTxFn: landsAfter(t, 1, predicted)})
 	g := gaslessSuccess("abc123")
 	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, g)
 	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
@@ -343,15 +360,48 @@ func TestDeploy_FullHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, svc.factoryAddress, factory)
 }
-func TestDeploy_NotDeployedAfterSuccess(t *testing.T) {
-	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(2)}) // still missing after submit
+func TestDeploy_AddressMismatch(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{ledgerFn: deployedAfter(1), getTxFn: landsAfter(t, 0, testContractAddress(t))})
 	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, gaslessSuccess("abc123"))
 	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
 	require.NoError(t, err)
 
 	_, _, err = svc.Deploy(context.Background(), params, testContractAddress(t))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "is not deployed")
+	assert.Contains(t, err.Error(), "deterministic address mismatch")
+}
+
+func TestDeploy_NotVisibleBeforeDeadlineIsRetryable(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{
+		ledgerFn: deployedAfter(1),
+		getTxFn: func(context.Context, string, string) (*service.GetTxResult, error) {
+			return &service.GetTxResult{Status: service.RPCStatusNotFound}, nil
+		},
+	})
+	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, gaslessSuccess("abc123"))
+	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	_, _, err = svc.Deploy(ctx, params, testContractAddress(t))
+	assert.ErrorIs(t, err, service.ErrGaslessPending)
+}
+
+func TestDeploy_FailedOnOurRPC(t *testing.T) {
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{
+		ledgerFn: deployedAfter(1),
+		getTxFn: func(context.Context, string, string) (*service.GetTxResult, error) {
+			return &service.GetTxResult{Status: service.RPCStatusFailed}, nil
+		},
+	})
+	svc, _ := newTestSmartAccountServiceWithGasless(t, rpc, gaslessSuccess("abc123"))
+	params, err := buildWebauthnAccountInitParams("aabb", []byte{1, 2, 3})
+	require.NoError(t, err)
+
+	_, _, err = svc.Deploy(context.Background(), params, testContractAddress(t))
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, service.ErrGaslessPending)
 }
 
 func TestDeploy_PendingIsRetryable(t *testing.T) {
@@ -390,6 +440,7 @@ func TestDeployForCredential_Success(t *testing.T) {
 	addr := testContractAddress(t)
 	rpc := noBundlerRPC(t, &fakeSorobanRPC{
 		ledgerFn: deployedAfter(1),
+		getTxFn:  landsAfter(t, 0, addr),
 		simulateFn: func(context.Context, string, string, service.RPCResourceConfig) (*service.SimulateResult, error) {
 			// The address prediction.
 			return &service.SimulateResult{Results: []service.SimResultEntry{{XDR: contractAddressScValXDR(t, addr)}}}, nil
