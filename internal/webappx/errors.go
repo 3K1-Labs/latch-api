@@ -11,6 +11,10 @@ type ErrorCode string
 const (
 	// ErrInternal is for unexpected server-side failures (HTTP 500).
 	ErrInternal ErrorCode = "internal_error"
+	// ErrSponsorshipLimit is returned (HTTP 429) when the gasless service's
+	// sponsorship budget refused a free transaction (wallet creation, setup
+	// rules, signer changes).
+	ErrSponsorshipLimit ErrorCode = "sponsorship_limit_reached"
 	// ErrNoContextRule is returned by proposal creation when the caller
 	// requires a matched on-chain context rule and none was found.
 	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"

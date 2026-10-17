@@ -20,15 +20,12 @@ import (
 // lib/smart-account-factory-webauthn.ts's deriveWebauthnSalt() default version.
 const webauthnSaltVersion = "webauthn-v1"
 
-// deployFee and deployTimeoutSeconds match the fee/timeout the TS source uses
-// for the bundler-paid create_account transaction.
-const (
-	deployFee             int64 = 1_500_000
-	deployTimeoutSeconds        = 300
-	predictTimeoutSeconds       = 30
-	deployPollAttempts          = 30
-	deployPollInterval          = time.Second
-)
+// deployFee is the base fee the TS source used for the bundler-paid
+// create_account transaction; the bundler-sourced build and submit paths
+// still use it.
+const deployFee int64 = 1_500_000
+
+const predictTimeoutSeconds = 30
 
 // sorobanRPC is the subset of *service.SorobanService the smart-account
 // factory needs to simulate, submit, and poll transactions.
@@ -48,9 +45,10 @@ type SmartAccountService struct {
 	rpcURL            string
 	networkPassphrase string
 	factoryAddress    string
+	gasless           gaslessSubmitter
 }
 
-func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Queries, rpcURL, networkPassphrase, factoryAddress string) *SmartAccountService {
+func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Queries, rpcURL, networkPassphrase, factoryAddress string, gasless gaslessSubmitter) *SmartAccountService {
 	return &SmartAccountService{
 		soroban:           soroban,
 		bundler:           bundler,
@@ -58,6 +56,7 @@ func NewSmartAccountService(soroban sorobanRPC, bundler *BundlerService, q *db.Q
 		rpcURL:            rpcURL,
 		networkPassphrase: networkPassphrase,
 		factoryAddress:    factoryAddress,
+		gasless:           gasless,
 	}
 }
 
@@ -179,10 +178,13 @@ func (s *SmartAccountService) IsDeployed(ctx context.Context, contractAddress st
 	return len(result.Entries) > 0, nil
 }
 
-// Deploy submits the bundler-paid create_account transaction for a webauthn
-// smart account, polling for confirmation and verifying the deployed address
-// matches predictedAddress. Idempotent: if predictedAddress is already
-// deployed, returns immediately without submitting a transaction. Ports
+// Deploy creates a smart account through the factory's create_account,
+// submitted by latch-relayer-gasless in sponsored mode: one of its channel
+// accounts sources the transaction and its funder pays the fee, so
+// concurrent creations no longer contend for the bundler's sequence number
+// (issue #110). Idempotent: if predictedAddress is already deployed, returns
+// immediately without submitting; a retried creation reuses the first
+// submission's request id, so it is never paid for twice. Ports
 // deployWebauthnSmartAccount().
 func (s *SmartAccountService) Deploy(ctx context.Context, params xdr.ScVal, predictedAddress string) (smartAccountAddress string, alreadyDeployed bool, err error) {
 	deployed, err := s.IsDeployed(ctx, predictedAddress)
@@ -197,111 +199,27 @@ func (s *SmartAccountService) Deploy(ctx context.Context, params xdr.ScVal, pred
 	if err != nil {
 		return "", false, fmt.Errorf("decode factory address: %w", err)
 	}
+	createFn := invokeContractHostFunction(factoryContractID, "create_account", params)
 
-	bundlerG := s.bundler.PublicKey()
-	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
+	result, err := submitSponsored(ctx, s.gasless, predictedAddress, createFn, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("fetch bundler sequence: %w", err)
+		return "", false, fmt.Errorf("create_account: %w", err)
+	}
+	if result.Status != service.RPCStatusSuccess {
+		return "", false, fmt.Errorf("create_account %s: %w", result.Hash, service.ErrGaslessPending)
 	}
 
-	buildTx := func(sorobanData *xdr.SorobanTransactionData) (*txnbuild.Transaction, error) {
-		op := &txnbuild.InvokeHostFunction{
-			HostFunction:  invokeContractHostFunction(factoryContractID, "create_account", params),
-			SourceAccount: bundlerG,
-		}
-		if sorobanData != nil {
-			op.Ext = xdr.TransactionExt{V: 1, SorobanData: sorobanData}
-		}
-		return txnbuild.NewTransaction(txnbuild.TransactionParams{
-			SourceAccount:        &txnbuild.SimpleAccount{AccountID: bundlerG, Sequence: seq},
-			Operations:           []txnbuild.Operation{op},
-			BaseFee:              deployFee,
-			Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(deployTimeoutSeconds)},
-			IncrementSequenceNum: true,
-		})
-	}
-
-	simTx, err := buildTx(nil)
+	// The factory derives the address from its own salt, so it can only
+	// differ from the prediction if the params do; confirm the account is
+	// really there before callers persist or build on it.
+	deployed, err = s.IsDeployed(ctx, predictedAddress)
 	if err != nil {
-		return "", false, fmt.Errorf("build simulate tx: %w", err)
+		return "", false, fmt.Errorf("confirm deployment: %w", err)
 	}
-	simTxB64, err := simTx.Base64()
-	if err != nil {
-		return "", false, fmt.Errorf("encode simulate tx: %w", err)
+	if !deployed {
+		return "", false, fmt.Errorf("create_account %s succeeded but %s is not deployed", result.Hash, predictedAddress)
 	}
-	sim, err := s.soroban.SimulateTransaction(ctx, s.rpcURL, simTxB64, service.RPCResourceConfig{})
-	if err != nil {
-		return "", false, fmt.Errorf("simulate create_account: %w", err)
-	}
-	if sim.Error != "" {
-		return "", false, fmt.Errorf("create_account simulation failed: %s", sim.Error)
-	}
-
-	var sorobanData xdr.SorobanTransactionData
-	if err := xdr.SafeUnmarshalBase64(sim.TransactionData, &sorobanData); err != nil {
-		return "", false, fmt.Errorf("decode soroban transaction data: %w", err)
-	}
-
-	finalTx, err := buildTx(&sorobanData)
-	if err != nil {
-		return "", false, fmt.Errorf("build final tx: %w", err)
-	}
-	signedTx, err := finalTx.Sign(s.networkPassphrase, s.bundler.Keypair())
-	if err != nil {
-		return "", false, fmt.Errorf("sign deploy tx: %w", err)
-	}
-	envelopeB64, err := signedTx.Base64()
-	if err != nil {
-		return "", false, fmt.Errorf("encode signed tx: %w", err)
-	}
-
-	sendResult, err := s.soroban.SendTransaction(ctx, s.rpcURL, envelopeB64)
-	if err != nil {
-		return "", false, fmt.Errorf("send create_account tx: %w", err)
-	}
-	if sendResult.Status == service.RPCStatusError {
-		return "", false, fmt.Errorf("factory create_account failed: %s", sendResult.ErrorResultXdr)
-	}
-
-	actualAddress, err := s.pollDeployResult(ctx, sendResult.Hash)
-	if err != nil {
-		return "", false, err
-	}
-	if actualAddress == "" {
-		actualAddress = predictedAddress
-	}
-	if actualAddress != predictedAddress {
-		return "", false, fmt.Errorf("deterministic address mismatch: predicted=%s actual=%s", predictedAddress, actualAddress)
-	}
-
-	return actualAddress, false, nil
-}
-
-func (s *SmartAccountService) pollDeployResult(ctx context.Context, txHash string) (string, error) {
-	for range deployPollAttempts {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(deployPollInterval):
-		}
-
-		txResult, err := s.soroban.GetTransaction(ctx, s.rpcURL, txHash)
-		if err != nil {
-			return "", fmt.Errorf("poll create_account tx: %w", err)
-		}
-		switch txResult.Status {
-		case service.RPCStatusNotFound:
-			continue
-		case service.RPCStatusSuccess:
-			if txResult.ResultMetaXdr == "" {
-				return "", nil
-			}
-			return extractReturnAddress(txResult.ResultMetaXdr)
-		default:
-			return "", fmt.Errorf("factory deployment failed with status: %s", txResult.Status)
-		}
-	}
-	return "", fmt.Errorf("timed out waiting for create_account confirmation")
+	return predictedAddress, false, nil
 }
 
 // DeployForCredential composes the full smart-account creation flow for a

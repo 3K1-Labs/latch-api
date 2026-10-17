@@ -274,6 +274,9 @@ func (h *SmartAccountHandler) DeployWebauthn(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.deploySvc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy webauthn smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -487,6 +490,9 @@ func (h *SmartAccountHandler) DeployGAddress(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.deploySvc.DeployFreighter(c.Request.Context(), req.GAddress)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy g-address smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return

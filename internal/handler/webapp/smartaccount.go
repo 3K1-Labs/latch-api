@@ -119,6 +119,9 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.smartAccountSvc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
@@ -202,6 +205,9 @@ func (h *SmartAccountHandler) DeployFreighter(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.smartAccountSvc.DeployFreighter(c.Request.Context(), req.GAddress)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy freighter smart account", "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
