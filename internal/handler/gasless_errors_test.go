@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 )
 
 func TestFailGasless(t *testing.T) {
@@ -21,6 +22,10 @@ func TestFailGasless(t *testing.T) {
 		handled bool
 		status  int
 	}{
+		{"fee balance", fmt.Errorf("build: %w", webapp.ErrInsufficientFeeBalance), true, http.StatusBadRequest},
+		{"stale quote", webapp.ErrFeeQuoteStale, true, http.StatusConflict},
+		{"no fee rule", webapp.ErrFeeRuleNotFound, true, http.StatusBadRequest},
+		{"failure limit", service.ErrGaslessTooManyFailures, true, http.StatusTooManyRequests},
 		{"limit", fmt.Errorf("submit: %w", service.ErrGaslessLimited), true, http.StatusTooManyRequests},
 		{"not configured", service.ErrGaslessNotConfigured, true, http.StatusServiceUnavailable},
 		{"unavailable", fmt.Errorf("submit: %w", service.ErrGaslessUnavailable), true, http.StatusServiceUnavailable},

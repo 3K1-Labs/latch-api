@@ -19,6 +19,19 @@ const (
 	// that submits sponsored transactions is unreachable, unconfigured, or
 	// hasn't confirmed a submission yet. Retryable.
 	ErrServiceUnavailable ErrorCode = "service_unavailable"
+	// ErrInsufficientFeeBalance is returned (HTTP 400) when the wallet holds
+	// too little XLM or USDC to pay a user-paid transaction's network fee.
+	ErrInsufficientFeeBalance ErrorCode = "insufficient_fee_balance"
+	// ErrFeeQuoteStale is returned (HTTP 409) when a signed user-paid
+	// transaction's maximum fee no longer covers the network fee, or the
+	// wallet changed since it was built: rebuild and sign again.
+	ErrFeeQuoteStale ErrorCode = "fee_quote_stale"
+	// ErrFeeRuleNotFound is returned (HTTP 400) when none of the wallet's
+	// context rules lets this signer authorize paying the network fee.
+	ErrFeeRuleNotFound ErrorCode = "fee_rule_not_found"
+	// ErrTooManyFailedTransactions is returned (HTTP 429) when too many of
+	// the wallet's user-paid transactions failed on-chain recently.
+	ErrTooManyFailedTransactions ErrorCode = "too_many_failed_transactions"
 	// ErrNoContextRule is returned by proposal creation when the caller
 	// requires a matched on-chain context rule and none was found.
 	ErrNoContextRule ErrorCode = "NO_CONTEXT_RULE"

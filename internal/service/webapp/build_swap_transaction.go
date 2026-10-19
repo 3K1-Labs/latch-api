@@ -203,6 +203,9 @@ type BuildSwapResult struct {
 	TokenInContractID string
 	AmountInRaw       string
 	AmountOutMinRaw   string
+	// NetworkFee is the most the wallet pays for this swap, in XLM or USDC
+	// through FeeForwarder.
+	NetworkFee NetworkFee
 }
 
 // BuildSwap builds an unsigned Aquarius router swap_chained transaction from
@@ -294,12 +297,26 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 	swapFn := invokeContractHostFunction(routerContractID, "swap_chained",
 		smartAccountVal, swapChainVal, tokenInVal, scU128(amountInHi, amountInLo), scU128(amountOutMinHi, amountOutMinLo))
 
+	// The user pays the network fee: the swap is wrapped in
+	// FeeForwarder.forward(); token-in counts toward the fee-token check.
+	// Swaps sign every call against one rule, so that rule must be a Default
+	// rule — the only kind that also covers forward() and the fee token's
+	// approve. Discovery falls back to rule 0 on an account with no Default
+	// rule; refuse that upfront instead of building a swap that fails on-chain.
+	if !ruleOK || !swapRule.IsDefault {
+		return BuildSwapResult{}, ErrFeeRuleNotFound
+	}
+	wrap, err := s.planForward(ctx, in.SmartAccountAddress, *swapFn.InvokeContract, in.TokenInContractID, amountIn)
+	if err != nil {
+		return BuildSwapResult{}, err
+	}
+
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
 		return BuildSwapResult{}, fmt.Errorf("fetch bundler sequence: %w", err)
 	}
 	buildTx := func(auth []xdr.SorobanAuthorizationEntry, sorobanData *xdr.SorobanTransactionData) (*txnbuild.Transaction, error) {
-		op := &txnbuild.InvokeHostFunction{HostFunction: swapFn, SourceAccount: bundlerG, Auth: auth}
+		op := &txnbuild.InvokeHostFunction{HostFunction: wrap.hostFunction, SourceAccount: bundlerG, Auth: auth}
 		if sorobanData != nil {
 			op.Ext = xdr.TransactionExt{V: 1, SorobanData: sorobanData}
 		}
@@ -324,6 +341,7 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 		feePayerG:                bundlerG,
 		bundlerDelegatedAuthMode: swapAuth.useDelegatedAuth,
 		delegatedAuthG:           swapAuth.delegatedAuthG,
+		dropAuthAddress:          wrap.executor,
 	}, buildTx)
 	if err != nil {
 		return BuildSwapResult{}, err
@@ -335,6 +353,7 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 		TokenInContractID:          in.TokenInContractID,
 		AmountInRaw:                amountIn.String(),
 		AmountOutMinRaw:            amountOutMin.String(),
+		NetworkFee:                 wrap.fee,
 	}, nil
 }
 

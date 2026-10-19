@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 )
 
 func TestFailGasless(t *testing.T) {
@@ -26,6 +27,10 @@ func TestFailGasless(t *testing.T) {
 		{"not configured", service.ErrGaslessNotConfigured, true, http.StatusServiceUnavailable, "service_unavailable"},
 		{"unavailable", fmt.Errorf("submit: %w", service.ErrGaslessUnavailable), true, http.StatusServiceUnavailable, "service_unavailable"},
 		{"pending", fmt.Errorf("submit: %w", service.ErrGaslessPending), true, http.StatusServiceUnavailable, "service_unavailable"},
+		{"fee balance", fmt.Errorf("build: %w", webapp.ErrInsufficientFeeBalance), true, http.StatusBadRequest, "insufficient_fee_balance"},
+		{"stale quote", fmt.Errorf("submit: %w", webapp.ErrFeeQuoteStale), true, http.StatusConflict, "fee_quote_stale"},
+		{"no fee rule", webapp.ErrFeeRuleNotFound, true, http.StatusBadRequest, "fee_rule_not_found"},
+		{"failure limit", fmt.Errorf("submit: %w", service.ErrGaslessTooManyFailures), true, http.StatusTooManyRequests, "too_many_failed_transactions"},
 		{"refused is left to the caller", service.ErrGaslessRefused, false, 0, ""},
 		{"failed on-chain is left to the caller", service.ErrGaslessFailed, false, 0, ""},
 		{"other errors are left to the caller", errors.New("boom"), false, 0, ""},

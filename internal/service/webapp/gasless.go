@@ -68,10 +68,16 @@ func gaslessRequestID(fn xdr.HostFunction, entries []xdr.SorobanAuthorizationEnt
 }
 
 // submitSponsored hands fn, with its signed auth entries, to the gasless
-// service in sponsored mode on behalf of wallet. The envelope's source,
-// sequence and fee are placeholders: the service re-sources it onto a
-// channel account and re-simulates.
+// service in sponsored mode on behalf of wallet.
 func submitSponsored(ctx context.Context, gasless gaslessSubmitter, wallet string, fn xdr.HostFunction, entries []xdr.SorobanAuthorizationEntry) (SubmitResult, error) {
+	return submitGasless(ctx, gasless, service.GaslessModeSponsored, wallet, fn, entries)
+}
+
+// submitGasless hands fn, with its signed auth entries, to the gasless
+// service in mode on behalf of wallet. The envelope's source, sequence and
+// fee are placeholders: the service re-sources it onto a channel account
+// and re-simulates.
+func submitGasless(ctx context.Context, gasless gaslessSubmitter, mode, wallet string, fn xdr.HostFunction, entries []xdr.SorobanAuthorizationEntry) (SubmitResult, error) {
 	if gasless == nil {
 		return SubmitResult{}, service.ErrGaslessNotConfigured
 	}
@@ -101,7 +107,7 @@ func submitSponsored(ctx context.Context, gasless gaslessSubmitter, wallet strin
 	rec, err := gasless.Submit(ctx, service.GaslessSubmission{
 		RequestID:   reqID,
 		Wallet:      wallet,
-		Mode:        service.GaslessModeSponsored,
+		Mode:        mode,
 		Transaction: envelope,
 	})
 	if errors.Is(err, service.ErrGaslessPending) && rec.TxHash != "" {

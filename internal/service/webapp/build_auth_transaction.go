@@ -35,6 +35,9 @@ type authTransactionCoreInput struct {
 	// external signer needed if the bundler itself can sign delegatedAuthG).
 	bundlerDelegatedAuthMode bool
 	delegatedAuthG           string
+	// dropAuthAddress, when set, removes that address's recorded entries:
+	// the gasless executor's, which the relayer signs itself.
+	dropAuthAddress string
 }
 
 // buildAuthTransactionCore simulates buildTx(nil, nil), extracts and
@@ -71,6 +74,9 @@ func (s *TransactionService) buildAuthTransactionCore(
 	entries, err := normalizeAuthEntries(sim.Results[0].Auth)
 	if err != nil {
 		return BuildAuthTransactionResult{}, fmt.Errorf("normalize auth entries: %w", err)
+	}
+	if in.dropAuthAddress != "" {
+		entries = dropAuthFor(entries, in.dropAuthAddress)
 	}
 	if len(entries) == 0 {
 		return BuildAuthTransactionResult{}, fmt.Errorf("no auth entries in simulation result")

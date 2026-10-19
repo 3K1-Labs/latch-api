@@ -72,12 +72,12 @@ type TransactionService struct {
 	// endpoints only (BuildCounter/BuildDelegatedCounter) — unrelated to any
 	// mobile-serving or asset-transfer path.
 	counterContractAddress string
-	// gasless submits the calls Latch sponsors (setup rules, signer changes);
-	// everything else is still sourced and paid for by the bundler.
-	gasless gaslessSubmitter
+	// gasless submits the calls Latch sponsors (setup rules, signer changes)
+	// and the user-paid ones wrapped in forward() (sends, swaps).
+	gasless gaslessClient
 }
 
-func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string, gasless gaslessSubmitter) *TransactionService {
+func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextRules *ContextRulesService, rpcURL, networkPassphrase, webauthnVerifierAddress, ed25519VerifierAddress, counterContractAddress string, gasless gaslessClient) *TransactionService {
 	return &TransactionService{
 		soroban:                 soroban,
 		bundler:                 bundler,
@@ -119,6 +119,9 @@ type BuildSendResult struct {
 	Recipient string
 	Amount    string
 	AmountRaw string
+	// NetworkFee is the most the wallet pays for this send, in XLM or USDC
+	// through FeeForwarder.
+	NetworkFee NetworkFee
 }
 
 // BuildSend builds an unsigned SAC transfer transaction from a smart account
@@ -176,6 +179,18 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 		return BuildSendResult{}, fmt.Errorf("resolve asset contract: %w", err)
 	}
 
+	// The user pays the network fee: the transfer is wrapped in
+	// FeeForwarder.forward(), paid in XLM or USDC (issue #110 phase B).
+	transfer := xdr.InvokeContractArgs{
+		ContractAddress: xdr.ScAddress{Type: xdr.ScAddressTypeScAddressTypeContract, ContractId: &contractID},
+		FunctionName:    "transfer",
+		Args:            []xdr.ScVal{fromVal, toVal, amountVal},
+	}
+	wrap, err := s.planForward(ctx, in.SmartAccountAddress, transfer, asset.ContractID, i128ToBigInt(hi, lo))
+	if err != nil {
+		return BuildSendResult{}, err
+	}
+
 	bundlerG := s.bundler.PublicKey()
 	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
 	if err != nil {
@@ -184,7 +199,7 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 
 	buildTx := func(auth []xdr.SorobanAuthorizationEntry, sorobanData *xdr.SorobanTransactionData) (*txnbuild.Transaction, error) {
 		op := &txnbuild.InvokeHostFunction{
-			HostFunction:  invokeContractHostFunction(contractID, "transfer", fromVal, toVal, amountVal),
+			HostFunction:  wrap.hostFunction,
 			SourceAccount: bundlerG,
 			Auth:          auth,
 		}
@@ -224,6 +239,8 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 	if err != nil {
 		return BuildSendResult{}, fmt.Errorf("normalize auth entries: %w", err)
 	}
+	// The relayer adds and signs its own executor authorization.
+	entries = dropAuthFor(entries, wrap.executor)
 	validUntilLedger := setAddressCredentialExpiration(entries, sim.LatestLedger, 60)
 
 	var signerGStr string
@@ -249,8 +266,33 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 		return BuildSendResult{}, fmt.Errorf("no smart account auth entry found in simulation result")
 	}
 
+	// One rule per call: forward() — and approve on a fee token other than
+	// the asset — take the rule this signer holds for that contract; every
+	// other call (the transfer, approve on the asset itself) keeps the rule
+	// resolved above.
+	rules := map[string]uint32{asset.ContractID: contextRuleID}
+	contextRuleIDs, err := contextRuleIDsPerContext(entries[smartAccountAuthEntryIndex], func(contract string) (uint32, error) {
+		if id, ok := rules[contract]; ok {
+			return id, nil
+		}
+		if contract != wrap.feeForwarder && contract != wrap.fee.Token {
+			return contextRuleID, nil
+		}
+		id, ok, err := s.resolveSignerRule(ctx, in.SmartAccountAddress, in.SignerType, in.SignerG, in.KeyDataHex, contract)
+		if err != nil {
+			return 0, fmt.Errorf("resolve fee rule: %w", err)
+		}
+		if !ok {
+			return 0, ErrFeeRuleNotFound
+		}
+		rules[contract] = id
+		return id, nil
+	})
+	if err != nil {
+		return BuildSendResult{}, err
+	}
+	embedContextRuleIDs(&entries[smartAccountAuthEntryIndex], contextRuleIDs)
 	smartAccountEntry := entries[smartAccountAuthEntryIndex]
-	contextRuleIDs := contextRuleIDsForEntry(smartAccountEntry, contextRuleID)
 
 	signaturePayload, err := hashSorobanAuthPayload(smartAccountEntry, s.networkPassphrase)
 	if err != nil {
@@ -339,10 +381,11 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 			SimulationResultXdr:                   string(simResultJSON),
 			SubmitMethod:                          submitMethod,
 		},
-		Asset:     asset,
-		Recipient: in.Recipient,
-		Amount:    in.Amount,
-		AmountRaw: formatI128Raw(hi, lo),
+		Asset:      asset,
+		Recipient:  in.Recipient,
+		Amount:     in.Amount,
+		AmountRaw:  formatI128Raw(hi, lo),
+		NetworkFee: wrap.fee,
 	}, nil
 }
 
@@ -906,6 +949,12 @@ func (s *TransactionService) submitWithBundler(ctx context.Context, txXdrB64 str
 		return SubmitResult{}, fmt.Errorf("expected an invoke host function operation")
 	}
 	hostFunction := op.Body.InvokeHostFunctionOp.HostFunction
+	if wallet, ok, err := s.userPaidWallet(ctx, hostFunction); err != nil || ok {
+		if err != nil {
+			return SubmitResult{}, err
+		}
+		return s.submitForward(ctx, wallet, hostFunction, entries)
+	}
 	wallet, sponsored := sponsoredWallet(hostFunction)
 
 	// Simulation ignores the sequence number, so a sponsored call never
