@@ -361,6 +361,11 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 			{
 				transaction.GET("/bundler", transactionRelayHandler.Bundler)
 				transaction.POST("/submit", transactionRelayLimiter, transactionRelayHandler.Submit)
+				// Phase B (#110): mobile builds sends and swaps here, wrapped
+				// in FeeForwarder.forward(), and only signs them on the phone.
+				transactionBuildHandler := handler.NewTransactionBuildHandler(webappTransactionSvc, cfg)
+				transaction.POST("/build-send", transactionBuildHandler.BuildSend)
+				transaction.POST("/build-swap", transactionBuildHandler.BuildSwap)
 			}
 
 			// Solo backup signers (LATCH_MOBILE_BACKUP_SIGNERS.md): the client

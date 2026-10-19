@@ -148,6 +148,9 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		KeyDataHex:          req.KeyDataHex,
 	}, catalog)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
@@ -184,9 +187,10 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 			"contractId": result.Asset.ContractID,
 			"decimals":   result.Asset.Decimals,
 		},
-		"recipient": result.Recipient,
-		"amount":    result.Amount,
-		"amountRaw": result.AmountRaw,
+		"recipient":  result.Recipient,
+		"amount":     result.Amount,
+		"amountRaw":  result.AmountRaw,
+		"networkFee": result.NetworkFee,
 	})
 }
 
@@ -842,6 +846,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		"tokenInContractId":                     result.TokenInContractID,
 		"amountInRaw":                           result.AmountInRaw,
 		"amountOutMinRaw":                       result.AmountOutMinRaw,
+		"networkFee":                            result.NetworkFee,
 		"providerId":                            providerID,
 	})
 }
@@ -854,6 +859,9 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // via err.Error() — that's their purpose; anything unrecognized falls back
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	if failGasless(c, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, webapp.ErrSignerRuleNotFound):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())

@@ -23,7 +23,7 @@ func newTestTransactionService(t *testing.T, rpc sorobanRPC, contextRules *Conte
 
 	verifierAddr := testContractAddress(t)
 	ed25519VerifierAddr := testContractAddress(t)
-	svc := NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), nil)
+	svc := NewTransactionService(withForwardRPC(t, rpc), bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), &fakeGasless{})
 	return svc, bundlerKp
 }
 

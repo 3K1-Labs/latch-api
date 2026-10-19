@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/latch/backend/internal/service"
+	"github.com/latch/backend/internal/service/webapp"
 	"github.com/latch/backend/internal/webappx"
 )
 
@@ -19,6 +20,15 @@ import (
 // is a 429. Anything else is left to the caller's own mapping.
 func failGasless(c *gin.Context, err error) bool {
 	switch {
+	case errors.Is(err, webapp.ErrInsufficientFeeBalance):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInsufficientFeeBalance, webapp.ErrInsufficientFeeBalance.Error())
+	case errors.Is(err, webapp.ErrFeeQuoteStale):
+		webappx.Fail(c, http.StatusConflict, webappx.ErrFeeQuoteStale, webapp.ErrFeeQuoteStale.Error())
+	case errors.Is(err, webapp.ErrFeeRuleNotFound):
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrFeeRuleNotFound, webapp.ErrFeeRuleNotFound.Error())
+	case errors.Is(err, service.ErrGaslessTooManyFailures):
+		slog.Warn("gasless forward failure limit", "path", c.FullPath(), "err", err)
+		webappx.Fail(c, http.StatusTooManyRequests, webappx.ErrTooManyFailedTransactions, "too many recent transactions from this wallet failed, please try again later")
 	case errors.Is(err, service.ErrGaslessLimited):
 		slog.Warn("gasless sponsorship limit reached", "path", c.FullPath(), "err", err)
 		webappx.Fail(c, http.StatusTooManyRequests, webappx.ErrSponsorshipLimit, "sponsorship limit reached, please try again later")

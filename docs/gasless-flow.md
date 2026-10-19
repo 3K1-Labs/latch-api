@@ -325,10 +325,15 @@ if actualAddress != predictedAddress {
 
 ---
 
-## 4. What is still on the bundler, and Phase B (user-paid)
+## 4. Phase B (user-paid sends and swaps) and what is still on the bundler
 
-Sends (`transfer`), swaps (`swap_chained`), multisig execute and device pairing still take the
-old bundler path — so the race still exists there until Phase B/C.
+Sends and swaps are user-paid (phase B, `internal/service/webapp/gasless_forward.go`):
+`BuildSend` / `BuildSwap` call `planForward` (fee-token config → simulate the plain action →
+quote XLM then USDC → pick the first token whose balance covers max fee + spend), wrap the call in
+`forward()`, drop the executor's recorded entry, give each context its own rule id and embed them
+in the returned entry. Submit sees a `forward()` on our FeeForwarder (`userPaidWallet`) and calls
+`submitForward` → `/gasless/submit` mode `forward`. Multisig execute and device pairing still take
+the old bundler path — the race still exists there until their own phases.
 
 Phase B wraps the call in `FeeForwarder.forward(fee_token, fee_amount, max_fee_amount,
 expiration_ledger, target_contract, target_fn, target_args, user, relayer)`. Proven on mainnet
