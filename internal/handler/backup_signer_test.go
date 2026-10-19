@@ -183,6 +183,55 @@ func TestBackupSignerHandler_ConfirmRemoveSigner_DeregisterFailureIsBestEffort(t
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+// Signer id 0 is the account's original signer (OZ stellar-accounts' global
+// NextSignerId counter starts at 0), so it must bind and reach the service
+// rather than being rejected as a missing field.
+func TestBackupSignerHandler_ConfirmRemoveSigner_SignerIDZero(t *testing.T) {
+	txStub := &stubBackupSignerConfirm{}
+	credStub := &stubPasskeyCredentialRegister{}
+	h := newBackupSignerHandler(txStub, credStub, nil)
+	r := gin.New()
+	r.POST("/confirm-remove", h.ConfirmRemoveSigner)
+
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/confirm-remove", postJSONBody(map[string]any{
+		"smart_account_address": testContractAddr,
+		"context_rule_id":       0,
+		"signer_id":             0,
+		"key_data_hex":          "aabbcc",
+		"tx_hash":               "deadbeef",
+	})), "uid")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, webapp.ConfirmRemoveSignerInput{
+		SmartAccountAddress: testContractAddr,
+		ContextRuleID:       0,
+		SignerID:            0,
+		TxHash:              "deadbeef",
+	}, txStub.gotConfirmRemove)
+	assert.Equal(t, "aabbcc", credStub.gotDeregisterKeyData)
+}
+
+func TestBackupSignerHandler_ConfirmRemoveSigner_SignerIDOmitted(t *testing.T) {
+	txStub := &stubBackupSignerConfirm{}
+	h := newBackupSignerHandler(txStub, nil, nil)
+	r := gin.New()
+	r.POST("/confirm-remove", h.ConfirmRemoveSigner)
+
+	req := withUserID(httptest.NewRequest(http.MethodPost, "/confirm-remove", postJSONBody(map[string]any{
+		"smart_account_address": testContractAddr,
+		"key_data_hex":          "aabbcc",
+		"tx_hash":               "deadbeef",
+	})), "uid")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid request body")
+	assert.Empty(t, txStub.gotConfirmRemove.TxHash, "service must not be called")
+}
+
 // ── notifications ────────────────────────────────────────────────────────────
 
 func TestBackupSignerHandler_ConfirmAddSigner_RecordsNotification(t *testing.T) {

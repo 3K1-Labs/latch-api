@@ -128,13 +128,16 @@ func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	})
 }
 
+// SignerID is a pointer so `required` rejects an omitted signer_id but
+// accepts 0: signer ids come from a global counter starting at 0, so 0 is
+// the account's original signer, not "unset".
 type confirmRemoveBackupSignerRequest struct {
-	Network             string `json:"network,omitempty"`
-	SmartAccountAddress string `json:"smart_account_address" binding:"required"`
-	ContextRuleID       uint32 `json:"context_rule_id"`
-	SignerID            uint32 `json:"signer_id" binding:"required"`
-	KeyDataHex          string `json:"key_data_hex" binding:"required"`
-	TxHash              string `json:"tx_hash" binding:"required"`
+	Network             string  `json:"network,omitempty"`
+	SmartAccountAddress string  `json:"smart_account_address" binding:"required"`
+	ContextRuleID       uint32  `json:"context_rule_id"`
+	SignerID            *uint32 `json:"signer_id" binding:"required"`
+	KeyDataHex          string  `json:"key_data_hex" binding:"required"`
+	TxHash              string  `json:"tx_hash" binding:"required"`
 }
 
 // ConfirmRemoveSigner godoc
@@ -166,7 +169,7 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	if err := h.txSvc.ConfirmRemoveSigner(c.Request.Context(), webapp.ConfirmRemoveSignerInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		ContextRuleID:       req.ContextRuleID,
-		SignerID:            req.SignerID,
+		SignerID:            *req.SignerID,
 		TxHash:              req.TxHash,
 	}); err != nil {
 		failChainConfirm(c, err)
@@ -183,7 +186,7 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionBackupSignerRemoved), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"smartAccountAddress": req.SmartAccountAddress,
-		"signerId":            req.SignerID,
+		"signerId":            *req.SignerID,
 		"network":             string(network),
 	})
 	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
