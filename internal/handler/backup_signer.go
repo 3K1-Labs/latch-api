@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
@@ -28,57 +27,14 @@ import (
 // that needs an ownership table — chain verification alone establishes the
 // fact, and RequireAuth alone establishes who's asking.
 type BackupSignerHandler struct {
-	txSvc        backupSignerConfirmService // testnet
-	txSvcMainnet backupSignerConfirmService // mainnet; nil if not configured
-	credSvc      passkeyCredentialRegisterService
-	auditSvc     auditService
-	notifSvc     notificationService
+	txSvc    backupSignerConfirmService
+	credSvc  passkeyCredentialRegisterService
+	auditSvc auditService
+	notifSvc notificationService
 }
 
-func NewBackupSignerHandler(txSvc, txSvcMainnet backupSignerConfirmService, credSvc passkeyCredentialRegisterService, auditSvc auditService, notifSvc notificationService) *BackupSignerHandler {
-	return &BackupSignerHandler{txSvc: txSvc, txSvcMainnet: txSvcMainnet, credSvc: credSvc, auditSvc: auditSvc, notifSvc: notifSvc}
-}
-
-// BackupSignerServiceOrNil boxes a possibly-nil *webapp.TransactionService
-// into the interface, mirroring TransactionServiceOrNil/
-// SmartAccountDeployServiceOrNil elsewhere in this package — a nil concrete
-// pointer boxed directly into an interface value is non-nil, which would
-// defeat resolveNetwork's nil check.
-func BackupSignerServiceOrNil(svc *webapp.TransactionService) backupSignerConfirmService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-func (h *BackupSignerHandler) resolveNetwork(raw string) (backupSignerConfirmService, webapp.Network, error) {
-	network, err := webapp.ParseNetwork(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	if network == webapp.NetworkMainnet {
-		if h.txSvcMainnet == nil {
-			return nil, "", errMainnetNotConfigured
-		}
-		return h.txSvcMainnet, network, nil
-	}
-	if h.txSvc == nil {
-		return nil, "", errTestnetNotConfigured
-	}
-	return h.txSvc, network, nil
-}
-
-func (h *BackupSignerHandler) failNetworkResolution(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, errMainnetNotConfigured):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "mainnet is not configured on this deployment")
-	case errors.Is(err, errTestnetNotConfigured):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "testnet is not configured on this deployment")
-	case errors.Is(err, deploynet.ErrMismatch):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
-	default:
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be \"testnet\" or \"mainnet\"")
-	}
+func NewBackupSignerHandler(txSvc backupSignerConfirmService, credSvc passkeyCredentialRegisterService, auditSvc auditService, notifSvc notificationService) *BackupSignerHandler {
+	return &BackupSignerHandler{txSvc: txSvc, credSvc: credSvc, auditSvc: auditSvc, notifSvc: notifSvc}
 }
 
 // failChainConfirm maps ConfirmAddSigner/ConfirmRemoveSigner's sentinel
@@ -128,13 +84,13 @@ func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
-	signerID, err := svc.ConfirmAddSigner(c.Request.Context(), webapp.ConfirmAddSignerInput{
+	signerID, err := h.txSvc.ConfirmAddSigner(c.Request.Context(), webapp.ConfirmAddSignerInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		ContextRuleID:       req.ContextRuleID,
 		KeyDataHex:          req.KeyDataHex,
@@ -172,13 +128,16 @@ func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	})
 }
 
+// SignerID is a pointer so `required` rejects an omitted signer_id but
+// accepts 0: signer ids come from a global counter starting at 0, so 0 is
+// the account's original signer, not "unset".
 type confirmRemoveBackupSignerRequest struct {
-	Network             string `json:"network,omitempty"`
-	SmartAccountAddress string `json:"smart_account_address" binding:"required"`
-	ContextRuleID       uint32 `json:"context_rule_id"`
-	SignerID            uint32 `json:"signer_id" binding:"required"`
-	KeyDataHex          string `json:"key_data_hex" binding:"required"`
-	TxHash              string `json:"tx_hash" binding:"required"`
+	Network             string  `json:"network,omitempty"`
+	SmartAccountAddress string  `json:"smart_account_address" binding:"required"`
+	ContextRuleID       uint32  `json:"context_rule_id"`
+	SignerID            *uint32 `json:"signer_id" binding:"required"`
+	KeyDataHex          string  `json:"key_data_hex" binding:"required"`
+	TxHash              string  `json:"tx_hash" binding:"required"`
 }
 
 // ConfirmRemoveSigner godoc
@@ -201,16 +160,16 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
-	if err := svc.ConfirmRemoveSigner(c.Request.Context(), webapp.ConfirmRemoveSignerInput{
+	if err := h.txSvc.ConfirmRemoveSigner(c.Request.Context(), webapp.ConfirmRemoveSignerInput{
 		SmartAccountAddress: req.SmartAccountAddress,
 		ContextRuleID:       req.ContextRuleID,
-		SignerID:            req.SignerID,
+		SignerID:            *req.SignerID,
 		TxHash:              req.TxHash,
 	}); err != nil {
 		failChainConfirm(c, err)
@@ -227,7 +186,7 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionBackupSignerRemoved), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 		"smartAccountAddress": req.SmartAccountAddress,
-		"signerId":            req.SignerID,
+		"signerId":            *req.SignerID,
 		"network":             string(network),
 	})
 	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{

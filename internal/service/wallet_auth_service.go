@@ -41,20 +41,6 @@ func ParseWalletNetwork(raw string) (string, error) {
 	return network, err
 }
 
-// SorobanURLs holds the per-network Soroban RPC endpoints passkey sign-in reads
-// smart-account signers from.
-type SorobanURLs struct {
-	Testnet string
-	Mainnet string
-}
-
-func (u SorobanURLs) forNetwork(network string) string {
-	if network == NetworkMainnet {
-		return u.Mainnet
-	}
-	return u.Testnet
-}
-
 // WalletAuthService orchestrates SEP-10-style wallet sign-in: issue a single-use
 // nonce, then verify the wallet's signature over it and mint wallet-scope tokens.
 // Ed25519 wallets verify against the G-address directly; passkey wallets verify a
@@ -64,16 +50,16 @@ type WalletAuthService struct {
 	auth           *AuthService
 	nonce          *WalletNonceService
 	signerReader   WebAuthnSignerReader
-	sorobanURLs    SorobanURLs
+	sorobanURL     string
 	allowedOrigins []string
 }
 
-func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, sorobanURLs SorobanURLs, allowedOrigins []string) *WalletAuthService {
+func NewWalletAuthService(auth *AuthService, nonce *WalletNonceService, signerReader WebAuthnSignerReader, sorobanURL string, allowedOrigins []string) *WalletAuthService {
 	return &WalletAuthService{
 		auth:           auth,
 		nonce:          nonce,
 		signerReader:   signerReader,
-		sorobanURLs:    sorobanURLs,
+		sorobanURL:     sorobanURL,
 		allowedOrigins: allowedOrigins,
 	}
 }
@@ -157,7 +143,7 @@ func (s *WalletAuthService) SignIn(ctx context.Context, in WalletSignInInput) (a
 // them. The candidate keys come from chain (not the request), so a caller can't
 // sign in as a wallet whose key it doesn't control.
 func (s *WalletAuthService) verifyPasskey(ctx context.Context, in WalletSignInInput, network string, nonceBytes []byte) error {
-	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet, s.sorobanURLs.forNetwork(network))
+	keys, err := s.signerReader.WebAuthnSignerKeys(ctx, in.Wallet, s.sorobanURL)
 	if err != nil {
 		// Name the network in the wrapped error: "no signer on chain" is most
 		// often a wallet signed in against the network it does not live on, and

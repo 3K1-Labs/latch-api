@@ -2,12 +2,10 @@ package handler
 
 import (
 	"encoding/base64"
-	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/middleware"
 	"github.com/latch/backend/internal/service"
@@ -45,48 +43,19 @@ const maxAuthEntries = 32
 // bundler XLM on resource fees for a contract call of its choosing. That is
 // what RequireAuth and the per-subject rate limit on this route bound.
 type TransactionRelayHandler struct {
-	txSvc        transactionRelayService
-	txSvcMainnet transactionRelayService
-	policy       bundlerPolicyService
-	auditSvc     auditService
-	notifSvc     notificationService
+	txSvc    transactionRelayService
+	policy   bundlerPolicyService
+	auditSvc auditService
+	notifSvc notificationService
 }
 
-func NewTransactionRelayHandler(txSvc, txSvcMainnet transactionRelayService, policy bundlerPolicyService, auditSvc auditService, notifSvc notificationService) *TransactionRelayHandler {
+func NewTransactionRelayHandler(txSvc transactionRelayService, policy bundlerPolicyService, auditSvc auditService, notifSvc notificationService) *TransactionRelayHandler {
 	return &TransactionRelayHandler{
-		txSvc:        txSvc,
-		txSvcMainnet: txSvcMainnet,
-		policy:       policy,
-		auditSvc:     auditSvc,
-		notifSvc:     notifSvc,
+		txSvc:    txSvc,
+		policy:   policy,
+		auditSvc: auditSvc,
+		notifSvc: notifSvc,
 	}
-}
-
-// TransactionRelayServiceOrNil boxes a possibly-nil *webapp.TransactionService
-// into the interface, so a nil concrete pointer does not become a non-nil
-// interface value and defeat the not-configured checks.
-func TransactionRelayServiceOrNil(svc *webapp.TransactionService) transactionRelayService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-func (h *TransactionRelayHandler) resolveNetwork(raw string) (transactionRelayService, webapp.Network, error) {
-	network, err := webapp.ParseNetwork(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	if network == webapp.NetworkMainnet {
-		if h.txSvcMainnet == nil {
-			return nil, "", errMainnetNotConfigured
-		}
-		return h.txSvcMainnet, network, nil
-	}
-	if h.txSvc == nil {
-		return nil, "", errTestnetNotConfigured
-	}
-	return h.txSvc, network, nil
 }
 
 // Bundler godoc
@@ -101,13 +70,13 @@ func (h *TransactionRelayHandler) resolveNetwork(raw string) (transactionRelaySe
 // @Security     BearerAuth
 // @Router       /v1/transaction/bundler [get]
 func (h *TransactionRelayHandler) Bundler(c *gin.Context) {
-	svc, network, err := h.resolveNetwork(c.Query("network"))
+	network, err := webapp.ParseNetwork(c.Query("network"))
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 	httpx.Success(c, http.StatusOK, gin.H{
-		"bundler_address": svc.BundlerAddress(),
+		"bundler_address": h.txSvc.BundlerAddress(),
 		"network":         string(network),
 	})
 }
@@ -166,23 +135,26 @@ func (h *TransactionRelayHandler) Submit(c *gin.Context) {
 		}
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
 	// Bound fee griefing before spending anything: the caller chose this
 	// contract, and the bundler is about to pay for the call.
-	if err := h.policy.CheckEnvelope(req.TxXdr, string(network)); err != nil {
+	if err := h.policy.CheckEnvelope(req.TxXdr); err != nil {
 		slog.Warn("bundler policy rejected invocation", "userID", userID, "network", network, "err", err)
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation,
 			"this contract is not eligible for bundler-paid submission")
 		return
 	}
 
-	result, err := svc.SubmitBatchAuthEntries(c.Request.Context(), req.TxXdr, entries)
+	result, err := h.txSvc.SubmitBatchAuthEntries(c.Request.Context(), req.TxXdr, entries)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		// A rejected simulation is the caller's transaction being invalid —
 		// bad auth, insufficient balance, a failing contract — not a server
 		// fault. Returning 400 lets the client show the user something useful
@@ -211,19 +183,6 @@ func (h *TransactionRelayHandler) Submit(c *gin.Context) {
 		// parses the new signer and context-rule ids out of it.
 		"result_meta_xdr": result.ResultMetaXdr,
 	})
-}
-
-func (h *TransactionRelayHandler) failNetworkResolution(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, errMainnetNotConfigured):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "mainnet is not configured on this deployment")
-	case errors.Is(err, errTestnetNotConfigured):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "testnet is not configured on this deployment")
-	case errors.Is(err, deploynet.ErrMismatch):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
-	default:
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be \"testnet\" or \"mainnet\"")
-	}
 }
 
 // sanitizeSubmitError keeps the simulation's own diagnostic — which the user

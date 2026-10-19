@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/latch/backend/internal/config"
-	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 )
@@ -71,10 +70,7 @@ func (h *TransactionHandler) Simulate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rpcURL := h.cfg.SorobanRPCURLTestnet
-	if network == deploynet.Mainnet {
-		rpcURL = h.cfg.SorobanRPCURLMainnet
-	}
+	rpcURL := h.cfg.SorobanRPCURL
 
 	result, err := h.sorobanSvc.SimulateTransaction(c.Request.Context(), rpcURL, req.XDR, req.ResourceConfig)
 	if err != nil {
@@ -122,10 +118,7 @@ func (h *TransactionHandler) Relay(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rpcURL := h.cfg.SorobanRPCURLTestnet
-	if network == deploynet.Mainnet {
-		rpcURL = h.cfg.SorobanRPCURLMainnet
-	}
+	rpcURL := h.cfg.SorobanRPCURL
 
 	sent, err := h.sorobanSvc.SendTransaction(c.Request.Context(), rpcURL, req.XDR)
 	if err != nil {

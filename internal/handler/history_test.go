@@ -15,12 +15,9 @@ import (
 
 func testConfig() *config.Config {
 	return &config.Config{
-		SorobanRPCURLTestnet: "http://testnet-rpc",
-		SorobanRPCURLMainnet: "http://mainnet-rpc",
-		HorizonURLTestnet:    "http://testnet-horizon",
-		HorizonURLMainnet:    "http://mainnet-horizon",
-		NativeSACIDTestnet:   "native-sac-testnet",
-		NativeSACIDMainnet:   "native-sac-mainnet",
+		SorobanRPCURL: "http://rpc",
+		HorizonURL:    "http://horizon",
+		NativeSACID:   "native-sac",
 	}
 }
 
