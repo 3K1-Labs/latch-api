@@ -47,6 +47,10 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 	auditSvc := service.NewAuditService(queries)
 	encSvc := service.NewEncryptionService(queries, cfg.ServerPepper)
 	relayerSvc := service.NewRelayerService(cfg.RelayerURL, cfg.RelayerAPIKey, cfg.RelayerTimeout)
+	gaslessSvc := service.NewGaslessService(cfg.GaslessURL, cfg.GaslessAPIKey, cfg.GaslessTimeout)
+	if !gaslessSvc.Configured() {
+		slog.Warn("GASLESS_URL not configured — wallet creation, setup rules and signer changes will answer 503")
+	}
 	backupSvc := service.NewBackupService(queries, encSvc)
 	accountSvc := service.NewAccountService(queries, relayerSvc)
 	passkeyCredentialSvc := service.NewPasskeyCredentialService(queries, walletNonceSvc, cfg.WebAuthnAllowedOrigins)
@@ -128,12 +132,12 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 		} else {
 			webappSmartAccountSvc = webapp.NewSmartAccountService(
 				sorobanSvc, bundlerSvc, queries,
-				cfg.SorobanRPCURL, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress,
+				cfg.SorobanRPCURL, cfg.WebAppNetworkPassphrase, cfg.WebAppFactoryAddress, gaslessSvc,
 			)
 			webappTransactionSvc = webapp.NewTransactionService(
 				sorobanSvc, bundlerSvc, webappContextRulesSvc,
 				cfg.SorobanRPCURL, cfg.WebAppNetworkPassphrase, cfg.WebAppWebAuthnVerifierAddress,
-				cfg.WebAppEd25519VerifierAddress, cfg.WebAppCounterContractAddress,
+				cfg.WebAppEd25519VerifierAddress, cfg.WebAppCounterContractAddress, gaslessSvc,
 			)
 			webappMultisigDraftSvc = webapp.NewMultisigDraftService(sqlDB, queries, webappSmartAccountSvc)
 			webappMultisigAccountsSvc = webapp.NewMultisigAccountsService(sqlDB, queries, webappSmartAccountSvc)

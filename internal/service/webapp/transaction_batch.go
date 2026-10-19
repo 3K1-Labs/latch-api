@@ -78,10 +78,22 @@ func (s *TransactionService) SubmitBatchAuthEntries(ctx context.Context, txXdrB6
 		}
 	}
 
+	// A single sponsored call goes to latch-relayer-gasless; a batch (device
+	// pairing) stays with the bundler until the gasless service accepts more
+	// than one operation. Simulation ignores the sequence number, so only a
+	// transaction the bundler signs reads it.
+	var wallet string
+	sponsored := false
+	if len(hostFunctions) == 1 {
+		wallet, sponsored = sponsoredWallet(hostFunctions[0])
+	}
 	bundlerG := s.bundler.PublicKey()
-	seq, err := s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG)
-	if err != nil {
-		return SubmitResult{}, fmt.Errorf("refresh bundler sequence: %w", err)
+	var seq int64
+	if !sponsored {
+		var err error
+		if seq, err = s.soroban.GetAccountLedgerSequence(ctx, s.rpcURL, bundlerG); err != nil {
+			return SubmitResult{}, fmt.Errorf("refresh bundler sequence: %w", err)
+		}
 	}
 
 	buildTx := func(sorobanData *xdr.SorobanTransactionData) (*txnbuild.Transaction, error) {
@@ -121,6 +133,9 @@ func (s *TransactionService) SubmitBatchAuthEntries(ctx context.Context, txXdrB6
 	}
 	if sim.Error != "" {
 		return SubmitResult{}, fmt.Errorf("auth validation failed: %s", sim.Error)
+	}
+	if sponsored {
+		return submitSponsored(ctx, s.gasless, wallet, hostFunctions[0], entries)
 	}
 
 	var sorobanData xdr.SorobanTransactionData

@@ -192,6 +192,18 @@ type Config struct {
 	// into a failure. Keep it comfortably under the global 30s request
 	// timeout.
 	RelayerTimeout time.Duration
+
+	// GaslessURL is the base URL of latch-relayer-gasless, which submits the
+	// transactions Latch sponsors (wallet creation, setup rules, signer
+	// changes) through its channel accounts. Empty disables those flows: they
+	// answer 503 rather than falling back to the bundler.
+	GaslessURL string
+	// GaslessAPIKey is sent as `Authorization: Bearer <key>`; it must match
+	// the gasless deployment's own RELAYER_API_KEY.
+	GaslessAPIKey string
+	// GaslessTimeout bounds one gasless call, including waiting for the
+	// submission's outcome. It stays under the global 30s request timeout.
+	GaslessTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -278,6 +290,10 @@ func Load() (*Config, error) {
 		RelayerURL:     getEnv("RELAYER_URL", ""),
 		RelayerAPIKey:  getEnv("RELAYER_API_KEY", ""),
 		RelayerTimeout: time.Duration(getEnvInt("RELAYER_TIMEOUT_SEC", 25)) * time.Second,
+
+		GaslessURL:     getEnv("GASLESS_URL", ""),
+		GaslessAPIKey:  getEnv("GASLESS_API_KEY", ""),
+		GaslessTimeout: time.Duration(getEnvInt("GASLESS_TIMEOUT_SEC", 25)) * time.Second,
 	}
 
 	var err error
