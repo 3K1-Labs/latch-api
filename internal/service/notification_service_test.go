@@ -22,6 +22,8 @@ var errNotificationTest = errors.New("notification test error")
 // methods NotificationService calls, so success/dedupe/error paths can be
 // exercised without a database — same pattern as stubQuerier in
 // membership_service_test.go.
+const testNotificationWalletAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJEVA"
+
 type notificationStubQuerier struct {
 	db.Querier
 
@@ -29,13 +31,16 @@ type notificationStubQuerier struct {
 	insertNoRows bool
 	insertErr    error
 	gotInsert    db.InsertNotificationParams
+	gotInsertWal db.InsertNotificationForWalletParams
 
 	tokensOut []string
 	tokensErr error
 
-	listRows []db.ListNotificationsForUserRow
-	listErr  error
-	gotList  db.ListNotificationsForUserParams
+	listRows   []db.ListNotificationsForUserRow
+	listErr    error
+	gotList    db.ListNotificationsForUserParams
+	walletRows []db.ListNotificationsForWalletRow
+	gotListWal db.ListNotificationsForWalletParams
 
 	unreadCount int64
 	unreadErr   error
@@ -57,7 +62,22 @@ func (s *notificationStubQuerier) InsertNotification(_ context.Context, arg db.I
 	return s.insertID, nil
 }
 
-func (s *notificationStubQuerier) ListPushTokensForUser(_ context.Context, _ uuid.UUID) ([]string, error) {
+func (s *notificationStubQuerier) InsertNotificationForWallet(_ context.Context, arg db.InsertNotificationForWalletParams) (uuid.UUID, error) {
+	s.gotInsertWal = arg
+	if s.insertNoRows {
+		return uuid.UUID{}, sql.ErrNoRows
+	}
+	if s.insertErr != nil {
+		return uuid.UUID{}, s.insertErr
+	}
+	return s.insertID, nil
+}
+
+func (s *notificationStubQuerier) ListPushTokensForUser(_ context.Context, _ uuid.NullUUID) ([]string, error) {
+	return s.tokensOut, s.tokensErr
+}
+
+func (s *notificationStubQuerier) ListPushTokensForWallet(_ context.Context, _ sql.NullString) ([]string, error) {
 	return s.tokensOut, s.tokensErr
 }
 
@@ -66,7 +86,16 @@ func (s *notificationStubQuerier) ListNotificationsForUser(_ context.Context, ar
 	return s.listRows, s.listErr
 }
 
-func (s *notificationStubQuerier) CountUnreadNotifications(_ context.Context, _ uuid.UUID) (int64, error) {
+func (s *notificationStubQuerier) ListNotificationsForWallet(_ context.Context, arg db.ListNotificationsForWalletParams) ([]db.ListNotificationsForWalletRow, error) {
+	s.gotListWal = arg
+	return s.walletRows, s.listErr
+}
+
+func (s *notificationStubQuerier) CountUnreadNotifications(_ context.Context, _ uuid.NullUUID) (int64, error) {
+	return s.unreadCount, s.unreadErr
+}
+
+func (s *notificationStubQuerier) CountUnreadNotificationsForWallet(_ context.Context, _ sql.NullString) (int64, error) {
 	return s.unreadCount, s.unreadErr
 }
 
@@ -74,7 +103,15 @@ func (s *notificationStubQuerier) MarkNotificationRead(_ context.Context, _ db.M
 	return s.markReadRows, s.markReadErr
 }
 
-func (s *notificationStubQuerier) MarkAllNotificationsRead(_ context.Context, _ uuid.UUID) error {
+func (s *notificationStubQuerier) MarkNotificationReadForWallet(_ context.Context, _ db.MarkNotificationReadForWalletParams) (int64, error) {
+	return s.markReadRows, s.markReadErr
+}
+
+func (s *notificationStubQuerier) MarkAllNotificationsRead(_ context.Context, _ uuid.NullUUID) error {
+	return s.markAllErr
+}
+
+func (s *notificationStubQuerier) MarkAllNotificationsReadForWallet(_ context.Context, _ sql.NullString) error {
 	return s.markAllErr
 }
 
@@ -112,14 +149,14 @@ func TestNewNotificationService(t *testing.T) {
 
 func TestNotificationNotify_InvalidUserID(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, &stubPushNotifier{})
-	err := svc.Notify(context.Background(), "not-a-uuid", NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	err := svc.Notify(context.Background(), "not-a-uuid", "", NotificationRecord{Type: "x", Title: "t", Body: "b"})
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestNotificationNotify_InsertError(t *testing.T) {
 	q := &notificationStubQuerier{insertErr: errNotificationTest}
 	svc := NewNotificationService(q, &stubPushNotifier{})
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{Type: "x", Title: "t", Body: "b"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "insert notification")
 }
@@ -132,7 +169,7 @@ func TestNotificationNotify_DedupeCollision_NoPush(t *testing.T) {
 	notifier := &stubPushNotifier{}
 	svc := NewNotificationService(q, notifier)
 
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{
 		Type: "funding_completed", Title: "t", Body: "b", DedupeKey: "memo-1",
 	})
 	require.NoError(t, err)
@@ -147,7 +184,7 @@ func TestNotificationNotify_Success_DispatchesPush(t *testing.T) {
 	notifier := &stubPushNotifier{done: make(chan struct{})}
 	svc := NewNotificationService(q, notifier)
 
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{
 		Type: "signer_added", Title: "Backup signer added", Body: "body text",
 	})
 	require.NoError(t, err)
@@ -187,7 +224,7 @@ func TestNotificationNotify_PushContextDetachedWithOwnTimeout(t *testing.T) {
 	svc := NewNotificationService(q, notifier)
 
 	before := time.Now()
-	require.NoError(t, svc.Notify(ctx, testNotificationUserID, NotificationRecord{Type: "x", Title: "t", Body: "b"}))
+	require.NoError(t, svc.Notify(ctx, testNotificationUserID, "", NotificationRecord{Type: "x", Title: "t", Body: "b"}))
 	cancel()
 	select {
 	case <-notifier.done:
@@ -210,7 +247,7 @@ func TestNotificationNotify_TokenLookupError_StillSucceeds(t *testing.T) {
 	notifier := &stubPushNotifier{}
 	svc := NewNotificationService(q, notifier)
 
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{Type: "x", Title: "t", Body: "b"})
 	require.NoError(t, err)
 
 	time.Sleep(20 * time.Millisecond)
@@ -222,7 +259,7 @@ func TestNotificationNotify_NoTokens_NoPushDispatch(t *testing.T) {
 	notifier := &stubPushNotifier{}
 	svc := NewNotificationService(q, notifier)
 
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{Type: "x", Title: "t", Body: "b"})
 	require.NoError(t, err)
 
 	time.Sleep(20 * time.Millisecond)
@@ -236,28 +273,91 @@ func TestNotificationNotify_PushFailureDoesNotAffectResult(t *testing.T) {
 	notifier := &stubPushNotifier{err: errNotificationTest, done: make(chan struct{})}
 	svc := NewNotificationService(q, notifier)
 
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{Type: "x", Title: "t", Body: "b"})
 	require.NoError(t, err)
 	<-notifier.done // let the goroutine finish so -race sees the full interleaving
+}
+
+// ── Notify (wallet scope) ────────────────────────────────────────────────────
+//
+// Wallet-scope callers (ScopeWallet) have no users row — sub is a wallet
+// address, not a UUID (see WalletAuthService.IssueWalletTokenPair) — so
+// Notify must route to the *ForWallet queries instead of uuid.Parse-ing the
+// subject, which is exactly the bug this covers: a wallet address can never
+// parse as a UUID.
+
+func TestNotificationNotify_Wallet_Success_DispatchesPush(t *testing.T) {
+	id := uuid.New()
+	q := &notificationStubQuerier{insertID: id, tokensOut: []string{"tokA"}}
+	notifier := &stubPushNotifier{done: make(chan struct{})}
+	svc := NewNotificationService(q, notifier)
+
+	err := svc.Notify(context.Background(), testNotificationWalletAddress, ScopeWallet, NotificationRecord{
+		Type: "transaction_relayed", Title: "Transaction sent", Body: "body",
+	})
+	require.NoError(t, err)
+
+	select {
+	case <-notifier.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("push notifier was not called")
+	}
+	assert.Equal(t, testNotificationWalletAddress, q.gotInsertWal.WalletAddress.String)
+	assert.True(t, q.gotInsertWal.WalletAddress.Valid)
+	assert.Equal(t, []string{"tokA"}, notifier.gotTokens)
+}
+
+func TestNotificationNotify_Wallet_DedupeCollision_NoPush(t *testing.T) {
+	q := &notificationStubQuerier{insertNoRows: true}
+	notifier := &stubPushNotifier{}
+	svc := NewNotificationService(q, notifier)
+
+	err := svc.Notify(context.Background(), testNotificationWalletAddress, ScopeWallet, NotificationRecord{
+		Type: "funding_completed", Title: "t", Body: "b", DedupeKey: "memo-1",
+	})
+	require.NoError(t, err)
+
+	time.Sleep(20 * time.Millisecond)
+	assert.Nil(t, notifier.gotTokens)
+}
+
+func TestNotificationNotify_Wallet_InsertError(t *testing.T) {
+	q := &notificationStubQuerier{insertErr: errNotificationTest}
+	svc := NewNotificationService(q, &stubPushNotifier{})
+	err := svc.Notify(context.Background(), testNotificationWalletAddress, ScopeWallet, NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "insert notification")
+}
+
+func TestNotificationNotify_Wallet_TokenLookupError_StillSucceeds(t *testing.T) {
+	q := &notificationStubQuerier{insertID: uuid.New(), tokensErr: errNotificationTest}
+	notifier := &stubPushNotifier{}
+	svc := NewNotificationService(q, notifier)
+
+	err := svc.Notify(context.Background(), testNotificationWalletAddress, ScopeWallet, NotificationRecord{Type: "x", Title: "t", Body: "b"})
+	require.NoError(t, err)
+
+	time.Sleep(20 * time.Millisecond)
+	assert.Nil(t, notifier.gotTokens)
 }
 
 // ── List ────────────────────────────────────────────────────────────────────
 
 func TestNotificationList_InvalidUserID(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, nil)
-	_, _, err := svc.List(context.Background(), "not-a-uuid", "", 10)
+	_, _, err := svc.List(context.Background(), "not-a-uuid", "", "", 10)
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestNotificationList_InvalidCursor(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, nil)
-	_, _, err := svc.List(context.Background(), testNotificationUserID, "not-a-timestamp", 10)
+	_, _, err := svc.List(context.Background(), testNotificationUserID, "", "not-a-timestamp", 10)
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestNotificationList_QueryError(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{listErr: errNotificationTest}, nil)
-	_, _, err := svc.List(context.Background(), testNotificationUserID, "", 10)
+	_, _, err := svc.List(context.Background(), testNotificationUserID, "", "", 10)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "list notifications")
 }
@@ -267,7 +367,7 @@ func TestNotificationList_ValidCursorIsForwarded(t *testing.T) {
 	svc := NewNotificationService(q, nil)
 	cursor := time.Now().Add(-time.Hour).Format(time.RFC3339Nano)
 
-	_, _, err := svc.List(context.Background(), testNotificationUserID, cursor, 10)
+	_, _, err := svc.List(context.Background(), testNotificationUserID, "", cursor, 10)
 	require.NoError(t, err)
 	require.True(t, q.gotList.Cursor.Valid)
 }
@@ -276,7 +376,7 @@ func TestNotificationList_DefaultsLimitWhenOutOfRange(t *testing.T) {
 	q := &notificationStubQuerier{}
 	svc := NewNotificationService(q, nil)
 
-	_, _, err := svc.List(context.Background(), testNotificationUserID, "", 0)
+	_, _, err := svc.List(context.Background(), testNotificationUserID, "", "", 0)
 	require.NoError(t, err)
 	assert.Equal(t, int32(defaultNotificationPageSize), q.gotList.RowLimit)
 }
@@ -290,7 +390,7 @@ func TestNotificationList_NextCursor_WhenPageIsFull(t *testing.T) {
 	}}
 	svc := NewNotificationService(q, nil)
 
-	out, next, err := svc.List(context.Background(), testNotificationUserID, "", 2)
+	out, next, err := svc.List(context.Background(), testNotificationUserID, "", "", 2)
 	require.NoError(t, err)
 	require.Len(t, out, 2)
 	assert.Equal(t, "a", out[0].Type)
@@ -304,7 +404,7 @@ func TestNotificationList_NoNextCursor_WhenPageIsPartial(t *testing.T) {
 	}}
 	svc := NewNotificationService(q, nil)
 
-	out, next, err := svc.List(context.Background(), testNotificationUserID, "", 10)
+	out, next, err := svc.List(context.Background(), testNotificationUserID, "", "", 10)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	assert.Empty(t, next, "a partial page is the last page")
@@ -314,7 +414,7 @@ func TestNotificationNotify_SerializesMetadata(t *testing.T) {
 	q := &notificationStubQuerier{insertID: uuid.New()}
 	svc := NewNotificationService(q, &stubPushNotifier{})
 
-	err := svc.Notify(context.Background(), testNotificationUserID, NotificationRecord{
+	err := svc.Notify(context.Background(), testNotificationUserID, "", NotificationRecord{
 		Type: "x", Title: "t", Body: "b", Metadata: map[string]any{"memoId": "12345"},
 	})
 	require.NoError(t, err)
@@ -331,7 +431,7 @@ func TestNotificationList_UnmarshalsMetadata(t *testing.T) {
 	}}
 	svc := NewNotificationService(q, nil)
 
-	out, _, err := svc.List(context.Background(), testNotificationUserID, "", 10)
+	out, _, err := svc.List(context.Background(), testNotificationUserID, "", "", 10)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	assert.Equal(t, "12345", out[0].Metadata["memoId"])
@@ -344,31 +444,74 @@ func TestNotificationList_ReadFlagReflectsReadAt(t *testing.T) {
 	}}
 	svc := NewNotificationService(q, nil)
 
-	out, _, err := svc.List(context.Background(), testNotificationUserID, "", 10)
+	out, _, err := svc.List(context.Background(), testNotificationUserID, "", "", 10)
 	require.NoError(t, err)
 	require.Len(t, out, 2)
 	assert.True(t, out[0].Read)
 	assert.False(t, out[1].Read)
 }
 
+// ── List (wallet scope) ─────────────────────────────────────────────────────
+
+func TestNotificationList_Wallet_UsesWalletQuery(t *testing.T) {
+	q := &notificationStubQuerier{walletRows: []db.ListNotificationsForWalletRow{
+		{ID: uuid.New(), Type: "a", Title: "A", Body: "a-body", CreatedAt: time.Now()},
+	}}
+	svc := NewNotificationService(q, nil)
+
+	out, _, err := svc.List(context.Background(), testNotificationWalletAddress, ScopeWallet, "", 10)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, testNotificationWalletAddress, q.gotListWal.WalletAddress.String)
+}
+
+func TestNotificationList_Wallet_InvalidCursor(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{}, nil)
+	_, _, err := svc.List(context.Background(), testNotificationWalletAddress, ScopeWallet, "not-a-timestamp", 10)
+	require.ErrorIs(t, err, ErrValidation)
+}
+
+func TestNotificationList_Wallet_QueryError(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{listErr: errNotificationTest}, nil)
+	_, _, err := svc.List(context.Background(), testNotificationWalletAddress, ScopeWallet, "", 10)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list notifications")
+}
+
 // ── UnreadCount ─────────────────────────────────────────────────────────────
 
 func TestNotificationUnreadCount_InvalidUserID(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, nil)
-	_, err := svc.UnreadCount(context.Background(), "not-a-uuid")
+	_, err := svc.UnreadCount(context.Background(), "not-a-uuid", "")
 	require.ErrorIs(t, err, ErrValidation)
 }
 
 func TestNotificationUnreadCount_Success(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{unreadCount: 3}, nil)
-	n, err := svc.UnreadCount(context.Background(), testNotificationUserID)
+	n, err := svc.UnreadCount(context.Background(), testNotificationUserID, "")
 	require.NoError(t, err)
 	assert.Equal(t, 3, n)
 }
 
 func TestNotificationUnreadCount_QueryError(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{unreadErr: errNotificationTest}, nil)
-	_, err := svc.UnreadCount(context.Background(), testNotificationUserID)
+	_, err := svc.UnreadCount(context.Background(), testNotificationUserID, "")
+	require.Error(t, err)
+}
+
+// A wallet address can never parse as a UUID — this is the exact shape of
+// the bug fixed here: UnreadCount must route wallet-scope subjects to
+// CountUnreadNotificationsForWallet rather than failing uuid.Parse.
+func TestNotificationUnreadCount_Wallet_Success(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{unreadCount: 2}, nil)
+	n, err := svc.UnreadCount(context.Background(), testNotificationWalletAddress, ScopeWallet)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+}
+
+func TestNotificationUnreadCount_Wallet_QueryError(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{unreadErr: errNotificationTest}, nil)
+	_, err := svc.UnreadCount(context.Background(), testNotificationWalletAddress, ScopeWallet)
 	require.Error(t, err)
 }
 
@@ -376,42 +519,69 @@ func TestNotificationUnreadCount_QueryError(t *testing.T) {
 
 func TestNotificationMarkRead_InvalidIDs(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, nil)
-	require.ErrorIs(t, svc.MarkRead(context.Background(), "not-a-uuid", uuid.New().String()), ErrValidation)
-	require.ErrorIs(t, svc.MarkRead(context.Background(), testNotificationUserID, "not-a-uuid"), ErrValidation)
+	require.ErrorIs(t, svc.MarkRead(context.Background(), "not-a-uuid", "", uuid.New().String()), ErrValidation)
+	require.ErrorIs(t, svc.MarkRead(context.Background(), testNotificationUserID, "", "not-a-uuid"), ErrValidation)
 }
 
 func TestNotificationMarkRead_NotFound(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{markReadRows: 0}, nil)
-	err := svc.MarkRead(context.Background(), testNotificationUserID, uuid.New().String())
+	err := svc.MarkRead(context.Background(), testNotificationUserID, "", uuid.New().String())
 	require.ErrorIs(t, err, ErrNotificationNotFound)
 }
 
 func TestNotificationMarkRead_Success(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{markReadRows: 1}, nil)
-	err := svc.MarkRead(context.Background(), testNotificationUserID, uuid.New().String())
+	err := svc.MarkRead(context.Background(), testNotificationUserID, "", uuid.New().String())
 	require.NoError(t, err)
 }
 
 func TestNotificationMarkRead_QueryError(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{markReadErr: errors.New("db error")}, nil)
-	err := svc.MarkRead(context.Background(), testNotificationUserID, uuid.New().String())
+	err := svc.MarkRead(context.Background(), testNotificationUserID, "", uuid.New().String())
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrNotificationNotFound)
+}
+
+func TestNotificationMarkRead_Wallet_Success(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{markReadRows: 1}, nil)
+	err := svc.MarkRead(context.Background(), testNotificationWalletAddress, ScopeWallet, uuid.New().String())
+	require.NoError(t, err)
+}
+
+func TestNotificationMarkRead_Wallet_NotFound(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{markReadRows: 0}, nil)
+	err := svc.MarkRead(context.Background(), testNotificationWalletAddress, ScopeWallet, uuid.New().String())
+	require.ErrorIs(t, err, ErrNotificationNotFound)
+}
+
+func TestNotificationMarkRead_Wallet_InvalidNotificationID(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{}, nil)
+	require.ErrorIs(t, svc.MarkRead(context.Background(), testNotificationWalletAddress, ScopeWallet, "not-a-uuid"), ErrValidation)
 }
 
 // ── MarkAllRead ─────────────────────────────────────────────────────────────
 
 func TestNotificationMarkAllRead_InvalidUserID(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, nil)
-	require.ErrorIs(t, svc.MarkAllRead(context.Background(), "not-a-uuid"), ErrValidation)
+	require.ErrorIs(t, svc.MarkAllRead(context.Background(), "not-a-uuid", ""), ErrValidation)
 }
 
 func TestNotificationMarkAllRead_Success(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{}, nil)
-	require.NoError(t, svc.MarkAllRead(context.Background(), testNotificationUserID))
+	require.NoError(t, svc.MarkAllRead(context.Background(), testNotificationUserID, ""))
 }
 
 func TestNotificationMarkAllRead_QueryError(t *testing.T) {
 	svc := NewNotificationService(&notificationStubQuerier{markAllErr: errNotificationTest}, nil)
-	require.Error(t, svc.MarkAllRead(context.Background(), testNotificationUserID))
+	require.Error(t, svc.MarkAllRead(context.Background(), testNotificationUserID, ""))
+}
+
+func TestNotificationMarkAllRead_Wallet_Success(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{}, nil)
+	require.NoError(t, svc.MarkAllRead(context.Background(), testNotificationWalletAddress, ScopeWallet))
+}
+
+func TestNotificationMarkAllRead_Wallet_QueryError(t *testing.T) {
+	svc := NewNotificationService(&notificationStubQuerier{markAllErr: errNotificationTest}, nil)
+	require.Error(t, svc.MarkAllRead(context.Background(), testNotificationWalletAddress, ScopeWallet))
 }

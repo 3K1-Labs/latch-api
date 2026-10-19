@@ -153,16 +153,16 @@ type pushNotifier interface {
 }
 
 type notificationService interface {
-	Notify(ctx context.Context, userID string, rec service.NotificationRecord) error
-	List(ctx context.Context, userID, cursor string, limit int) ([]service.Notification, string, error)
-	UnreadCount(ctx context.Context, userID string) (int, error)
-	MarkRead(ctx context.Context, userID, notificationID string) error
-	MarkAllRead(ctx context.Context, userID string) error
+	Notify(ctx context.Context, userID, scope string, rec service.NotificationRecord) error
+	List(ctx context.Context, userID, scope, cursor string, limit int) ([]service.Notification, string, error)
+	UnreadCount(ctx context.Context, userID, scope string) (int, error)
+	MarkRead(ctx context.Context, userID, scope, notificationID string) error
+	MarkAllRead(ctx context.Context, userID, scope string) error
 }
 
 type pushDeviceService interface {
-	Register(ctx context.Context, userID, token, platform string) error
-	Delete(ctx context.Context, userID, token string) error
+	Register(ctx context.Context, userID, scope, token, platform string) error
+	Delete(ctx context.Context, userID, scope, token string) error
 }
 
 type priceService interface {

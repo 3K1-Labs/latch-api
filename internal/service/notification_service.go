@@ -59,36 +59,51 @@ func NewNotificationService(q db.Querier, notifier PushNotifier) *NotificationSe
 // a dedupe no-op), dispatches push to the user's registered devices in a
 // fire-and-forget goroutine — mirroring CosignHandler.notifyQueue: push
 // failure must never fail the write that triggered it.
-func (s *NotificationService) Notify(ctx context.Context, userID string, rec NotificationRecord) error {
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		return ErrValidation
-	}
-
+//
+// scope distinguishes the two subjects a caller's JWT sub can be: a
+// users.id UUID (email-scope) or a wallet address (ScopeWallet — SEP-10-style
+// sign-in, no users row). See WalletAuthService.IssueWalletTokenPair.
+func (s *NotificationService) Notify(ctx context.Context, userID, scope string, rec NotificationRecord) error {
 	var metaMsg pqtype.NullRawMessage
 	if rec.Metadata != nil {
 		if b, err := json.Marshal(rec.Metadata); err == nil {
 			metaMsg = pqtype.NullRawMessage{RawMessage: b, Valid: true}
 		}
 	}
+	dedupe := sql.NullString{String: rec.DedupeKey, Valid: rec.DedupeKey != ""}
 
-	id, err := s.q.InsertNotification(ctx, db.InsertNotificationParams{
-		UserID:    uid,
-		Type:      rec.Type,
-		Title:     rec.Title,
-		Body:      rec.Body,
-		Metadata:  metaMsg,
-		DedupeKey: sql.NullString{String: rec.DedupeKey, Valid: rec.DedupeKey != ""},
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		// Dedupe collision: already recorded, so already pushed. Not an error.
-		return nil
+	var id uuid.UUID
+	var tokens []string
+	var err error
+	if scope == ScopeWallet {
+		wallet := sql.NullString{String: userID, Valid: true}
+		id, err = s.q.InsertNotificationForWallet(ctx, db.InsertNotificationForWalletParams{
+			WalletAddress: wallet, Type: rec.Type, Title: rec.Title, Body: rec.Body, Metadata: metaMsg, DedupeKey: dedupe,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			// Dedupe collision: already recorded, so already pushed. Not an error.
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("insert notification: %w", err)
+		}
+		tokens, err = s.q.ListPushTokensForWallet(ctx, wallet)
+	} else {
+		uid, perr := uuid.Parse(userID)
+		if perr != nil {
+			return ErrValidation
+		}
+		id, err = s.q.InsertNotification(ctx, db.InsertNotificationParams{
+			UserID: uuid.NullUUID{UUID: uid, Valid: true}, Type: rec.Type, Title: rec.Title, Body: rec.Body, Metadata: metaMsg, DedupeKey: dedupe,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("insert notification: %w", err)
+		}
+		tokens, err = s.q.ListPushTokensForUser(ctx, uuid.NullUUID{UUID: uid, Valid: true})
 	}
-	if err != nil {
-		return fmt.Errorf("insert notification: %w", err)
-	}
-
-	tokens, err := s.q.ListPushTokensForUser(ctx, uid)
 	if err != nil {
 		slog.Error("list push tokens for notification", "notificationID", id, "err", err)
 		return nil
@@ -119,13 +134,23 @@ func (s *NotificationService) dispatchPush(ctx context.Context, tokens []string,
 	}()
 }
 
+// notifRow is the subset of ListNotificationsForUserRow/ListNotificationsForWalletRow
+// that List's output mapping needs — the two generated types are structurally
+// identical but distinct Go types, so each branch converts into this shared
+// shape before the one mapping loop below runs.
+type notifRow struct {
+	ID        uuid.UUID
+	Type      string
+	Title     string
+	Body      string
+	Metadata  pqtype.NullRawMessage
+	ReadAt    sql.NullTime
+	CreatedAt time.Time
+}
+
 // List returns a page of notifications newest-first. cursor is the
 // created_at of the last row the caller already has ("" for the first page).
-func (s *NotificationService) List(ctx context.Context, userID, cursor string, limit int) ([]Notification, string, error) {
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		return nil, "", ErrValidation
-	}
+func (s *NotificationService) List(ctx context.Context, userID, scope, cursor string, limit int) ([]Notification, string, error) {
 	if limit <= 0 || limit > defaultNotificationPageSize {
 		limit = defaultNotificationPageSize
 	}
@@ -139,13 +164,35 @@ func (s *NotificationService) List(ctx context.Context, userID, cursor string, l
 		cursorTime = sql.NullTime{Time: t, Valid: true}
 	}
 
-	rows, err := s.q.ListNotificationsForUser(ctx, db.ListNotificationsForUserParams{
-		UserID:   uid,
-		Cursor:   cursorTime,
-		RowLimit: int32(limit),
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("list notifications: %w", err)
+	var rows []notifRow
+	if scope == ScopeWallet {
+		walletRows, err := s.q.ListNotificationsForWallet(ctx, db.ListNotificationsForWalletParams{
+			WalletAddress: sql.NullString{String: userID, Valid: true},
+			Cursor:        cursorTime,
+			RowLimit:      int32(limit),
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("list notifications: %w", err)
+		}
+		for _, r := range walletRows {
+			rows = append(rows, notifRow{r.ID, r.Type, r.Title, r.Body, r.Metadata, r.ReadAt, r.CreatedAt})
+		}
+	} else {
+		uid, err := uuid.Parse(userID)
+		if err != nil {
+			return nil, "", ErrValidation
+		}
+		userRows, err := s.q.ListNotificationsForUser(ctx, db.ListNotificationsForUserParams{
+			UserID:   uuid.NullUUID{UUID: uid, Valid: true},
+			Cursor:   cursorTime,
+			RowLimit: int32(limit),
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("list notifications: %w", err)
+		}
+		for _, r := range userRows {
+			rows = append(rows, notifRow{r.ID, r.Type, r.Title, r.Body, r.Metadata, r.ReadAt, r.CreatedAt})
+		}
 	}
 
 	out := make([]Notification, 0, len(rows))
@@ -174,28 +221,46 @@ func (s *NotificationService) List(ctx context.Context, userID, cursor string, l
 	return out, nextCursor, nil
 }
 
-func (s *NotificationService) UnreadCount(ctx context.Context, userID string) (int, error) {
+func (s *NotificationService) UnreadCount(ctx context.Context, userID, scope string) (int, error) {
+	if scope == ScopeWallet {
+		count, err := s.q.CountUnreadNotificationsForWallet(ctx, sql.NullString{String: userID, Valid: true})
+		if err != nil {
+			return 0, fmt.Errorf("count unread notifications: %w", err)
+		}
+		return int(count), nil
+	}
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return 0, ErrValidation
 	}
-	count, err := s.q.CountUnreadNotifications(ctx, uid)
+	count, err := s.q.CountUnreadNotifications(ctx, uuid.NullUUID{UUID: uid, Valid: true})
 	if err != nil {
 		return 0, fmt.Errorf("count unread notifications: %w", err)
 	}
 	return int(count), nil
 }
 
-func (s *NotificationService) MarkRead(ctx context.Context, userID, notificationID string) error {
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		return ErrValidation
-	}
+func (s *NotificationService) MarkRead(ctx context.Context, userID, scope, notificationID string) error {
 	nid, err := uuid.Parse(notificationID)
 	if err != nil {
 		return ErrValidation
 	}
-	rows, err := s.q.MarkNotificationRead(ctx, db.MarkNotificationReadParams{ID: nid, UserID: uid})
+
+	var rows int64
+	if scope == ScopeWallet {
+		rows, err = s.q.MarkNotificationReadForWallet(ctx, db.MarkNotificationReadForWalletParams{
+			ID: nid, WalletAddress: sql.NullString{String: userID, Valid: true},
+		})
+	} else {
+		var uid uuid.UUID
+		uid, err = uuid.Parse(userID)
+		if err != nil {
+			return ErrValidation
+		}
+		rows, err = s.q.MarkNotificationRead(ctx, db.MarkNotificationReadParams{
+			ID: nid, UserID: uuid.NullUUID{UUID: uid, Valid: true},
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("mark notification read: %w", err)
 	}
@@ -205,12 +270,18 @@ func (s *NotificationService) MarkRead(ctx context.Context, userID, notification
 	return nil
 }
 
-func (s *NotificationService) MarkAllRead(ctx context.Context, userID string) error {
+func (s *NotificationService) MarkAllRead(ctx context.Context, userID, scope string) error {
+	if scope == ScopeWallet {
+		if err := s.q.MarkAllNotificationsReadForWallet(ctx, sql.NullString{String: userID, Valid: true}); err != nil {
+			return fmt.Errorf("mark all notifications read: %w", err)
+		}
+		return nil
+	}
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return ErrValidation
 	}
-	if err := s.q.MarkAllNotificationsRead(ctx, uid); err != nil {
+	if err := s.q.MarkAllNotificationsRead(ctx, uuid.NullUUID{UUID: uid, Valid: true}); err != nil {
 		return fmt.Errorf("mark all notifications read: %w", err)
 	}
 	return nil
