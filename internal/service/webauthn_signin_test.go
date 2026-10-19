@@ -197,7 +197,7 @@ func TestParseP256PubKey(t *testing.T) {
 type stubSignerReader struct {
 	keys [][]byte
 	err  error
-	// gotRPCURL records the endpoint the service selected for the network.
+	// gotRPCURL records the endpoint the service read signers from.
 	gotRPCURL string
 }
 
@@ -206,10 +206,10 @@ func (s *stubSignerReader) WebAuthnSignerKeys(_ context.Context, _, rpcURL strin
 	return s.keys, s.err
 }
 
-var testSorobanURLs = SorobanURLs{Testnet: "http://testnet-rpc", Mainnet: "http://mainnet-rpc"}
+const testSorobanURL = "http://rpc"
 
 func newPasskeyAuthService(reader WebAuthnSignerReader) *WalletAuthService {
-	return NewWalletAuthService(nil, nil, reader, testSorobanURLs, []string{testOrigin})
+	return NewWalletAuthService(nil, nil, reader, testSorobanURL, []string{testOrigin})
 }
 
 func TestVerifyPasskey_Success(t *testing.T) {
@@ -223,23 +223,7 @@ func TestVerifyPasskey_Success(t *testing.T) {
 		AuthenticatorData: authData, ClientDataJSON: cdj, PasskeySignature: sig,
 	}, NetworkTestnet, nonce)
 	require.NoError(t, err)
-	assert.Equal(t, testSorobanURLs.Testnet, reader.gotRPCURL)
-}
-
-// A mainnet-only smart account is invisible on testnet, so the network must
-// pick the RPC the signers are actually read from.
-func TestVerifyPasskey_MainnetReadsMainnetRPC(t *testing.T) {
-	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	nonce := []byte("0123456789abcdef0123456789abcdef")
-	pub65, authData, cdj, sig := makeAssertion(t, priv, nonce, testOrigin)
-
-	reader := &stubSignerReader{keys: [][]byte{pub65}}
-	svc := newPasskeyAuthService(reader)
-	err := svc.verifyPasskey(context.Background(), WalletSignInInput{
-		AuthenticatorData: authData, ClientDataJSON: cdj, PasskeySignature: sig,
-	}, NetworkMainnet, nonce)
-	require.NoError(t, err)
-	assert.Equal(t, testSorobanURLs.Mainnet, reader.gotRPCURL)
+	assert.Equal(t, testSorobanURL, reader.gotRPCURL)
 }
 
 func TestVerifyPasskey_NoSignerMapsToBadSignature(t *testing.T) {

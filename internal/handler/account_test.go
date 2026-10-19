@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -190,7 +191,7 @@ func TestCreateDepositIntent_NetworkRejected(t *testing.T) {
 		err     error
 		wantMsg string
 	}{
-		{"unsupported network", service.ErrNetworkUnsupported, "funding is only available on testnet"},
+		{"other network", fmt.Errorf("%w: serves testnet only", deploynet.ErrMismatch), "network mismatch: serves testnet only"},
 		{"invalid network", service.ErrInvalidNetwork, "network must be testnet or mainnet"},
 	}
 	for _, tc := range tests {
@@ -302,8 +303,8 @@ func TestDepositStatus_ForwardsNetwork(t *testing.T) {
 	}
 }
 
-func TestDepositStatus_NetworkUnsupported(t *testing.T) {
-	h := newAccountHandler(&stubAccount{fundingStatusErr: service.ErrNetworkUnsupported}, nil)
+func TestDepositStatus_NetworkMismatch(t *testing.T) {
+	h := newAccountHandler(&stubAccount{fundingStatusErr: fmt.Errorf("%w: serves testnet only", deploynet.ErrMismatch)}, nil)
 	r := gin.New()
 	r.GET("/accounts/deposit/status/:memo_id", h.DepositStatus)
 
@@ -311,7 +312,7 @@ func TestDepositStatus_NetworkUnsupported(t *testing.T) {
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/accounts/deposit/status/12345?network=mainnet", nil), "uid")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "not available on this network")
+	assert.Contains(t, w.Body.String(), "NETWORK_MISMATCH")
 }
 
 func TestDepositStatus_NotOwner(t *testing.T) {

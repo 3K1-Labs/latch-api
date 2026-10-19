@@ -170,8 +170,6 @@ func (h *AccountHandler) CreateDepositIntent(c *gin.Context) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
 		case errors.Is(err, deploynet.ErrMismatch):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
-		case errors.Is(err, service.ErrNetworkUnsupported):
-			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is only available on testnet")
 		case errors.Is(err, service.ErrRelayerNotConfigured):
 			httpx.Fail(c, http.StatusServiceUnavailable, httpx.ErrInternal, "funding is temporarily unavailable")
 		case errors.Is(err, service.ErrRelayerUnavailable):
@@ -225,8 +223,6 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 	status, err := h.accountSvc.GetFundingStatus(c.Request.Context(), userID, scope, memoID, network)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrNetworkUnsupported):
-			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "funding is not available on this network")
 		case errors.Is(err, service.ErrInvalidNetwork):
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be testnet or mainnet")
 		case errors.Is(err, deploynet.ErrMismatch):
@@ -253,7 +249,7 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 		h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionFundingCompleted), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 			"memo_id": memoID,
 		})
-		if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		if err := h.notifSvc.Notify(c.Request.Context(), userID, scope, service.NotificationRecord{
 			Type: "funding_completed", Title: "Deposit received", Body: "Your deposit has been credited.",
 			DedupeKey: memoID,
 		}); err != nil {

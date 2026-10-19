@@ -28,7 +28,7 @@ func newTestFreighterSmartAccountService(t *testing.T, rpc sorobanRPC) *SmartAcc
 	require.NoError(t, err)
 
 	factoryAddr := testContractAddress(t)
-	return NewSmartAccountService(rpc, bundlerSvc, q, "https://rpc.example.com", testPassphrase, factoryAddr)
+	return NewSmartAccountService(rpc, bundlerSvc, q, "https://rpc.example.com", testPassphrase, factoryAddr, nil)
 }
 
 // stubHorizonAndFriendbot points horizonTestnetURL/friendbotURL at ts for
@@ -69,7 +69,7 @@ func TestQueryFreighter_NotDeployed(t *testing.T) {
 	require.NoError(t, err)
 	bundlerSvc, err := NewBundlerService(bundlerKp.Seed(), "")
 	require.NoError(t, err)
-	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr)
+	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr, nil)
 
 	address, deployed, err := svc.QueryFreighter(context.Background(), testGAddress)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestDeployFreighter_AlreadyDeployed(t *testing.T) {
 	require.NoError(t, err)
 	bundlerSvc, err := NewBundlerService(bundlerKp.Seed(), "")
 	require.NoError(t, err)
-	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr)
+	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr, nil)
 
 	// Account already exists on horizon — friendbot must not be called.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,26 +125,14 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 	factoryAddr := testContractAddress(t)
 	predictedAddr := testContractAddress(t)
 
-	deployCalls := 0
-	rpc := &fakeSorobanRPC{
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			deployCalls++
-			return &service.SimulateResult{
-				Results:         []service.SimResultEntry{{XDR: contractAddressScValXDR(t, predictedAddr)}},
-				TransactionData: minimalSorobanTransactionDataXDR(t),
-			}, nil
+	rpc := noBundlerRPC(t, &fakeSorobanRPC{
+		simulateFn: func(context.Context, string, string, service.RPCResourceConfig) (*service.SimulateResult, error) {
+			return &service.SimulateResult{Results: []service.SimResultEntry{{XDR: contractAddressScValXDR(t, predictedAddr)}}}, nil
 		},
-		ledgerFn: func(ctx context.Context, rpcURL string, keys []string) (*service.GetLedgerEntriesResult, error) {
-			return &service.GetLedgerEntriesResult{}, nil
-		},
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
-		sendFn: func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-			return &service.SendTxResult{Hash: "abc123", Status: "PENDING"}, nil
-		},
-		getTxFn: func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error) {
-			return &service.GetTxResult{Status: service.RPCStatusSuccess, ResultMetaXdr: resultMetaXDRWithAddress(t, predictedAddr)}, nil
-		},
-	}
+		ledgerFn: deployedAfter(1),
+		getTxFn:  landsAfter(t, 0, predictedAddr),
+	})
+	g := gaslessSuccess("abc123")
 	sqlDB, _, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { sqlDB.Close() })
@@ -152,7 +140,7 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 	require.NoError(t, err)
 	bundlerSvc, err := NewBundlerService(bundlerKp.Seed(), "")
 	require.NoError(t, err)
-	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr)
+	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr, g)
 
 	var friendbotCalled bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +163,7 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 	assert.True(t, friendbotCalled)
 	assert.Equal(t, predictedAddr, address)
 	assert.False(t, alreadyDeployed)
-	assert.Positive(t, deployCalls)
+	assert.Len(t, g.calls, 1)
 }
 
 func TestDeployFreighter_FriendbotFails(t *testing.T) {

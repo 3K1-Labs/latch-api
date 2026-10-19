@@ -8,19 +8,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/httpx"
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stellar/go-stellar-sdk/strkey"
-)
-
-// Each network's service instance is only constructed when that network's
-// bundler/factory config is present, so a request for an unconfigured network
-// is a client-visible 400 rather than a nil-interface panic.
-var (
-	errTestnetNotConfigured = errors.New("testnet is not configured")
-	errMainnetNotConfigured = errors.New("mainnet is not configured")
 )
 
 // ed25519PublicKeyHexLen is the hex length of a raw 32-byte Ed25519 public key.
@@ -40,20 +31,18 @@ const minWebauthnKeyDataHexLen = 132
 // address is already on-chain gets that address back without a new
 // transaction, so client retries are safe.
 type SmartAccountHandler struct {
-	deploySvc        smartAccountDeployService
-	deploySvcMainnet smartAccountDeployService
-	proofSvc         deployProofService
-	auditSvc         auditService
-	credSvc          passkeyCredentialRegisterService
+	deploySvc smartAccountDeployService
+	proofSvc  deployProofService
+	auditSvc  auditService
+	credSvc   passkeyCredentialRegisterService
 }
 
-func NewSmartAccountHandler(deploySvc, deploySvcMainnet smartAccountDeployService, proofSvc deployProofService, auditSvc auditService, credSvc passkeyCredentialRegisterService) *SmartAccountHandler {
+func NewSmartAccountHandler(deploySvc smartAccountDeployService, proofSvc deployProofService, auditSvc auditService, credSvc passkeyCredentialRegisterService) *SmartAccountHandler {
 	return &SmartAccountHandler{
-		deploySvc:        deploySvc,
-		deploySvcMainnet: deploySvcMainnet,
-		proofSvc:         proofSvc,
-		auditSvc:         auditSvc,
-		credSvc:          credSvc,
+		deploySvc: deploySvc,
+		proofSvc:  proofSvc,
+		auditSvc:  auditSvc,
+		credSvc:   credSvc,
 	}
 }
 
@@ -131,7 +120,7 @@ func (h *SmartAccountHandler) DeployChallenge(c *gin.Context) {
 
 	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
@@ -150,53 +139,6 @@ func (h *SmartAccountHandler) DeployChallenge(c *gin.Context) {
 		"nonce":      nonce,
 		"expires_in": int(ttl.Seconds()),
 	})
-}
-
-// SmartAccountDeployServiceOrNil boxes a possibly-nil *webapp.SmartAccountService
-// into the smartAccountDeployService interface, avoiding the Go trap where a
-// nil concrete pointer boxed into an interface yields a non-nil interface
-// value — which would make resolveNetwork's nil check always false and panic
-// on the first mainnet request instead of returning a clean 400.
-func SmartAccountDeployServiceOrNil(svc *webapp.SmartAccountService) smartAccountDeployService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-// resolveNetwork selects the service instance for the requested network.
-// Empty or "testnet" resolves to the testnet instance; "mainnet" requires the
-// mainnet instance to have been configured at startup.
-func (h *SmartAccountHandler) resolveNetwork(raw string) (smartAccountDeployService, webapp.Network, error) {
-	network, err := webapp.ParseNetwork(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	if network == webapp.NetworkMainnet {
-		if h.deploySvcMainnet == nil {
-			return nil, "", errMainnetNotConfigured
-		}
-		return h.deploySvcMainnet, network, nil
-	}
-	if h.deploySvc == nil {
-		return nil, "", errTestnetNotConfigured
-	}
-	return h.deploySvc, network, nil
-}
-
-// failNetworkResolution maps a resolveNetwork error onto the /v1 error
-// envelope. Both cases are client-correctable, so both are 400.
-func (h *SmartAccountHandler) failNetworkResolution(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, errMainnetNotConfigured):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "mainnet is not configured on this deployment")
-	case errors.Is(err, errTestnetNotConfigured):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "testnet is not configured on this deployment")
-	case errors.Is(err, deploynet.ErrMismatch):
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrNetworkMismatch, err.Error())
-	default:
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "network must be \"testnet\" or \"mainnet\"")
-	}
 }
 
 // respondDeploy writes the audit entry and success envelope shared by all
@@ -258,9 +200,9 @@ func (h *SmartAccountHandler) DeployEd25519(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
@@ -268,7 +210,7 @@ func (h *SmartAccountHandler) DeployEd25519(c *gin.Context) {
 		return
 	}
 
-	address, alreadyDeployed, err := svc.DeployByPublicKey(c.Request.Context(), req.PublicKeyHex)
+	address, alreadyDeployed, err := h.deploySvc.DeployByPublicKey(c.Request.Context(), req.PublicKeyHex)
 	if err != nil {
 		slog.Error("deploy ed25519 smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
@@ -320,9 +262,9 @@ func (h *SmartAccountHandler) DeployWebauthn(c *gin.Context) {
 		return
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
@@ -330,8 +272,11 @@ func (h *SmartAccountHandler) DeployWebauthn(c *gin.Context) {
 		return
 	}
 
-	address, alreadyDeployed, err := svc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
+	address, alreadyDeployed, err := h.deploySvc.DeployByKeyData(c.Request.Context(), req.KeyDataHex)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy webauthn smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -469,9 +414,9 @@ func (h *SmartAccountHandler) DeployMultisig(c *gin.Context) {
 		}
 	}
 
-	svc, network, err := h.resolveNetwork(req.Network)
+	network, err := webapp.ParseNetwork(req.Network)
 	if err != nil {
-		h.failNetworkResolution(c, err)
+		failRequestNetwork(c, err)
 		return
 	}
 
@@ -485,7 +430,7 @@ func (h *SmartAccountHandler) DeployMultisig(c *gin.Context) {
 		return
 	}
 
-	address, alreadyDeployed, err := svc.DeployMultisig(c.Request.Context(), signers, req.Threshold, salt)
+	address, alreadyDeployed, err := h.deploySvc.DeployMultisig(c.Request.Context(), signers, req.Threshold, salt)
 	if err != nil {
 		slog.Error("deploy multisig smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
@@ -527,26 +472,15 @@ func (h *SmartAccountHandler) DeployGAddress(c *gin.Context) {
 		return
 	}
 
+	network, err := webapp.ParseNetwork(req.Network)
+	if err != nil {
+		failRequestNetwork(c, err)
+		return
+	}
 	// The underlying flow funds the signer account via friendbot, which only
-	// exists on testnet — same constraint the webapp route enforces. Checked
-	// before resolveNetwork so a mainnet request gets this specific reason
-	// rather than a generic "mainnet is not configured".
-	requested, err := webapp.ParseNetwork(req.Network)
-	if err != nil {
-		h.failNetworkResolution(c, err)
-		return
-	}
-	if requested == webapp.NetworkMainnet {
+	// exists on testnet — same constraint the webapp route enforces.
+	if network == webapp.NetworkMainnet {
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "g-address deployment funds via testnet friendbot and is unavailable on mainnet")
-		return
-	}
-
-	// Resolve rather than reaching for h.deploySvc directly: on a mainnet-only
-	// deployment the testnet service is nil, and calling through a nil
-	// interface would panic instead of returning a 400.
-	svc, network, err := h.resolveNetwork(req.Network)
-	if err != nil {
-		h.failNetworkResolution(c, err)
 		return
 	}
 
@@ -554,8 +488,11 @@ func (h *SmartAccountHandler) DeployGAddress(c *gin.Context) {
 		return
 	}
 
-	address, alreadyDeployed, err := svc.DeployFreighter(c.Request.Context(), req.GAddress)
+	address, alreadyDeployed, err := h.deploySvc.DeployFreighter(c.Request.Context(), req.GAddress)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy g-address smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return

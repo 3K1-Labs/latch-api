@@ -44,6 +44,7 @@ type registerPushDeviceRequest struct {
 // @Router       /v1/devices [post]
 func (h *PushDeviceHandler) Register(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
 	var req registerPushDeviceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -51,7 +52,7 @@ func (h *PushDeviceHandler) Register(c *gin.Context) {
 		return
 	}
 
-	if err := h.pushDeviceSvc.Register(c.Request.Context(), userID, req.PushToken, req.Platform); err != nil {
+	if err := h.pushDeviceSvc.Register(c.Request.Context(), userID, scope, req.PushToken, req.Platform); err != nil {
 		if errors.Is(err, service.ErrValidation) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid push token")
 			return
@@ -78,8 +79,9 @@ func (h *PushDeviceHandler) Register(c *gin.Context) {
 // @Router       /v1/devices/{token} [delete]
 func (h *PushDeviceHandler) Delete(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
-	if err := h.pushDeviceSvc.Delete(c.Request.Context(), userID, c.Param("token")); err != nil {
+	if err := h.pushDeviceSvc.Delete(c.Request.Context(), userID, scope, c.Param("token")); err != nil {
 		if errors.Is(err, service.ErrValidation) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid push token")
 			return

@@ -200,15 +200,22 @@ latch-relayer exposes four endpoints: `POST /intents`, `PATCH /intents/{memo_id}
 
 **Mobile funding path.** `AccountService` mints a funding intent via `RelayerService.CreateIntent` (`POST {RELAYER_URL}/intents`), which returns the `memo_id` and `pool_address` a deposit must carry. `smart_account_registrations` records which user owns which smart account address — ownership only; it does not store memo or pool values. `POST /intents` is deliberately **not** idempotent: every call mints a new, TTL-bound intent.
 
-Two relayer deployments exist, selected by network (`relayerFor` in `account_service.go`). Mainnet funding returns `ErrNetworkUnsupported` unless `RELAYER_URL_MAINNET` is set — never falling back to the testnet relayer, whose pool keypair also exists on mainnet and would hand back an address nothing is watching.
+Each latch-api deployment talks to the one latch-relayer deployment bound to its own network (`RELAYER_URL`). Never point a deployment at the other network's relayer: the pool keypair exists on both networks, so it would hand back an address nothing is watching.
 
 **Web app on-ramp path.** `OnRampService` calls the same `POST /intents` and adopts the returned `memo_id` and `pool_address` rather than minting its own. The relayer is the sole allocator of deposit references: a reference it did not issue is one it cannot match, and the deposit is swept to the recovery address instead of credited. Registration is synchronous and fails closed with a 503 — there is no retry sweep.
 
 - `RELAYER_URL` — base URL of `latch-relayer`; empty disables registration entirely, logged not fatal (default unset)
 - `RELAYER_API_KEY` — shared secret sent as `Authorization: Bearer <key>` on every relayer call; must match the relayer deployment's own `RELAYER_API_KEY` (≥32 chars, which the relayer enforces at startup). Unset means every call comes back 401, surfaced as a 503 (default unset)
 - `RELAYER_TIMEOUT_SEC` — HTTP timeout for relayer calls (default `25`; must clear the relayer's ~14s cold start and stay under the global 30s request timeout)
-- `RELAYER_URL_MAINNET` / `RELAYER_API_KEY_MAINNET` — a second relayer deployment bound to mainnet. Empty `RELAYER_URL_MAINNET` leaves mainnet funding unsupported; the API key falls back to `RELAYER_API_KEY` when unset
 - `ONRAMP_RELAYER_TIMEOUT_SEC` — tighter budget for the relayer call made while building an on-ramp session (default `8`). Shorter than `RELAYER_TIMEOUT_SEC` because the on-ramp calls a provider afterwards and both must fit the global 30s request timeout
 - `ONRAMP_INTENT_TTL_SEC` — how long the relayer keeps an on-ramp intent alive (default `604800`, 7 days). Must cover the slowest settlement path: the relayer's own default is one hour, and its forwarder sweeps late deposits to recovery, so an hour would strand every bank-funded purchase
+
+### latch-relayer-gasless integration (issue #110)
+
+The bundler is a single Stellar account, so it can source one pending transaction at a time and concurrent submissions collided with `tx_bad_seq`. Sponsored transactions now go to `latch-relayer-gasless` (`POST /gasless/submit`, mode `sponsored`), which sources each on one of its channel accounts and pays the fee by fee-bump: wallet creation (factory `create_account`, in `SmartAccountService.Deploy`) and single calls to a wallet's `add_context_rule`, `add_signer` or `remove_context_rule` (in `submitWithBundler` / `SubmitBatchAuthEntries`). latch-api still runs its own enforce-mode simulation before handing a call off. The list in `internal/service/webapp/gasless.go` must match the gasless deployment's `SPONSORED_CALLS`. User-paid calls (sends, swaps, multisig execute) and multi-op batches (device pairing) are still bundler-sourced until forward mode and batch support land. There is no bundler fallback: an unconfigured or unavailable gasless service answers 503, a sponsorship cap 429. The request id is a hash of the call and its auth entries, so a retried request returns the first outcome and is never paid twice. See [`docs/gasless-integration-plan.md`](docs/gasless-integration-plan.md).
+
+- `GASLESS_URL` — base URL of `latch-relayer-gasless`; empty makes the sponsored flows answer 503 (default unset)
+- `GASLESS_API_KEY` — sent as `Authorization: Bearer <key>`; must match the gasless deployment's `RELAYER_API_KEY` (default unset)
+- `GASLESS_TIMEOUT_SEC` — budget for one submission, including waiting for its outcome (default `25`; stays under the global 30s request timeout)
 
 WCK-bundle and membership retention default high on purpose — they're discovery/bootstrap state a slow-to-join member still needs; set to `0` to disable that sweep entirely. The cosign sweep is the high-churn one that matters.

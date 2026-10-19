@@ -32,3 +32,37 @@ WHERE id = $1 AND user_id = $2 AND read_at IS NULL;
 UPDATE notifications
 SET read_at = NOW()
 WHERE user_id = $1 AND read_at IS NULL;
+
+-- Wallet-scope counterparts (sub is a wallet address, not a users.id UUID —
+-- see WalletAuthService.IssueWalletTokenPair). Same shape as the user_id
+-- queries above, targeting the wallet_address column and its own partial
+-- indexes (migration 000033) instead.
+
+-- name: InsertNotificationForWallet :one
+INSERT INTO notifications (wallet_address, type, title, body, metadata, dedupe_key)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (wallet_address, type, dedupe_key) WHERE dedupe_key IS NOT NULL AND wallet_address IS NOT NULL DO NOTHING
+RETURNING id;
+
+-- name: ListNotificationsForWallet :many
+SELECT id, type, title, body, metadata, read_at, created_at
+FROM notifications
+WHERE wallet_address = sqlc.arg('wallet_address')
+  AND (sqlc.narg('cursor')::timestamptz IS NULL OR created_at < sqlc.narg('cursor'))
+ORDER BY created_at DESC
+LIMIT sqlc.arg('row_limit');
+
+-- name: CountUnreadNotificationsForWallet :one
+SELECT COUNT(*)
+FROM notifications
+WHERE wallet_address = $1 AND read_at IS NULL;
+
+-- name: MarkNotificationReadForWallet :execrows
+UPDATE notifications
+SET read_at = NOW()
+WHERE id = $1 AND wallet_address = $2 AND read_at IS NULL;
+
+-- name: MarkAllNotificationsReadForWallet :exec
+UPDATE notifications
+SET read_at = NOW()
+WHERE wallet_address = $1 AND read_at IS NULL;

@@ -20,12 +20,6 @@ var ErrRelayerNotConfigured = errors.New("relayer url not configured")
 // memo_id (404 from GET /deposit/status/{memo_id}).
 var ErrIntentNotFound = errors.New("funding intent not found")
 
-// ErrNetworkUnsupported is returned for a funding request on a network this
-// deployment's latch-relayer doesn't serve — see CreateFundingIntent. The
-// request is valid, the capability just isn't there, so it's a hard 400 rather
-// than something a retry can fix.
-var ErrNetworkUnsupported = errors.New("network not supported for funding")
-
 // ErrRelayerUnavailable is returned when latch-relayer is configured and the
 // request is well-formed, but the call didn't reach a healthy relayer —
 // transport error, timeout (it sleeps when idle and takes tens of seconds to
@@ -85,13 +79,6 @@ func NewRelayerService(baseURL, apiKey string, timeout time.Duration) *RelayerSe
 		retryInterval: 2 * time.Second,
 		httpClient:    &http.Client{Timeout: timeout},
 	}
-}
-
-// configured reports whether this relayer has somewhere to call. Callers use it
-// to decide whether a network is served at all, rather than discovering the
-// empty base URL one request later.
-func (s *RelayerService) configured() bool {
-	return s != nil && s.baseURL != ""
 }
 
 // authorize attaches latch-relayer's shared secret. Every route but /health

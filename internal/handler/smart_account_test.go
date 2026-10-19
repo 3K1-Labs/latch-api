@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/latch/backend/internal/deploynet"
 	"github.com/latch/backend/internal/service"
 	"github.com/latch/backend/internal/service/webapp"
 	"github.com/stellar/go-stellar-sdk/strkey"
@@ -98,14 +99,14 @@ func (s *stubDeployProof) Verify(_ context.Context, in service.DeployProofInput)
 	return s.err
 }
 
-func newSmartAccountRouter(t *testing.T, testnet, mainnet smartAccountDeployService) *gin.Engine {
+func newSmartAccountRouter(t *testing.T, svc smartAccountDeployService) *gin.Engine {
 	t.Helper()
-	return newSmartAccountRouterWithProof(t, testnet, mainnet, &stubDeployProof{})
+	return newSmartAccountRouterWithProof(t, svc, &stubDeployProof{})
 }
 
-func newSmartAccountRouterWithProof(t *testing.T, testnet, mainnet smartAccountDeployService, proof deployProofService) *gin.Engine {
+func newSmartAccountRouterWithProof(t *testing.T, svc smartAccountDeployService, proof deployProofService) *gin.Engine {
 	t.Helper()
-	h := NewSmartAccountHandler(testnet, mainnet, proof, &stubAudit{}, &stubPasskeyCredentialRegister{})
+	h := NewSmartAccountHandler(svc, proof, &stubAudit{}, &stubPasskeyCredentialRegister{})
 	r := gin.New()
 	r.POST("/smart-account/challenge", h.DeployChallenge)
 	r.POST("/smart-account/ed25519", h.DeployEd25519)
@@ -146,7 +147,7 @@ func decodeDataEnvelope(t *testing.T, w *httptest.ResponseRecorder) map[string]a
 
 func TestDeployEd25519_Success(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{"public_key_hex": testPublicKeyHex})
 
@@ -161,7 +162,7 @@ func TestDeployEd25519_Success(t *testing.T) {
 
 func TestDeployEd25519_AlreadyDeployedIsSuccess(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr, alreadyDeployed: true}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{"public_key_hex": testPublicKeyHex})
 
@@ -183,7 +184,7 @@ func TestDeployEd25519_InvalidPublicKey(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &stubSmartAccountDeploy{address: testContractAddr}
-			r := newSmartAccountRouter(t, svc, nil)
+			r := newSmartAccountRouter(t, svc)
 
 			body := map[string]any{}
 			if tc.publicKeyHex != nil {
@@ -198,7 +199,7 @@ func TestDeployEd25519_InvalidPublicKey(t *testing.T) {
 }
 
 func TestDeployEd25519_ServiceError(t *testing.T) {
-	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{err: errGeneric}, nil)
+	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{err: errGeneric})
 
 	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{"public_key_hex": testPublicKeyHex})
 
@@ -208,7 +209,7 @@ func TestDeployEd25519_ServiceError(t *testing.T) {
 }
 
 func TestDeployEd25519_UnknownNetwork(t *testing.T) {
-	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{address: testContractAddr}, nil)
+	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{address: testContractAddr})
 
 	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{
 		"public_key_hex": testPublicKeyHex,
@@ -218,8 +219,10 @@ func TestDeployEd25519_UnknownNetwork(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestDeployEd25519_MainnetNotConfigured(t *testing.T) {
-	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{address: testContractAddr}, nil)
+func TestDeployEd25519_OtherNetwork(t *testing.T) {
+	deploynet.SetForTest(t, deploynet.Testnet)
+	svc := &stubSmartAccountDeploy{address: testContractAddr}
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{
 		"public_key_hex": testPublicKeyHex,
@@ -227,40 +230,15 @@ func TestDeployEd25519_MainnetNotConfigured(t *testing.T) {
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "mainnet is not configured")
-}
-
-func TestDeployEd25519_RoutesToMainnetService(t *testing.T) {
-	testnet := &stubSmartAccountDeploy{address: "C-testnet"}
-	mainnet := &stubSmartAccountDeploy{address: "C-mainnet"}
-	r := newSmartAccountRouter(t, testnet, mainnet)
-
-	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{
-		"public_key_hex": testPublicKeyHex,
-		"network":        "mainnet",
-	})
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "C-mainnet", decodeDataEnvelope(t, w)["smart_account_address"])
-	assert.Empty(t, testnet.gotPublicKeyHex, "testnet service must not be touched for a mainnet request")
-}
-
-// A mainnet-only deployment leaves the testnet service nil. Reaching for it
-// without a nil check would panic instead of returning a 400.
-func TestDeployEd25519_TestnetNotConfigured(t *testing.T) {
-	r := newSmartAccountRouter(t, nil, &stubSmartAccountDeploy{address: "C-mainnet"})
-
-	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{"public_key_hex": testPublicKeyHex})
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "testnet is not configured")
+	assert.Contains(t, w.Body.String(), "NETWORK_MISMATCH")
+	assert.Empty(t, svc.gotPublicKeyHex, "a rejected network must not reach the service")
 }
 
 // ── webauthn ──────────────────────────────────────────────────────────────────
 
 func TestDeployWebauthn_Success(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/webauthn", map[string]any{"key_data_hex": testKeyDataHex})
 
@@ -272,7 +250,7 @@ func TestDeployWebauthn_Success(t *testing.T) {
 func TestDeployWebauthn_RegistersPasskeyCredential(t *testing.T) {
 	deploy := &stubSmartAccountDeploy{address: testContractAddr}
 	cred := &stubPasskeyCredentialRegister{}
-	h := NewSmartAccountHandler(deploy, nil, &stubDeployProof{}, &stubAudit{}, cred)
+	h := NewSmartAccountHandler(deploy, &stubDeployProof{}, &stubAudit{}, cred)
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.DeployWebauthn)
 
@@ -294,7 +272,7 @@ func TestDeployWebauthn_RegistersPasskeyCredential(t *testing.T) {
 func TestDeployWebauthn_CredentialRegisterFailureDoesNotFailDeploy(t *testing.T) {
 	deploy := &stubSmartAccountDeploy{address: testContractAddr}
 	cred := &stubPasskeyCredentialRegister{err: errors.New("index unavailable")}
-	h := NewSmartAccountHandler(deploy, nil, &stubDeployProof{}, &stubAudit{}, cred)
+	h := NewSmartAccountHandler(deploy, &stubDeployProof{}, &stubAudit{}, cred)
 	r := gin.New()
 	r.POST("/smart-account/webauthn", h.DeployWebauthn)
 
@@ -316,7 +294,7 @@ func TestDeployWebauthn_InvalidKeyData(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &stubSmartAccountDeploy{address: testContractAddr}
-			r := newSmartAccountRouter(t, svc, nil)
+			r := newSmartAccountRouter(t, svc)
 
 			body := map[string]any{}
 			if tc.keyDataHex != nil {
@@ -334,7 +312,7 @@ func TestDeployWebauthn_InvalidKeyData(t *testing.T) {
 
 func TestDeployGAddress_Success(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/g-address", map[string]any{"g_address": testGAddress})
 
@@ -356,7 +334,7 @@ func TestDeployGAddress_InvalidAddress(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &stubSmartAccountDeploy{address: testContractAddr}
-			r := newSmartAccountRouter(t, svc, nil)
+			r := newSmartAccountRouter(t, svc)
 
 			body := map[string]any{}
 			if tc.gAddress != nil {
@@ -373,9 +351,9 @@ func TestDeployGAddress_InvalidAddress(t *testing.T) {
 // The g-address flow funds the signer via friendbot, which has no mainnet
 // equivalent — the rejection must say so rather than reporting a config gap.
 func TestDeployGAddress_MainnetRejected(t *testing.T) {
-	testnet := &stubSmartAccountDeploy{address: testContractAddr}
-	mainnet := &stubSmartAccountDeploy{address: "C-mainnet"}
-	r := newSmartAccountRouter(t, testnet, mainnet)
+	deploynet.SetForTest(t, deploynet.Mainnet)
+	svc := &stubSmartAccountDeploy{address: testContractAddr}
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/g-address", map[string]any{
 		"g_address": testGAddress,
@@ -384,16 +362,7 @@ func TestDeployGAddress_MainnetRejected(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "friendbot")
-	assert.Empty(t, mainnet.gotGAddress)
-}
-
-func TestDeployGAddress_TestnetNotConfigured(t *testing.T) {
-	r := newSmartAccountRouter(t, nil, &stubSmartAccountDeploy{address: "C-mainnet"})
-
-	w := doDeploy(t, r, "/smart-account/g-address", map[string]any{"g_address": testGAddress})
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "testnet is not configured")
+	assert.Empty(t, svc.gotGAddress)
 }
 
 // ── multisig ──────────────────────────────────────────────────────────────────
@@ -419,7 +388,7 @@ func multisigBody(overrides map[string]any) map[string]any {
 
 func TestDeployMultisig_Success(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/multisig", multisigBody(nil))
 
@@ -433,7 +402,7 @@ func TestDeployMultisig_Success(t *testing.T) {
 // client's ordering through untouched — no sorting, no grouping by type.
 func TestDeployMultisig_PreservesSignerOrder(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	// Deliberately not in any sorted or type-grouped order.
 	w := doDeploy(t, r, "/smart-account/multisig", multisigBody(map[string]any{
@@ -485,7 +454,7 @@ func TestDeployMultisig_InvalidRequests(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &stubSmartAccountDeploy{address: testContractAddr}
-			r := newSmartAccountRouter(t, svc, nil)
+			r := newSmartAccountRouter(t, svc)
 
 			w := doDeploy(t, r, "/smart-account/multisig", multisigBody(tc.overrides))
 
@@ -496,7 +465,7 @@ func TestDeployMultisig_InvalidRequests(t *testing.T) {
 }
 
 func TestDeployMultisig_ServiceError(t *testing.T) {
-	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{err: errGeneric}, nil)
+	r := newSmartAccountRouter(t, &stubSmartAccountDeploy{err: errGeneric})
 
 	w := doDeploy(t, r, "/smart-account/multisig", multisigBody(nil))
 
@@ -518,7 +487,7 @@ func TestDeploy_RejectedProofDoesNotDeploy(t *testing.T) {
 	for path, body := range paths {
 		t.Run(path, func(t *testing.T) {
 			svc := &stubSmartAccountDeploy{address: testContractAddr}
-			r := newSmartAccountRouterWithProof(t, svc, nil, &stubDeployProof{err: errGeneric})
+			r := newSmartAccountRouterWithProof(t, svc, &stubDeployProof{err: errGeneric})
 
 			w := doDeploy(t, r, path, body)
 
@@ -535,7 +504,7 @@ func TestDeploy_RejectedProofDoesNotDeploy(t *testing.T) {
 // other key the caller happens to control.
 func TestDeploy_ProofIsBoundToDeployedKey(t *testing.T) {
 	proof := &stubDeployProof{}
-	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{address: testContractAddr}, nil, proof)
+	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{address: testContractAddr}, proof)
 
 	doDeploy(t, r, "/smart-account/ed25519", map[string]any{"public_key_hex": testPublicKeyHex})
 
@@ -547,7 +516,7 @@ func TestDeploy_ProofIsBoundToDeployedKey(t *testing.T) {
 
 func TestDeployWebauthn_ProofCarriesAssertionParts(t *testing.T) {
 	proof := &stubDeployProof{}
-	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{address: testContractAddr}, nil, proof)
+	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{address: testContractAddr}, proof)
 
 	w := doDeploy(t, r, "/smart-account/webauthn", map[string]any{
 		"key_data_hex": testKeyDataHex,
@@ -568,7 +537,7 @@ func TestDeployWebauthn_ProofCarriesAssertionParts(t *testing.T) {
 // Possession of an unrelated key is not authorisation to deploy a signer set.
 func TestDeployMultisig_ProverMustBeInSignerSet(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/multisig", multisigBody(map[string]any{
 		"proof_key_type": "ed25519",
@@ -581,7 +550,7 @@ func TestDeployMultisig_ProverMustBeInSignerSet(t *testing.T) {
 
 func TestDeploy_MalformedProofEncoding(t *testing.T) {
 	svc := &stubSmartAccountDeploy{address: testContractAddr}
-	r := newSmartAccountRouter(t, svc, nil)
+	r := newSmartAccountRouter(t, svc)
 
 	w := doDeploy(t, r, "/smart-account/ed25519", map[string]any{
 		"public_key_hex": testPublicKeyHex,
@@ -596,7 +565,7 @@ func TestDeploy_MalformedProofEncoding(t *testing.T) {
 
 func TestDeployChallenge_Success(t *testing.T) {
 	proof := &stubDeployProof{challenge: "abc123"}
-	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{}, nil, proof)
+	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{}, proof)
 
 	w := doDeploy(t, r, "/smart-account/challenge", map[string]any{
 		"key_type": "ed25519",
@@ -614,7 +583,7 @@ func TestDeployChallenge_Success(t *testing.T) {
 
 func TestDeployChallenge_InvalidKey(t *testing.T) {
 	proof := &stubDeployProof{err: service.ErrInvalidWallet}
-	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{}, nil, proof)
+	r := newSmartAccountRouterWithProof(t, &stubSmartAccountDeploy{}, proof)
 
 	w := doDeploy(t, r, "/smart-account/challenge", map[string]any{
 		"key_type": "ed25519",
@@ -622,12 +591,4 @@ func TestDeployChallenge_InvalidKey(t *testing.T) {
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// ── nil boxing ────────────────────────────────────────────────────────────────
-
-// A nil *webapp.SmartAccountService boxed directly into the interface would
-// compare non-nil, defeating every "not configured" check above.
-func TestSmartAccountDeployServiceOrNil_NilPointerYieldsNilInterface(t *testing.T) {
-	assert.Nil(t, SmartAccountDeployServiceOrNil(nil))
 }

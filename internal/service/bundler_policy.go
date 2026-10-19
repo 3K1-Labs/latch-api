@@ -29,15 +29,11 @@ var ErrContractNotAllowed = errors.New("contract is not in the bundler allowlist
 // blind would break sends for every asset whose SAC was not listed, so it is
 // opt-in per deployment and logged at startup when unset.
 type BundlerPolicy struct {
-	testnet map[string]struct{}
-	mainnet map[string]struct{}
+	allowed map[string]struct{}
 }
 
-func NewBundlerPolicy(testnetContracts, mainnetContracts []string) *BundlerPolicy {
-	return &BundlerPolicy{
-		testnet: contractSet(testnetContracts),
-		mainnet: contractSet(mainnetContracts),
-	}
+func NewBundlerPolicy(contracts []string) *BundlerPolicy {
+	return &BundlerPolicy{allowed: contractSet(contracts)}
 }
 
 func contractSet(addresses []string) map[string]struct{} {
@@ -50,24 +46,16 @@ func contractSet(addresses []string) map[string]struct{} {
 	return set
 }
 
-// Configured reports whether an allowlist is in force for the network, so
-// startup can warn when the relay is running unrestricted.
-func (p *BundlerPolicy) Configured(network string) bool {
-	return len(p.setFor(network)) > 0
-}
-
-func (p *BundlerPolicy) setFor(network string) map[string]struct{} {
-	if network == "mainnet" {
-		return p.mainnet
-	}
-	return p.testnet
+// Configured reports whether an allowlist is in force, so startup can warn
+// when the relay is running unrestricted.
+func (p *BundlerPolicy) Configured() bool {
+	return len(p.allowed) > 0
 }
 
 // CheckEnvelope extracts the contract a transaction invokes and reports
 // whether the bundler may pay for it. An empty allowlist allows everything.
-func (p *BundlerPolicy) CheckEnvelope(txXdrB64, network string) error {
-	allowed := p.setFor(network)
-	if len(allowed) == 0 {
+func (p *BundlerPolicy) CheckEnvelope(txXdrB64 string) error {
+	if len(p.allowed) == 0 {
 		return nil
 	}
 
@@ -75,7 +63,7 @@ func (p *BundlerPolicy) CheckEnvelope(txXdrB64, network string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := allowed[contractID]; !ok {
+	if _, ok := p.allowed[contractID]; !ok {
 		return fmt.Errorf("%w: %s", ErrContractNotAllowed, contractID)
 	}
 	return nil

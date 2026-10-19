@@ -264,7 +264,8 @@ func (h *CosignHandler) audit(c *gin.Context, action service.AuditAction) {
 // succeeded by the time this is called.
 func (h *CosignHandler) notify(c *gin.Context, notifType, title, body string) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
-	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+	scope := middleware.ScopeFromContext(c.Request.Context())
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, scope, service.NotificationRecord{
 		Type: notifType, Title: title, Body: body,
 	}); err != nil {
 		slog.Error("record cosign notification", "type", notifType, "err", err)
