@@ -309,3 +309,60 @@ func TestFormatSevenDecimals(t *testing.T) {
 		assert.Equal(t, want, formatSevenDecimals(in), "%d", in)
 	}
 }
+
+// swapForward is forward() wrapping router.swap_chained(wallet, chain,
+// tokenIn, amountIn, minOut), the shape BuildSwap produces.
+func swapForward(t *testing.T, wallet, feeToken, tokenIn string, maxFee int64, amountIn uint64) xdr.HostFunction {
+	t.Helper()
+	routerID, err := contractIDFromAddress(testContractAddress(t))
+	require.NoError(t, err)
+	walletVal, err := scAddress(wallet)
+	require.NoError(t, err)
+	tokenInVal, err := scAddress(tokenIn)
+	require.NoError(t, err)
+	swap := *invokeContractHostFunction(routerID, "swap_chained", walletVal, scVoid(), tokenInVal, scU128(0, amountIn), scU128(0, 1)).InvokeContract
+	hf, err := forwardHostFunction(testFeeForwarder, feeToken, maxFee, 1120, swap, wallet, testExecutor)
+	require.NoError(t, err)
+	return hf
+}
+
+func TestForwardSpend(t *testing.T) {
+	wallet := testContractAddress(t)
+	send, err := forwardHostFunction(testFeeForwarder, fwdXLMSAC, 140_000, 1120, transferArgs(t, fwdXLMSAC, wallet, keypair.MustRandom().Address(), 5_000_000), wallet, testExecutor)
+	require.NoError(t, err)
+
+	token, amount, ok := forwardSpend(send.MustInvokeContract().Args)
+	require.True(t, ok)
+	assert.Equal(t, fwdXLMSAC, token)
+	assert.Equal(t, int64(5_000_000), amount.Int64(), "a send spends its transfer amount")
+
+	token, amount, ok = forwardSpend(swapForward(t, wallet, fwdXLMSAC, fwdUSDCSAC, 140_000, 7_000_000).MustInvokeContract().Args)
+	require.True(t, ok)
+	assert.Equal(t, fwdUSDCSAC, token, "a swap spends its token-in")
+	assert.Equal(t, int64(7_000_000), amount.Int64())
+}
+
+// #124 review: a swap of (nearly) the whole XLM balance, refused because
+// swap + fee no longer fit, must say "add funds", not "sign again".
+func TestSubmit_ForwardSwapRefusalCountsSwapSpend(t *testing.T) {
+	wallet := testContractAddress(t)
+	envelope := forwardEnvelope(t, swapForward(t, wallet, fwdXLMSAC, fwdXLMSAC, 140_000, 100_000_000))
+	refused := errors.Join(&service.GaslessError{HTTPStatus: 422, Code: "simulation_failed"}, service.ErrGaslessRefused)
+
+	for _, tc := range []struct {
+		name    string
+		balance int64
+		want    error
+	}{
+		{"covers the fee but not swap + fee → add funds", 100_050_000, ErrInsufficientFeeBalance},
+		{"covers swap + fee → rebuild and sign", 200_000_000, ErrFeeQuoteStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rpc := withForwardRPC(t, &fakeSorobanRPC{})
+			rpc.balances = map[string]int64{fwdXLMSAC: tc.balance}
+			svc := newForwardService(t, &fakeGasless{err: refused}, rpc, defaultContextRulesService(t))
+			_, err := svc.SubmitAuthEntries(context.Background(), envelope, nil)
+			assert.ErrorIs(t, err, tc.want)
+		})
+	}
+}

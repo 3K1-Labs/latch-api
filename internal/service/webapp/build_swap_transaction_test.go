@@ -341,3 +341,36 @@ func TestBuildSwap_FreighterWithoutPasskeyOnRule(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSwapSignerMismatch))
 }
+
+// #124 review: a swap signs every call against one rule, so an account with
+// no Default rule (discovery falls back to a token-only rule 0) is refused
+// upfront rather than handed a forward() it can't authorize.
+func TestBuildSwap_NoDefaultRuleIsRefused(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+	tokenOnly := buildTestRuleScVal("xlm-only", false, testContractAddress(t), externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	contextRules := newContextRulesService(t, scU32(1), tokenOnly, tokenOnly)
+
+	rpc := &balanceThenAuthFakeRPC{
+		t: t, balHi: 0, balLo: 1_000_000_000,
+		fakeSorobanRPC: fakeSorobanRPC{
+			sequenceFn: func(context.Context, string, string) (int64, error) { return 100, nil },
+			simulateFn: func(context.Context, string, string, service.RPCResourceConfig) (*service.SimulateResult, error) {
+				t.Fatal("refused before anything is simulated")
+				return nil, nil
+			},
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	_, err := svc.BuildSwap(context.Background(), BuildSwapInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		SwapChainXdr:        sampleSwapChainXdr(t),
+		TokenInContractID:   testContractAddress(t),
+		AmountInRaw:         "100",
+		AmountOutMinRaw:     "90",
+	})
+	assert.True(t, errors.Is(err, ErrFeeRuleNotFound), "err = %v", err)
+}

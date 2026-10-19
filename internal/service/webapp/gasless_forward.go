@@ -301,8 +301,10 @@ func (s *TransactionService) submitForward(ctx context.Context, wallet string, f
 }
 
 // forwardBalanceShort reports whether wallet's fee-token balance is below
-// the signed max_fee_amount plus what the wrapped transfer spends in that
-// same token.
+// the signed max_fee_amount plus what the wrapped action spends in that same
+// token. Build and submit are separate requests and nothing is kept between
+// them, so the spend is read back from the signed forward() itself — the
+// call that is actually charged.
 func (s *TransactionService) forwardBalanceShort(ctx context.Context, wallet string, fn xdr.HostFunction) (bool, error) {
 	args := fn.MustInvokeContract().Args
 	token, err := scValToAddressString(args[0])
@@ -311,17 +313,47 @@ func (s *TransactionService) forwardBalanceShort(ctx context.Context, wallet str
 	}
 	maxFee := args[2].MustI128()
 	need := i128ToBigInt(int64(maxFee.Hi), uint64(maxFee.Lo))
-	target, _ := scValToAddressString(args[4])
-	if target == token && args[5].Type == xdr.ScValTypeScvSymbol && string(*args[5].Sym) == "transfer" &&
-		args[6].Vec != nil && *args[6].Vec != nil && len(**args[6].Vec) == 3 && (**args[6].Vec)[2].I128 != nil {
-		amt := (**args[6].Vec)[2].I128
-		need.Add(need, i128ToBigInt(int64(amt.Hi), uint64(amt.Lo)))
+	if spendToken, amount, ok := forwardSpend(args); ok && spendToken == token {
+		need.Add(need, amount)
 	}
 	hi, lo, err := s.balanceOf(ctx, token, wallet)
 	if err != nil {
 		return false, err
 	}
 	return i128ToBigInt(hi, lo).Cmp(need) < 0, nil
+}
+
+// forwardSpend reads what the action wrapped in forward() takes from the
+// wallet, for the two shapes latch-api builds: a send,
+// token.transfer(from, to, amount i128), and a swap,
+// router.swap_chained(user, chain, token_in, amount_in u128, min_out).
+func forwardSpend(args []xdr.ScVal) (token string, amount *big.Int, ok bool) {
+	target, err := scValToAddressString(args[4])
+	if err != nil || args[5].Type != xdr.ScValTypeScvSymbol || args[6].Vec == nil || *args[6].Vec == nil {
+		return "", nil, false
+	}
+	targetArgs := **args[6].Vec
+	switch string(*args[5].Sym) {
+	case "transfer":
+		if len(targetArgs) != 3 || targetArgs[2].I128 == nil {
+			return "", nil, false
+		}
+		a := targetArgs[2].I128
+		return target, i128ToBigInt(int64(a.Hi), uint64(a.Lo)), true
+	case "swap_chained":
+		if len(targetArgs) != 5 || targetArgs[3].U128 == nil {
+			return "", nil, false
+		}
+		tokenIn, err := scValToAddressString(targetArgs[2])
+		if err != nil {
+			return "", nil, false
+		}
+		a := targetArgs[3].U128
+		amt := new(big.Int).Lsh(new(big.Int).SetUint64(uint64(a.Hi)), 64)
+		return tokenIn, amt.Or(amt, new(big.Int).SetUint64(uint64(a.Lo))), true
+	default:
+		return "", nil, false
+	}
 }
 
 // resolveSignerRule finds the context rule the signer signs calls on

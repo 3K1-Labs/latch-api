@@ -299,8 +299,13 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 
 	// The user pays the network fee: the swap is wrapped in
 	// FeeForwarder.forward(); token-in counts toward the fee-token check.
-	// Swaps sign against the Default rule, which covers forward() and the
-	// fee token's approve as well, so one rule id still fits every call.
+	// Swaps sign every call against one rule, so that rule must be a Default
+	// rule — the only kind that also covers forward() and the fee token's
+	// approve. Discovery falls back to rule 0 on an account with no Default
+	// rule; refuse that upfront instead of building a swap that fails on-chain.
+	if !ruleOK || !swapRule.IsDefault {
+		return BuildSwapResult{}, ErrFeeRuleNotFound
+	}
 	wrap, err := s.planForward(ctx, in.SmartAccountAddress, *swapFn.InvokeContract, in.TokenInContractID, amountIn)
 	if err != nil {
 		return BuildSwapResult{}, err
