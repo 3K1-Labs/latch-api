@@ -101,6 +101,10 @@ func (h *NotificationHandler) UnreadCount(c *gin.Context) {
 
 	unread, err := h.notifSvc.UnreadCount(c.Request.Context(), userID)
 	if err != nil {
+		if errors.Is(err, service.ErrValidation) {
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid user id")
+			return
+		}
 		slog.Error("count unread notifications", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
