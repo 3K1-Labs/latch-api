@@ -102,7 +102,7 @@ type swapAuthResolution struct {
 	// claims Delegated(delegatedAuthG) directly, no External signer needed.
 	useDelegatedAuth bool
 	delegatedAuthG   string
-	// needsPasskeySetup: passkey/phantom was requested but the rule only has
+	// needsPasskeySetup: passkey/ed25519 was requested but the rule only has
 	// a Delegated signer — setup-swap-rules must run first.
 	needsPasskeySetup bool
 }
@@ -120,7 +120,7 @@ func resolveSwapAuthMode(rule ContextRuleSummary, ruleOK bool, signerType, signe
 	if signerType == "freighter" && signerG == ruleG {
 		return swapAuthResolution{useDelegatedAuth: true, delegatedAuthG: ruleG}
 	}
-	if signerType == "passkey" || signerType == "phantom" {
+	if signerType == "passkey" || signerType == "ed25519" {
 		return swapAuthResolution{needsPasskeySetup: true}
 	}
 	return swapAuthResolution{}
@@ -154,7 +154,7 @@ func validateContextRuleForSignerType(rule ContextRuleSummary, ruleOK bool, sign
 	}
 
 	switch signerType {
-	case "passkey", "phantom":
+	case "passkey", "ed25519":
 		if ruleHasOnlyDelegatedGSigner(rule, bundlerPublicKey) && !ruleHasExternalSigner(rule) {
 			return fmt.Errorf("%w: swap rule was configured for Delegated G (bundler), but passkey was requested; remove the rule and run setup-swap-rules again with keyDataHex", ErrSwapSignerMismatch)
 		}
@@ -184,7 +184,7 @@ func validateContextRuleForSignerType(rule ContextRuleSummary, ruleOK bool, sign
 // POST /api/transaction/build-swap.
 type BuildSwapInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "phantom" | "freighter"
+	SignerType          string // "passkey" | "ed25519" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
 	RouterContractID    string // defaults to the well-known testnet Aquarius router
 	// KeyDataHex identifies which passkey is about to sign, for accounts

@@ -377,7 +377,7 @@ func (s *TransactionService) resolveSignerRule(ctx context.Context, wallet, sign
 	switch signerType {
 	case "freighter":
 		return id, signerG != "" && ruleAuthorizesSigner(rule, signerType, "", signerG), nil
-	case "phantom":
+	case "ed25519":
 		return id, ruleAuthorizesSigner(rule, signerType, s.ed25519VerifierAddress, ""), nil
 	default:
 		return id, ruleAuthorizesSigner(rule, signerType, s.webauthnVerifierAddress, ""), nil

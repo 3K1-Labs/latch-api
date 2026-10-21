@@ -330,72 +330,6 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 	})
 }
 
-type submitPhantomRequest struct {
-	Network          string          `json:"network,omitempty"`
-	TxXdr            string          `json:"txXdr" binding:"required"`
-	AuthEntryXdr     string          `json:"authEntryXdr,omitempty"`
-	AuthSignatureHex string          `json:"authSignatureHex" binding:"required"`
-	PrefixedMessage  string          `json:"prefixedMessage,omitempty"`
-	PublicKeyHex     string          `json:"publicKeyHex" binding:"required"`
-	ContextRuleID    *flexibleUint32 `json:"contextRuleId"`
-	AuthEntriesXdr   []string        `json:"authEntriesXdr,omitempty"`
-}
-
-// SubmitPhantom godoc
-// @Summary      Submit a Phantom-signed transaction
-// @Description  Attaches the client's Phantom (Solana wallet) Ed25519 signature to the built transaction's auth entry and submits it to the network.
-// @Tags         transaction
-// @Accept       json
-// @Produce      json
-// @Param        body body submitPhantomRequest true "Signed transaction and auth entry"
-// @Success      200 {object} map[string]any
-// @Failure      400 {object} webappErrorResponse
-// @Router       /api/transaction/submit [post]
-func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
-	var req submitPhantomRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
-		return
-	}
-	if len(req.AuthEntriesXdr) == 0 && req.AuthEntryXdr == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "authEntryXdr or authEntriesXdr is required")
-		return
-	}
-
-	if _, err := webapp.ParseNetwork(req.Network); err != nil {
-		failNetworkResolution(c, err)
-		return
-	}
-
-	// prefixedMessage isn't used server-side: on-chain enforcement (the
-	// Ed25519PhantomVerifier contract) reconstructs and checks it during the
-	// enforcing-mode re-simulation in submitWithBundler — the same pattern
-	// SubmitWebAuthn already follows for the WebAuthn assertion.
-	result, err := h.txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
-		TxXdr:                      req.TxXdr,
-		AuthEntryXdr:               req.AuthEntryXdr,
-		AuthSignatureHex:           req.AuthSignatureHex,
-		PublicKeyHex:               req.PublicKeyHex,
-		ContextRuleID:              contextRuleIDPtr(req.ContextRuleID),
-		AuthEntriesXdr:             req.AuthEntriesXdr,
-		SmartAccountAuthEntryIndex: 0,
-	})
-	if err != nil {
-		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
-			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
-			return
-		}
-		slog.Error("submit phantom transaction", "network", req.Network, "err", err)
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
-		return
-	}
-
-	webappx.Success(c, http.StatusOK, gin.H{
-		"hash":   result.Hash,
-		"status": result.Status,
-	})
-}
-
 type prepareSignRequest struct {
 	Network             string `json:"network"`
 	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
@@ -495,8 +429,8 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType != "passkey" && req.SignerType != "phantom" && req.SignerType != "freighter" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, phantom, or freighter")
+	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "freighter" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or freighter")
 		return
 	}
 
@@ -788,8 +722,8 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType != "passkey" && req.SignerType != "phantom" && req.SignerType != "freighter" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, phantom, or freighter")
+	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "freighter" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or freighter")
 		return
 	}
 	if req.SignerType == "freighter" && req.SignerG == "" {

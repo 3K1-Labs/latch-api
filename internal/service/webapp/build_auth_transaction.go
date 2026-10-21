@@ -22,7 +22,7 @@ import (
 type authTransactionCoreInput struct {
 	smartAccountAddress string
 	contextRuleID       uint32
-	signerType          string // "passkey" | "phantom" | "freighter"
+	signerType          string // "passkey" | "ed25519" | "freighter"
 	signerG             string // required if signerType == "freighter"
 	// feePayerG is the bundler G the tx envelope pays fees from. For a
 	// freighter signer whose feePayerG differs from signerG (e.g. a swap
@@ -277,7 +277,7 @@ func (s *TransactionService) buildAuthTransactionCore(
 		result.GAddressEntryTemplateXdr = templateXdr
 		result.SubmitMethod = "delegated"
 
-	case in.signerType == "phantom":
+	case in.signerType == "ed25519":
 		result.SubmitMethod = "bundler-delegated"
 	default:
 		result.SubmitMethod = "webauthn"

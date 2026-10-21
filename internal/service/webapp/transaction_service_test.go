@@ -3,7 +3,6 @@ package webapp
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"testing"
 
 	"github.com/latch/backend/internal/service"
@@ -601,71 +600,6 @@ func TestSubmitDelegated_IndexOutOfRange(t *testing.T) {
 		SignedAuthEntryBase64:      base64.StdEncoding.EncodeToString(make([]byte, 64)),
 		SignerAddress:              testGAddress,
 		SmartAccountAuthEntryIndex: 5,
-	})
-	require.Error(t, err)
-}
-
-// ── SubmitPhantom ────────────────────────────────────────────────────────────
-
-func TestSubmitPhantom_Success(t *testing.T) {
-	smartAccountAddr := testContractAddress(t)
-	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 1060, "transfer")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	rpc := &fakeSorobanRPC{
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			return &service.SimulateResult{TransactionData: minimalSorobanTransactionDataXDR(t)}, nil
-		},
-		sendFn: func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-			return &service.SendTxResult{Status: service.RPCStatusPending, Hash: "hp1"}, nil
-		},
-		getTxFn: func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error) {
-			return &service.GetTxResult{Status: service.RPCStatusSuccess}, nil
-		},
-	}
-	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
-	txXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
-
-	result, err := svc.SubmitPhantom(context.Background(), SubmitPhantomInput{
-		TxXdr:            txXdr,
-		AuthEntryXdr:     authEntryB64,
-		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
-		PublicKeyHex:     hex.EncodeToString(make([]byte, 32)),
-		ContextRuleID:    uint32Ptr(0),
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "hp1", result.Hash)
-}
-
-func TestSubmitPhantom_MissingVerifierAddress(t *testing.T) {
-	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, defaultContextRulesService(t))
-	svc.ed25519VerifierAddress = ""
-	authEntry := sampleAuthEntry(t, testContractAddress(t), 1, 1060, "transfer")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	_, err = svc.SubmitPhantom(context.Background(), SubmitPhantomInput{
-		TxXdr:            buildSubmitTestEnvelope(t, bundlerKp.Address()),
-		AuthEntryXdr:     authEntryB64,
-		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
-		PublicKeyHex:     hex.EncodeToString(make([]byte, 32)),
-	})
-	require.Error(t, err)
-}
-
-func TestSubmitPhantom_InvalidPublicKeyHex(t *testing.T) {
-	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, defaultContextRulesService(t))
-	authEntry := sampleAuthEntry(t, testContractAddress(t), 1, 1060, "transfer")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	_, err = svc.SubmitPhantom(context.Background(), SubmitPhantomInput{
-		TxXdr:            buildSubmitTestEnvelope(t, bundlerKp.Address()),
-		AuthEntryXdr:     authEntryB64,
-		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
-		PublicKeyHex:     "not-hex!!",
 	})
 	require.Error(t, err)
 }

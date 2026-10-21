@@ -24,14 +24,14 @@ func TestBuildCallContractContextType_InvalidAddress(t *testing.T) {
 	assert.Contains(t, err.Error(), "resolve contract address")
 }
 
-func TestBuildSignersVecForSetup_PhantomBadHex(t *testing.T) {
-	_, err := buildSignersVecForSetup("phantom", testContractAddress(t), strings.Repeat("zz", 32), "", "")
+func TestBuildSignersVecForSetup_Ed25519BadHex(t *testing.T) {
+	_, err := buildSignersVecForSetup("ed25519", testContractAddress(t), strings.Repeat("zz", 32), "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode publicKeyHex")
 }
 
-func TestBuildSignersVecForSetup_PhantomBadVerifier(t *testing.T) {
-	_, err := buildSignersVecForSetup("phantom", "not-a-valid-address", strings.Repeat("ab", 32), "", "")
+func TestBuildSignersVecForSetup_Ed25519BadVerifier(t *testing.T) {
+	_, err := buildSignersVecForSetup("ed25519", "not-a-valid-address", strings.Repeat("ab", 32), "", "")
 	require.Error(t, err)
 }
 
@@ -268,11 +268,11 @@ func TestSetupSwapRules_FreighterGAddressIsBundler(t *testing.T) {
 	assert.Contains(t, err.Error(), "not the bundler fee-payer")
 }
 
-func TestSetupSwapRules_PhantomMissingPublicKeyHex(t *testing.T) {
+func TestSetupSwapRules_Ed25519MissingPublicKeyHex(t *testing.T) {
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, newContextRulesService(t), nil)
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "phantom",
+		SignerType:          "ed25519",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "publicKeyHex is required")
@@ -356,11 +356,11 @@ func TestSetupSwapRules_VerifierNotConfigured(t *testing.T) {
 }
 
 func TestSetupSwapRules_DecodeKeyDataErr(t *testing.T) {
-	// phantom (not passkey): a passkey with a non-empty keyDataHex now
+	// ed25519 (not passkey): a passkey with a non-empty keyDataHex now
 	// resolves via FindRuleForSigner *before* ever hex-decoding it (see
 	// LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6), so a garbage passkey
 	// keyDataHex now surfaces as ErrSignerRuleNotFound, not a decode error —
-	// phantom's PublicKeyHex still exercises the same hex.DecodeString call.
+	// ed25519's PublicKeyHex still exercises the same hex.DecodeString call.
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t,
 		scU32(1), buildTestRuleScVal("default", true, ""),
@@ -370,7 +370,7 @@ func TestSetupSwapRules_DecodeKeyDataErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "phantom",
+		SignerType:          "ed25519",
 		PublicKeyHex:        "not-hex!!",
 	})
 	require.Error(t, err)
@@ -455,7 +455,7 @@ func TestSetupSwapRules_UnsupportedSignerType(t *testing.T) {
 }
 
 func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
-	// phantom (not passkey — see TestSetupSwapRules_DecodeKeyDataErr): a
+	// ed25519 (not passkey — see TestSetupSwapRules_DecodeKeyDataErr): a
 	// passkey now short-circuits to alreadyConfigured/ErrSignerRuleNotFound
 	// before ever reaching buildSetupAuthTransaction.
 	smartAccountAddr := testContractAddress(t)
@@ -470,7 +470,7 @@ func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "phantom",
+		SignerType:          "ed25519",
 		PublicKeyHex:        strings.Repeat("ab", 32),
 	})
 	require.Error(t, err)

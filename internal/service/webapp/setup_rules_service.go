@@ -70,9 +70,9 @@ func buildDelegatedSignerScVal(gAddress string) (xdr.ScVal, error) {
 // lib/soroban-setup-signers.ts's buildSignersVecForSetup().
 func buildSignersVecForSetup(signerType, verifierAddress, publicKeyHex, keyDataHex, gAddress string) (xdr.ScVal, error) {
 	switch signerType {
-	case "phantom":
+	case "ed25519":
 		if verifierAddress == "" || publicKeyHex == "" {
-			return xdr.ScVal{}, fmt.Errorf("verifierAddress and publicKeyHex required for phantom setup")
+			return xdr.ScVal{}, fmt.Errorf("verifierAddress and publicKeyHex required for ed25519 setup")
 		}
 		if len(publicKeyHex) != 64 {
 			return xdr.ScVal{}, fmt.Errorf("publicKeyHex must be 64 hex chars")
@@ -122,10 +122,10 @@ func buildSignersVecForSetup(signerType, verifierAddress, publicKeyHex, keyDataH
 // POST /api/smart-account/setup-send-rules.
 type SetupSendRulesInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "phantom" | "freighter"
+	SignerType          string // "passkey" | "ed25519" | "freighter"
 	AssetID             string
 	AssetIDs            []string
-	PublicKeyHex        string // phantom
+	PublicKeyHex        string // ed25519
 	KeyDataHex          string // passkey
 	GAddress            string // freighter
 }
@@ -323,9 +323,9 @@ func (s *TransactionService) buildSetupAuthTransaction(ctx context.Context, fn x
 // POST /api/smart-account/setup-swap-rules.
 type SetupSwapRulesInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "phantom" | "freighter"; defaults to "passkey"
+	SignerType          string // "passkey" | "ed25519" | "freighter"; defaults to "passkey"
 	RouterContractID    string // defaults to the well-known testnet Aquarius router
-	PublicKeyHex        string // phantom
+	PublicKeyHex        string // ed25519
 	KeyDataHex          string // passkey
 	GAddress            string // freighter
 }
@@ -357,8 +357,8 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 	if signerType == "freighter" && in.GAddress == bundlerG {
 		return SetupSwapRulesResult{}, fmt.Errorf("gAddress must be your Freighter G-address, not the bundler fee-payer")
 	}
-	if signerType == "phantom" && in.PublicKeyHex == "" {
-		return SetupSwapRulesResult{}, fmt.Errorf("publicKeyHex is required for phantom setup")
+	if signerType == "ed25519" && in.PublicKeyHex == "" {
+		return SetupSwapRulesResult{}, fmt.Errorf("publicKeyHex is required for ed25519 setup")
 	}
 	if signerType == "passkey" && in.KeyDataHex == "" {
 		return SetupSwapRulesResult{}, fmt.Errorf("keyDataHex is required for passkey setup")
@@ -422,9 +422,9 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 
 	var signerScVal xdr.ScVal
 	switch signerType {
-	case "passkey", "phantom":
+	case "passkey", "ed25519":
 		keyHex := in.KeyDataHex
-		if signerType == "phantom" {
+		if signerType == "ed25519" {
 			keyHex = in.PublicKeyHex
 		}
 		keyBytes, err := hex.DecodeString(keyHex)
@@ -481,7 +481,7 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 
 // ruleAuthorizesSigner reports whether rule already authorizes signerType's
 // signer: a matching Delegated(gAddress) for freighter, or any External
-// signer (optionally matching verifierAddress) for passkey/phantom. Used by
+// signer (optionally matching verifierAddress) for passkey/ed25519. Used by
 // both setup-send-rules and setup-swap-rules to detect "this signer is
 // already configured" before creating a duplicate rule/signer entry. Ports
 // the combined effect of setup-swap-rules/route.ts's

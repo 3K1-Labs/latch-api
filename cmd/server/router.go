@@ -484,8 +484,6 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 		smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
 		smartAccountGroup.GET("/freighter", webappSmartAccountHandler.QueryFreighter)
 		smartAccountGroup.POST("/freighter", webappSmartAccountHandler.DeployFreighter)
-		smartAccountGroup.GET("", webappSmartAccountHandler.PhantomConfig)
-		smartAccountGroup.POST("", webappSmartAccountHandler.ConnectPhantom)
 	}
 
 	if webappTransactionSvc != nil {
@@ -495,7 +493,6 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)
 			transactionGroup.POST("/submit-webauthn", webappTransactionHandler.SubmitWebAuthn)
 			transactionGroup.POST("/submit-delegated", webappTransactionHandler.SubmitDelegated)
-			transactionGroup.POST("/submit", webappTransactionHandler.SubmitPhantom)
 			transactionGroup.POST("/prepare-sign", webappTransactionHandler.PrepareSign)
 			transactionGroup.POST("/build", webappTransactionHandler.BuildCounter)
 			transactionGroup.POST("/build-delegated", webappTransactionHandler.BuildDelegatedCounter)

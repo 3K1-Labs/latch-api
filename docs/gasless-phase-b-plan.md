@@ -63,7 +63,7 @@ Not in Phase B: multisig (D4), device pairing (Phase C), deleting the bundler pa
   `/v1/transaction/build-swap` (JWT) on the same service; mobile signs and submits through
   `/v1/transaction/submit`, which accepts sponsored calls and `forward()` calls and **refuses**
   plain user-paid transfers/swaps (fee required). Needs the ed25519 signer type in the builders —
-  the code currently labelled "phantom", kept and renamed by the rescoped Phantom removal.
+  the `ed25519` signer type (formerly labelled "phantom", renamed by the Phantom removal).
 - **D4 — Multisig is out of Phase B.** It stays bundler-paid until its own spec is settled
   (e.g. whether Refractor fits C-account auth-entry multisig).
 - **D5 — Per-context rule ids travel inside the returned auth entry** (AuthPayload); no client change.
@@ -87,5 +87,5 @@ latch-api go through forward mode on mainnet with the fee charged in XLM.
   multisig wallet can't be told apart from a single-signer one here.
 - **No latch-api simulation before a forward() submit:** enforce mode would fail without the
   executor's authorization, which only the relayer creates.
-- **Mobile ed25519 signers** map to the service's `phantom` signer type until the Phantom rescope
-  renames it.
+- **Mobile ed25519 signers** first mapped to the service's `phantom` signer type; the Phantom
+  removal renamed it to `ed25519`, so `/v1` now passes it through unchanged.

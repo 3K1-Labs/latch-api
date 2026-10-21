@@ -233,7 +233,7 @@ func TestBuildSend_SignerWithoutFeeRuleIsRefused(t *testing.T) {
 	svc := newForwardService(t, &fakeGasless{}, rpc, rules)
 
 	_, err = svc.BuildSend(context.Background(), BuildSendInput{
-		SmartAccountAddress: wallet, SignerType: "phantom", AssetID: "XLM", Recipient: keypair.MustRandom().Address(), Amount: "1",
+		SmartAccountAddress: wallet, SignerType: "ed25519", AssetID: "XLM", Recipient: keypair.MustRandom().Address(), Amount: "1",
 	}, []CatalogAsset{{AssetID: "XLM", ContractID: fwdXLMSAC, Decimals: 7}})
 	assert.ErrorIs(t, err, ErrFeeRuleNotFound)
 }
