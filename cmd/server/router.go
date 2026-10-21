@@ -482,8 +482,8 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 
 		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
 		smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
-		smartAccountGroup.GET("/freighter", webappSmartAccountHandler.QueryFreighter)
-		smartAccountGroup.POST("/freighter", webappSmartAccountHandler.DeployFreighter)
+		smartAccountGroup.GET("/delegated", webappSmartAccountHandler.QueryDelegated)
+		smartAccountGroup.POST("/delegated", webappSmartAccountHandler.DeployDelegated)
 	}
 
 	if webappTransactionSvc != nil {

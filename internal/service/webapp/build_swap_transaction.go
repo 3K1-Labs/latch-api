@@ -98,7 +98,7 @@ func ruleHasAnyDelegatedSigner(rule ContextRuleSummary) bool {
 // SwapAuthResolution.
 type swapAuthResolution struct {
 	// useDelegatedAuth: the rule authorizes only Delegated(delegatedAuthG),
-	// and the caller's freighter signerG matches it — the smart-account auth
+	// and the caller's delegated signerG matches it — the smart-account auth
 	// claims Delegated(delegatedAuthG) directly, no External signer needed.
 	useDelegatedAuth bool
 	delegatedAuthG   string
@@ -117,7 +117,7 @@ func resolveSwapAuthMode(rule ContextRuleSummary, ruleOK bool, signerType, signe
 	if ruleG == "" {
 		return swapAuthResolution{}
 	}
-	if signerType == "freighter" && signerG == ruleG {
+	if signerType == "delegated" && signerG == ruleG {
 		return swapAuthResolution{useDelegatedAuth: true, delegatedAuthG: ruleG}
 	}
 	if signerType == "passkey" || signerType == "ed25519" {
@@ -147,7 +147,7 @@ func assertSwapRuleReadyForSign(rule ContextRuleSummary, ruleOK bool, contextRul
 // validateContextRuleForSignerType().
 func validateContextRuleForSignerType(rule ContextRuleSummary, ruleOK bool, signerType, signerG, bundlerPublicKey string) error {
 	if signerG != "" && signerG == bundlerPublicKey {
-		return fmt.Errorf("%w: signerG must be the user's Freighter G-address, not the bundler fee-payer", ErrSwapValidation)
+		return fmt.Errorf("%w: signerG must be the user's delegated G-address, not the bundler fee-payer", ErrSwapValidation)
 	}
 	if !ruleOK {
 		return nil
@@ -161,18 +161,18 @@ func validateContextRuleForSignerType(rule ContextRuleSummary, ruleOK bool, sign
 		if !ruleHasExternalSigner(rule) {
 			return fmt.Errorf("%w: swap context rule has no External passkey signer yet; confirm the swap again to run setup-swap-rules (adds your passkey to the existing rule)", ErrSwapSignerMismatch)
 		}
-	case "freighter":
+	case "delegated":
 		if signerG == "" {
-			return fmt.Errorf("%w: signerG is required for freighter", ErrSwapValidation)
+			return fmt.Errorf("%w: signerG is required for delegated", ErrSwapValidation)
 		}
 		if !ruleHasExternalSigner(rule) {
 			return fmt.Errorf("%w: swap context rule has no External passkey signer yet; confirm the swap again to run setup-swap-rules first", ErrSwapSignerMismatch)
 		}
 		if ruleHasExternalSigner(rule) && !ruleHasDelegatedSignerG(rule, signerG) {
-			return fmt.Errorf("%w: swap rule was configured for passkey (External signer), but Freighter was requested; remove the rule and run setup-swap-rules with gAddress", ErrSwapSignerMismatch)
+			return fmt.Errorf("%w: swap rule was configured for passkey (External signer), but delegated was requested; remove the rule and run setup-swap-rules with gAddress", ErrSwapSignerMismatch)
 		}
 		if !ruleHasExternalSigner(rule) && !ruleHasDelegatedSignerG(rule, signerG) && ruleHasAnyDelegatedSigner(rule) {
-			return fmt.Errorf("%w: swap rule Delegated signer does not match signerG (%s); re-run setup-swap-rules with your Freighter G-address", ErrSwapSignerMismatch, signerG)
+			return fmt.Errorf("%w: swap rule Delegated signer does not match signerG (%s); re-run setup-swap-rules with your delegated G-address", ErrSwapSignerMismatch, signerG)
 		}
 	}
 	return nil
@@ -184,8 +184,8 @@ func validateContextRuleForSignerType(rule ContextRuleSummary, ruleOK bool, sign
 // POST /api/transaction/build-swap.
 type BuildSwapInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "ed25519" | "freighter"
-	SignerG             string // required if SignerType == "freighter"
+	SignerType          string // "passkey" | "ed25519" | "delegated"
+	SignerG             string // required if SignerType == "delegated"
 	RouterContractID    string // defaults to the well-known testnet Aquarius router
 	// KeyDataHex identifies which passkey is about to sign, for accounts
 	// with a backup signer — see BuildSendInput.KeyDataHex's doc comment.
@@ -217,8 +217,8 @@ type BuildSwapResult struct {
 // app/api/transaction/build-swap/route.ts.
 func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (BuildSwapResult, error) {
 	bundlerG := s.bundler.PublicKey()
-	if in.SignerType == "freighter" && in.SignerG == bundlerG {
-		return BuildSwapResult{}, fmt.Errorf("%w: signerG must be your Freighter G-address, not the bundler fee-payer", ErrSwapValidation)
+	if in.SignerType == "delegated" && in.SignerG == bundlerG {
+		return BuildSwapResult{}, fmt.Errorf("%w: signerG must be your delegated G-address, not the bundler fee-payer", ErrSwapValidation)
 	}
 
 	amountIn, err := parseU128Raw(in.AmountInRaw, "amountInRaw")

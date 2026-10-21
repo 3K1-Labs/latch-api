@@ -52,7 +52,7 @@ func TestBuildCounter_Success(t *testing.T) {
 	assert.Empty(t, result.SmartAccountAuthEntryXdr)
 }
 
-func TestBuildCounter_FreighterSynthesizesDelegatedEntry(t *testing.T) {
+func TestBuildCounter_DelegatedSynthesizesDelegatedEntry(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	counterAddr := testContractAddress(t)
 	signerKp, err := keypair.Random()

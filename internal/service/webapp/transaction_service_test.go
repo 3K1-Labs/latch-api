@@ -173,7 +173,7 @@ func TestBuildSend_UnknownSignerKeyRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
-func TestBuildSend_FreighterSynthesizesDelegatedEntry(t *testing.T) {
+func TestBuildSend_DelegatedSynthesizesDelegatedEntry(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
 	recipientKp, err := keypair.Random()
@@ -202,7 +202,7 @@ func TestBuildSend_FreighterSynthesizesDelegatedEntry(t *testing.T) {
 
 	result, err := svc.BuildSend(context.Background(), BuildSendInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             signerKp.Address(),
 		AssetID:             "USDC",
 		Recipient:           recipientKp.Address(),
@@ -696,7 +696,7 @@ func TestPrepareSign_UnknownSignerKeyRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
-func TestPrepareSign_FreighterSynthesizesDelegatedEntry(t *testing.T) {
+func TestPrepareSign_DelegatedSynthesizesDelegatedEntry(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	signerKp, err := keypair.Random()
 	require.NoError(t, err)
@@ -720,7 +720,7 @@ func TestPrepareSign_FreighterSynthesizesDelegatedEntry(t *testing.T) {
 	result, err := svc.PrepareSign(context.Background(), PrepareSignInput{
 		SmartAccountAddress: smartAccountAddr,
 		UnsignedTxXdr:       unsignedTxXdr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             signerKp.Address(),
 	})
 	require.NoError(t, err)
@@ -771,14 +771,14 @@ func TestPrepareSign_SignerMismatch_NoExternalSigner(t *testing.T) {
 	assert.ErrorIs(t, err, ErrPrepareSignSignerMismatch)
 }
 
-func TestPrepareSign_SignerMismatch_FreighterWrongG(t *testing.T) {
+func TestPrepareSign_SignerMismatch_DelegatedWrongG(t *testing.T) {
 	adminKp, err := keypair.Random()
 	require.NoError(t, err)
 	otherKp, err := keypair.Random()
 	require.NoError(t, err)
 
 	// Default rule authorizes only Delegated(adminKp) — a different
-	// Freighter G-address than the one the caller supplies.
+	// delegated G-address than the one the caller supplies.
 	contextRules := contextRulesServiceWithDefaultSigners(t, delegatedSignerScVal(t, adminKp.Address()))
 	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, contextRules)
 	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
@@ -786,7 +786,7 @@ func TestPrepareSign_SignerMismatch_FreighterWrongG(t *testing.T) {
 	_, err = svc.PrepareSign(context.Background(), PrepareSignInput{
 		SmartAccountAddress: testContractAddress(t),
 		UnsignedTxXdr:       unsignedTxXdr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             otherKp.Address(),
 	})
 	require.Error(t, err)

@@ -259,16 +259,16 @@ func TestSmartAccountBalances_BadAssetAllowlistJSON(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// ── QueryFreighter / DeployFreighter ────────────────────────────────────────
+// ── QueryDelegated / DeployDelegated ────────────────────────────────────────
 
 const testHandlerGAddress = "GA5WUJ54Z23KILLCUOUNAKTPBVZWKMQVO4O6EQ5GHLAERIMLLHNCSKYH"
 
-func TestQueryFreighter_Success(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterAddress: "CADDRESS", queryFreighterDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
+func TestQueryDelegated_Success(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{queryDelegatedAddress: "CADDRESS", queryDelegatedDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.GET("/smart-account/freighter", h.QueryFreighter)
+	r.GET("/smart-account/delegated", h.QueryDelegated)
 
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress="+testHandlerGAddress, nil)
+	req := httptest.NewRequest(http.MethodGet, "/smart-account/delegated?gAddress="+testHandlerGAddress, nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -277,36 +277,36 @@ func TestQueryFreighter_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"deployed":true`)
 }
 
-func TestQueryFreighter_InvalidGAddress(t *testing.T) {
+func TestQueryDelegated_InvalidGAddress(t *testing.T) {
 	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.GET("/smart-account/freighter", h.QueryFreighter)
+	r.GET("/smart-account/delegated", h.QueryDelegated)
 
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress=not-valid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/smart-account/delegated?gAddress=not-valid", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestQueryFreighter_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{queryFreighterErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
+func TestQueryDelegated_ServiceError(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{queryDelegatedErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.GET("/smart-account/freighter", h.QueryFreighter)
+	r.GET("/smart-account/delegated", h.QueryDelegated)
 
-	req := httptest.NewRequest(http.MethodGet, "/smart-account/freighter?gAddress="+testHandlerGAddress, nil)
+	req := httptest.NewRequest(http.MethodGet, "/smart-account/delegated?gAddress="+testHandlerGAddress, nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestDeployFreighter_Success(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS", deployFreighterAlreadyDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
+func TestDeployDelegated_Success(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{deployDelegatedAddress: "CADDRESS", deployDelegatedAlreadyDeployed: true}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
+	r.POST("/smart-account/delegated", h.DeployDelegated)
 
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/delegated", postJSONBody(map[string]any{
 		"gAddress": testHandlerGAddress,
 	}))
 	w := httptest.NewRecorder()
@@ -317,12 +317,12 @@ func TestDeployFreighter_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"alreadyDeployed":true`)
 }
 
-func TestDeployFreighter_InvalidGAddress(t *testing.T) {
+func TestDeployDelegated_InvalidGAddress(t *testing.T) {
 	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
+	r.POST("/smart-account/delegated", h.DeployDelegated)
 
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/delegated", postJSONBody(map[string]any{
 		"gAddress": "not-valid",
 	}))
 	w := httptest.NewRecorder()
@@ -331,13 +331,13 @@ func TestDeployFreighter_InvalidGAddress(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestDeployFreighter_NetworkMainnet_Rejected(t *testing.T) {
+func TestDeployDelegated_NetworkMainnet_Rejected(t *testing.T) {
 	deploynet.SetForTest(t, deploynet.Mainnet)
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterAddress: "CADDRESS"}, &stubContextRules{}, &stubBalances{}, testCfg())
+	h := NewSmartAccountHandler(&stubSmartAccount{deployDelegatedAddress: "CADDRESS"}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
+	r.POST("/smart-account/delegated", h.DeployDelegated)
 
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/delegated", postJSONBody(map[string]any{
 		"network":  "mainnet",
 		"gAddress": testHandlerGAddress,
 	}))
@@ -348,12 +348,12 @@ func TestDeployFreighter_NetworkMainnet_Rejected(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "friendbot")
 }
 
-func TestDeployFreighter_NetworkInvalid(t *testing.T) {
+func TestDeployDelegated_NetworkInvalid(t *testing.T) {
 	h := NewSmartAccountHandler(&stubSmartAccount{}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
+	r.POST("/smart-account/delegated", h.DeployDelegated)
 
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/delegated", postJSONBody(map[string]any{
 		"network":  "devnet",
 		"gAddress": testHandlerGAddress,
 	}))
@@ -364,12 +364,12 @@ func TestDeployFreighter_NetworkInvalid(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
 }
 
-func TestDeployFreighter_ServiceError(t *testing.T) {
-	h := NewSmartAccountHandler(&stubSmartAccount{deployFreighterErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
+func TestDeployDelegated_ServiceError(t *testing.T) {
+	h := NewSmartAccountHandler(&stubSmartAccount{deployDelegatedErr: assertErr}, &stubContextRules{}, &stubBalances{}, testCfg())
 	r := gin.New()
-	r.POST("/smart-account/freighter", h.DeployFreighter)
+	r.POST("/smart-account/delegated", h.DeployDelegated)
 
-	req := httptest.NewRequest(http.MethodPost, "/smart-account/freighter", postJSONBody(map[string]any{
+	req := httptest.NewRequest(http.MethodPost, "/smart-account/delegated", postJSONBody(map[string]any{
 		"gAddress": testHandlerGAddress,
 	}))
 	w := httptest.NewRecorder()

@@ -137,7 +137,7 @@ func TestBuildAuthTransactionCore_SynthesizeErrForSignerG(t *testing.T) {
 	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
 	_, err = svc.buildAuthTransactionCore(context.Background(), authTransactionCoreInput{
 		smartAccountAddress: smartAccountAddr,
-		signerType:          "freighter",
+		signerType:          "delegated",
 		signerG:             "not-a-valid-g-address",
 	}, trivialBuildTx(t, bundlerKp.Address(), 1))
 	require.Error(t, err)
@@ -160,7 +160,7 @@ func TestBuildAuthTransactionCore_SynthesizeErrForFeePayerG(t *testing.T) {
 	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
 	_, err = svc.buildAuthTransactionCore(context.Background(), authTransactionCoreInput{
 		smartAccountAddress: smartAccountAddr,
-		signerType:          "freighter",
+		signerType:          "delegated",
 		signerG:             signerKp.Address(),
 		feePayerG:           "not-a-valid-g-address",
 	}, trivialBuildTx(t, bundlerKp.Address(), 1))

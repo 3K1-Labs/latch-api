@@ -284,7 +284,7 @@ type approveDelegatedBeginRequest struct {
 
 // ApproveDelegatedBegin godoc
 // @Summary      Begin a delegated (G-address) proposal approval
-// @Description  Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger to sign against.
+// @Description  Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. an external wallet), plus the auth digest and validUntilLedger to sign against.
 // @Tags         multisig-proposals
 // @Accept       json
 // @Produce      json

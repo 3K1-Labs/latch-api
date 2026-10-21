@@ -73,7 +73,7 @@ var gatedRoutes = []string{
 	"POST /v1/passkey-credentials/lookup",
 	"POST /api/webauthn/registration/begin",
 	"GET /api/smart-account/webauthn",
-	"POST /api/smart-account/freighter",
+	"POST /api/smart-account/delegated",
 	"POST /api/transaction/build-send",
 	"POST /api/smart-account/setup-send-rules",
 	"POST /api/smart-account/add-signer",

@@ -58,7 +58,7 @@ func signBundlerDelegatedAuthEntry(entry xdr.SorobanAuthorizationEntry, bundlerK
 
 // buildUnsignedDelegatedGCheckAuthEntry builds an unsigned auth entry for a
 // native G-address signer that invokes the smart account's __check_auth(auth_digest)
-// directly — the entry a bundler or Freighter signer subsequently signs.
+// directly — the entry a bundler or delegated signer subsequently signs.
 // Ports lib/delegated-native-auth-entry.ts's buildUnsignedDelegatedGCheckAuthEntry().
 func buildUnsignedDelegatedGCheckAuthEntry(smartAccountAddress, signerG string, authDigestHash [32]byte, signatureExpirationLedger uint32) (xdr.SorobanAuthorizationEntry, error) {
 	smartAccountAddr, err := scAddressFromString(smartAccountAddress)

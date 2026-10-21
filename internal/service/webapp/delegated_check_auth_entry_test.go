@@ -25,7 +25,7 @@ func TestBuildDelegatedCheckAuthTemplate_ThenVerifyAndApply(t *testing.T) {
 	require.NotEmpty(t, tmpl.EntryTemplateXdrBase64)
 
 	// The client signs the raw preimage's hash — this mirrors what an
-	// external signer (Freighter) does before returning a 64-byte signature.
+	// external signer (an external wallet) does before returning a 64-byte signature.
 	preimageBytes, err := base64.StdEncoding.DecodeString(tmpl.PreimageXdrBase64)
 	require.NoError(t, err)
 	payloadHash := hash.Hash(preimageBytes)
@@ -33,15 +33,15 @@ func TestBuildDelegatedCheckAuthTemplate_ThenVerifyAndApply(t *testing.T) {
 	require.NoError(t, err)
 	sigB64 := base64.StdEncoding.EncodeToString(sig)
 
-	err = verifyDelegatedFreighterSignature(tmpl.EntryTemplateXdrBase64, sigB64, signerG, testPassphrase)
+	err = verifyDelegatedSignature(tmpl.EntryTemplateXdrBase64, sigB64, signerG, testPassphrase)
 	require.NoError(t, err)
 
-	signedEntry, err := applyDelegatedFreighterSignature(tmpl.EntryTemplateXdrBase64, sigB64, signerG)
+	signedEntry, err := applyDelegatedSignature(tmpl.EntryTemplateXdrBase64, sigB64, signerG)
 	require.NoError(t, err)
 	require.Equal(t, xdr.ScValTypeScvVec, signedEntry.Credentials.Address.Signature.Type)
 }
 
-func TestVerifyDelegatedFreighterSignature_WrongSigner(t *testing.T) {
+func TestVerifyDelegatedSignature_WrongSigner(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	signerKp, err := keypair.Random()
 	require.NoError(t, err)
@@ -59,21 +59,21 @@ func TestVerifyDelegatedFreighterSignature_WrongSigner(t *testing.T) {
 	require.NoError(t, err)
 	sigB64 := base64.StdEncoding.EncodeToString(sig)
 
-	err = verifyDelegatedFreighterSignature(tmpl.EntryTemplateXdrBase64, sigB64, signerKp.Address(), testPassphrase)
+	err = verifyDelegatedSignature(tmpl.EntryTemplateXdrBase64, sigB64, signerKp.Address(), testPassphrase)
 	require.ErrorIs(t, err, ErrDelegatedSignatureInvalid)
 }
 
-func TestVerifyDelegatedFreighterSignature_BadLength(t *testing.T) {
-	err := verifyDelegatedFreighterSignature("AAAA", base64.StdEncoding.EncodeToString([]byte("short")), testGAddress, testPassphrase)
+func TestVerifyDelegatedSignature_BadLength(t *testing.T) {
+	err := verifyDelegatedSignature("AAAA", base64.StdEncoding.EncodeToString([]byte("short")), testGAddress, testPassphrase)
 	require.ErrorIs(t, err, ErrDelegatedSignatureLength)
 }
 
-func TestVerifyDelegatedFreighterSignature_FullEntryTrusted(t *testing.T) {
+func TestVerifyDelegatedSignature_FullEntryTrusted(t *testing.T) {
 	// A signedAuthEntryBase64 longer than the raw-signature heuristic is
 	// treated as an already-complete entry and trusted without further
 	// verification here.
 	fullEntry := make([]byte, 200)
-	err := verifyDelegatedFreighterSignature("AAAA", base64.StdEncoding.EncodeToString(fullEntry), testGAddress, testPassphrase)
+	err := verifyDelegatedSignature("AAAA", base64.StdEncoding.EncodeToString(fullEntry), testGAddress, testPassphrase)
 	require.NoError(t, err)
 }
 
@@ -130,45 +130,45 @@ func TestSorobanAuthPreimageBytes_Success(t *testing.T) {
 	require.NotEmpty(t, raw)
 }
 
-// ── applyDelegatedFreighterSignature ─────────────────────────────────────────
+// ── applyDelegatedSignature ─────────────────────────────────────────
 
-func TestApplyDelegatedFreighterSignature_InvalidBase64(t *testing.T) {
-	_, err := applyDelegatedFreighterSignature("AAAA", "not-valid-base64!!", testGAddress)
+func TestApplyDelegatedSignature_InvalidBase64(t *testing.T) {
+	_, err := applyDelegatedSignature("AAAA", "not-valid-base64!!", testGAddress)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "decode signed auth entry")
 }
 
-func TestApplyDelegatedFreighterSignature_WrongLength(t *testing.T) {
+func TestApplyDelegatedSignature_WrongLength(t *testing.T) {
 	short := base64.StdEncoding.EncodeToString([]byte("too-short"))
-	_, err := applyDelegatedFreighterSignature("AAAA", short, testGAddress)
+	_, err := applyDelegatedSignature("AAAA", short, testGAddress)
 	require.ErrorIs(t, err, ErrDelegatedSignatureLength)
 }
 
-func TestApplyDelegatedFreighterSignature_BadTemplate(t *testing.T) {
-	sig := base64.StdEncoding.EncodeToString(make([]byte, freighterRawSignatureLen))
-	_, err := applyDelegatedFreighterSignature("not-valid-xdr!!", sig, testGAddress)
+func TestApplyDelegatedSignature_BadTemplate(t *testing.T) {
+	sig := base64.StdEncoding.EncodeToString(make([]byte, delegatedRawSignatureLen))
+	_, err := applyDelegatedSignature("not-valid-xdr!!", sig, testGAddress)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "decode entry template")
 }
 
-func TestApplyDelegatedFreighterSignature_NotAddressCredentials(t *testing.T) {
+func TestApplyDelegatedSignature_NotAddressCredentials(t *testing.T) {
 	entry := sampleAuthEntry(t, testGAddress, 1, 1000, "transfer")
 	entry.Credentials = xdr.SorobanCredentials{Type: xdr.SorobanCredentialsTypeSorobanCredentialsSourceAccount}
 	entryB64, err := xdr.MarshalBase64(entry)
 	require.NoError(t, err)
 
-	sig := base64.StdEncoding.EncodeToString(make([]byte, freighterRawSignatureLen))
-	_, err = applyDelegatedFreighterSignature(entryB64, sig, testGAddress)
+	sig := base64.StdEncoding.EncodeToString(make([]byte, delegatedRawSignatureLen))
+	_, err = applyDelegatedSignature(entryB64, sig, testGAddress)
 	require.ErrorIs(t, err, ErrNotAddressCredentials)
 }
 
-func TestApplyDelegatedFreighterSignature_InvalidSignerAddress(t *testing.T) {
+func TestApplyDelegatedSignature_InvalidSignerAddress(t *testing.T) {
 	entry := sampleAuthEntry(t, testGAddress, 1, 1000, "transfer")
 	entryB64, err := xdr.MarshalBase64(entry)
 	require.NoError(t, err)
 
-	sig := base64.StdEncoding.EncodeToString(make([]byte, freighterRawSignatureLen))
-	_, err = applyDelegatedFreighterSignature(entryB64, sig, "not-a-g-address")
+	sig := base64.StdEncoding.EncodeToString(make([]byte, delegatedRawSignatureLen))
+	_, err = applyDelegatedSignature(entryB64, sig, "not-a-g-address")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "decode signer public key")
 }
@@ -176,7 +176,7 @@ func TestApplyDelegatedFreighterSignature_InvalidSignerAddress(t *testing.T) {
 // bigSignedAuthEntry builds a sample auth entry with a full AuthPayload
 // signature attached (rather than the void/unsigned placeholder
 // sampleAuthEntry leaves it with), so its marshaled size clears
-// freighterFullEntryMinLen — matching what a real already-signed entry
+// delegatedFullEntryMinLen — matching what a real already-signed entry
 // looks like on the wire.
 func bigSignedAuthEntry(t *testing.T) xdr.SorobanAuthorizationEntry {
 	t.Helper()
@@ -187,30 +187,30 @@ func bigSignedAuthEntry(t *testing.T) xdr.SorobanAuthorizationEntry {
 	return entry
 }
 
-func TestApplyDelegatedFreighterSignature_FullEntryTrusted(t *testing.T) {
+func TestApplyDelegatedSignature_FullEntryTrusted(t *testing.T) {
 	entry := bigSignedAuthEntry(t)
 	raw, err := entry.MarshalBinary()
 	require.NoError(t, err)
-	require.Greater(t, len(raw), freighterFullEntryMinLen)
+	require.Greater(t, len(raw), delegatedFullEntryMinLen)
 	fullB64 := base64.StdEncoding.EncodeToString(raw)
 
-	result, err := applyDelegatedFreighterSignature("AAAA", fullB64, testGAddress)
+	result, err := applyDelegatedSignature("AAAA", fullB64, testGAddress)
 	require.NoError(t, err)
 	require.Equal(t, entry.Credentials.Type, result.Credentials.Type)
 }
 
-func TestApplyDelegatedFreighterSignature_FullEntryUnmarshalError(t *testing.T) {
+func TestApplyDelegatedSignature_FullEntryUnmarshalError(t *testing.T) {
 	entry := bigSignedAuthEntry(t)
 	raw, err := entry.MarshalBinary()
 	require.NoError(t, err)
-	require.Greater(t, len(raw), freighterFullEntryMinLen+1)
+	require.Greater(t, len(raw), delegatedFullEntryMinLen+1)
 	// Truncate a validly-marshaled entry just past the "full entry" length
 	// threshold — still long enough to hit that branch, but no longer a
 	// complete/valid XDR encoding.
-	truncated := raw[:freighterFullEntryMinLen+1]
+	truncated := raw[:delegatedFullEntryMinLen+1]
 	truncatedB64 := base64.StdEncoding.EncodeToString(truncated)
 
-	_, err = applyDelegatedFreighterSignature("AAAA", truncatedB64, testGAddress)
+	_, err = applyDelegatedSignature("AAAA", truncatedB64, testGAddress)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "decode full signed entry")
 }

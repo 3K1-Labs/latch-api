@@ -2,6 +2,7 @@ package webapp
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestFreighterSmartAccountService(t *testing.T, rpc sorobanRPC) *SmartAccountService {
+func newTestDelegatedSmartAccountService(t *testing.T, rpc sorobanRPC) *SmartAccountService {
 	t.Helper()
 	sqlDB, _, err := sqlmock.New()
 	require.NoError(t, err)
@@ -40,17 +41,24 @@ func stubHorizonAndFriendbot(t *testing.T, ts *httptest.Server) {
 	t.Cleanup(func() { horizonTestnetURL, friendbotURL = origHorizon, origFriendbot })
 }
 
-func TestDeriveFreighterDelegatedSalt_Deterministic(t *testing.T) {
-	a := DeriveFreighterDelegatedSalt(testGAddress)
-	b := DeriveFreighterDelegatedSalt(testGAddress)
+func TestDeriveDelegatedSalt_Deterministic(t *testing.T) {
+	a := DeriveDelegatedSalt(testGAddress)
+	b := DeriveDelegatedSalt(testGAddress)
 	assert.Equal(t, a, b)
 	assert.Len(t, a, 32)
 
-	other := DeriveFreighterDelegatedSalt("GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI")
+	other := DeriveDelegatedSalt("GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI")
 	assert.NotEqual(t, a, other)
 }
 
-func TestQueryFreighter_NotDeployed(t *testing.T) {
+// TestDeriveDelegatedSalt_GoldenVector pins the salt to the original
+// "freighter-delegated-v1" derivation: every existing delegated account's
+// address depends on it, so a change here would move them all.
+func TestDeriveDelegatedSalt_GoldenVector(t *testing.T) {
+	assert.Equal(t, "774879e1f142c035e0ec8ee7701846710e59c8dad7aa56a9fd3b7ff47bf71ce8", hex.EncodeToString(DeriveDelegatedSalt(testGAddress)))
+}
+
+func TestQueryDelegated_NotDeployed(t *testing.T) {
 	factoryAddr := testContractAddress(t)
 	predictedAddr := testContractAddress(t)
 
@@ -71,19 +79,19 @@ func TestQueryFreighter_NotDeployed(t *testing.T) {
 	require.NoError(t, err)
 	svc := NewSmartAccountService(rpc, bundlerSvc, db.New(sqlDB), "https://rpc.example.com", testPassphrase, factoryAddr, nil)
 
-	address, deployed, err := svc.QueryFreighter(context.Background(), testGAddress)
+	address, deployed, err := svc.QueryDelegated(context.Background(), testGAddress)
 	require.NoError(t, err)
 	assert.Equal(t, predictedAddr, address)
 	assert.False(t, deployed)
 }
 
-func TestQueryFreighter_InvalidGAddress(t *testing.T) {
-	svc := newTestFreighterSmartAccountService(t, &fakeSorobanRPC{})
-	_, _, err := svc.QueryFreighter(context.Background(), "not-a-g-address")
+func TestQueryDelegated_InvalidGAddress(t *testing.T) {
+	svc := newTestDelegatedSmartAccountService(t, &fakeSorobanRPC{})
+	_, _, err := svc.QueryDelegated(context.Background(), "not-a-g-address")
 	require.Error(t, err)
 }
 
-func TestDeployFreighter_AlreadyDeployed(t *testing.T) {
+func TestDeployDelegated_AlreadyDeployed(t *testing.T) {
 	factoryAddr := testContractAddress(t)
 	predictedAddr := testContractAddress(t)
 
@@ -115,13 +123,13 @@ func TestDeployFreighter_AlreadyDeployed(t *testing.T) {
 	defer ts.Close()
 	stubHorizonAndFriendbot(t, ts)
 
-	address, alreadyDeployed, err := svc.DeployFreighter(context.Background(), testGAddress)
+	address, alreadyDeployed, err := svc.DeployDelegated(context.Background(), testGAddress)
 	require.NoError(t, err)
 	assert.Equal(t, predictedAddr, address)
 	assert.True(t, alreadyDeployed)
 }
 
-func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
+func TestDeployDelegated_FundsViaFriendbotThenDeploys(t *testing.T) {
 	factoryAddr := testContractAddress(t)
 	predictedAddr := testContractAddress(t)
 
@@ -158,7 +166,7 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 	defer ts.Close()
 	stubHorizonAndFriendbot(t, ts)
 
-	address, alreadyDeployed, err := svc.DeployFreighter(context.Background(), testGAddress)
+	address, alreadyDeployed, err := svc.DeployDelegated(context.Background(), testGAddress)
 	require.NoError(t, err)
 	assert.True(t, friendbotCalled)
 	assert.Equal(t, predictedAddr, address)
@@ -166,8 +174,8 @@ func TestDeployFreighter_FundsViaFriendbotThenDeploys(t *testing.T) {
 	assert.Len(t, g.calls, 1)
 }
 
-func TestDeployFreighter_FriendbotFails(t *testing.T) {
-	svc := newTestFreighterSmartAccountService(t, &fakeSorobanRPC{})
+func TestDeployDelegated_FriendbotFails(t *testing.T) {
+	svc := newTestDelegatedSmartAccountService(t, &fakeSorobanRPC{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -175,23 +183,23 @@ func TestDeployFreighter_FriendbotFails(t *testing.T) {
 	defer ts.Close()
 	stubHorizonAndFriendbot(t, ts)
 
-	_, _, err := svc.DeployFreighter(context.Background(), testGAddress)
+	_, _, err := svc.DeployDelegated(context.Background(), testGAddress)
 	require.Error(t, err)
 }
 
-func TestQueryFreighter_PredictAddressErr(t *testing.T) {
+func TestQueryDelegated_PredictAddressErr(t *testing.T) {
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
 			return nil, errors.New("rpc down")
 		},
 	}
-	svc := newTestFreighterSmartAccountService(t, rpc)
-	_, _, err := svc.QueryFreighter(context.Background(), testGAddress)
+	svc := newTestDelegatedSmartAccountService(t, rpc)
+	_, _, err := svc.QueryDelegated(context.Background(), testGAddress)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "predict smart account address")
 }
 
-func TestQueryFreighter_IsDeployedErr(t *testing.T) {
+func TestQueryDelegated_IsDeployedErr(t *testing.T) {
 	predictedAddr := testContractAddress(t)
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
@@ -201,14 +209,14 @@ func TestQueryFreighter_IsDeployedErr(t *testing.T) {
 			return nil, errors.New("rpc down")
 		},
 	}
-	svc := newTestFreighterSmartAccountService(t, rpc)
-	_, _, err := svc.QueryFreighter(context.Background(), testGAddress)
+	svc := newTestDelegatedSmartAccountService(t, rpc)
+	_, _, err := svc.QueryDelegated(context.Background(), testGAddress)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "check deployment")
 }
 
-func TestDeployFreighter_InvalidGAddressAfterFunding(t *testing.T) {
-	svc := newTestFreighterSmartAccountService(t, &fakeSorobanRPC{})
+func TestDeployDelegated_InvalidGAddressAfterFunding(t *testing.T) {
+	svc := newTestDelegatedSmartAccountService(t, &fakeSorobanRPC{})
 
 	// Friendbot funding doesn't validate gAddress format (it's a raw URL
 	// param), so it succeeds; the deterministic-params builder is what
@@ -219,17 +227,17 @@ func TestDeployFreighter_InvalidGAddressAfterFunding(t *testing.T) {
 	defer ts.Close()
 	stubHorizonAndFriendbot(t, ts)
 
-	_, _, err := svc.DeployFreighter(context.Background(), "not-a-valid-g-address")
+	_, _, err := svc.DeployDelegated(context.Background(), "not-a-valid-g-address")
 	require.Error(t, err)
 }
 
-func TestDeployFreighter_PredictAddressErr(t *testing.T) {
+func TestDeployDelegated_PredictAddressErr(t *testing.T) {
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
 			return nil, errors.New("rpc down")
 		},
 	}
-	svc := newTestFreighterSmartAccountService(t, rpc)
+	svc := newTestDelegatedSmartAccountService(t, rpc)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -237,7 +245,7 @@ func TestDeployFreighter_PredictAddressErr(t *testing.T) {
 	defer ts.Close()
 	stubHorizonAndFriendbot(t, ts)
 
-	_, _, err := svc.DeployFreighter(context.Background(), testGAddress)
+	_, _, err := svc.DeployDelegated(context.Background(), testGAddress)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "predict smart account address")
 }

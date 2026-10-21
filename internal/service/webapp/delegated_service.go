@@ -12,10 +12,14 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// freighterSaltVersion is appended to a G-address before hashing to derive a
-// Freighter/mnemonic-linked smart account's deterministic salt. Ports
-// app/api/smart-account/freighter/route.ts's deriveSalt() version suffix.
-const freighterSaltVersion = "freighter-delegated-v1"
+// delegatedSaltVersion is appended to a G-address before hashing to derive a
+// delegated smart account's deterministic salt. Ports the webapp G-address
+// smart-account route's deriveSalt() version suffix.
+//
+// The value keeps its historical wording on purpose: it is hashed into every
+// delegated account's address, so changing it would move every existing
+// account. Do not rename it with the signer type.
+const delegatedSaltVersion = "freighter-delegated-v1"
 
 // horizonTestnetURL/friendbotURL back fundTestnetAccountIfNeeded. The webapp
 // port only ever runs against the configured testnet RPC/passphrase (see
@@ -30,18 +34,18 @@ var (
 
 const fundHTTPTimeout = 10 * time.Second
 
-// DeriveFreighterDelegatedSalt computes the deterministic account_salt for a
-// Freighter/mnemonic G-address signer: sha256(gAddress + "freighter-delegated-v1").
-// Ports app/api/smart-account/freighter/route.ts's deriveSalt().
-func DeriveFreighterDelegatedSalt(gAddress string) []byte {
-	sum := sha256.Sum256([]byte(gAddress + freighterSaltVersion))
+// DeriveDelegatedSalt computes the deterministic account_salt for a
+// delegated G-address signer: sha256(gAddress + delegatedSaltVersion).
+// Ports the webapp G-address smart-account route's deriveSalt().
+func DeriveDelegatedSalt(gAddress string) []byte {
+	sum := sha256.Sum256([]byte(gAddress + delegatedSaltVersion))
 	return sum[:]
 }
 
 // buildDelegatedAccountInitParams builds the AccountInitParams ScVal for a
 // smart account whose sole signer is AccountSignerInit::Delegated(gAddress)
-// — the deterministic-address factory params for Freighter/seed-imported
-// accounts. Ports app/api/smart-account/freighter/route.ts's buildParamsMap().
+// — the deterministic-address factory params for delegated (seed-imported)
+// accounts. Ports the webapp G-address smart-account route's buildParamsMap().
 func buildDelegatedAccountInitParams(gAddress string, salt []byte) (xdr.ScVal, error) {
 	delegatedSigner, err := buildDelegatedSignerScVal(gAddress)
 	if err != nil {
@@ -54,11 +58,11 @@ func buildDelegatedAccountInitParams(gAddress string, salt []byte) (xdr.ScVal, e
 	), nil
 }
 
-// QueryFreighter predicts a Freighter/mnemonic-linked smart account's
+// QueryDelegated predicts a delegated smart account's
 // address for gAddress and reports whether it's already deployed. Pure
-// computation, no persistence — mirrors GET /api/smart-account/freighter.
-func (s *SmartAccountService) QueryFreighter(ctx context.Context, gAddress string) (address string, deployed bool, err error) {
-	params, err := buildDelegatedAccountInitParams(gAddress, DeriveFreighterDelegatedSalt(gAddress))
+// computation, no persistence — mirrors GET /api/smart-account/delegated.
+func (s *SmartAccountService) QueryDelegated(ctx context.Context, gAddress string) (address string, deployed bool, err error) {
+	params, err := buildDelegatedAccountInitParams(gAddress, DeriveDelegatedSalt(gAddress))
 	if err != nil {
 		return "", false, err
 	}
@@ -73,17 +77,17 @@ func (s *SmartAccountService) QueryFreighter(ctx context.Context, gAddress strin
 	return address, deployed, nil
 }
 
-// DeployFreighter predicts and deploys a Freighter/mnemonic-linked smart
+// DeployDelegated predicts and deploys a delegated smart
 // account for gAddress, funding gAddress on testnet via friendbot first if
 // it doesn't yet exist on-chain (a later delegated signature from gAddress
 // requires the classic account to exist). Mirrors
-// POST /api/smart-account/freighter.
-func (s *SmartAccountService) DeployFreighter(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error) {
+// POST /api/smart-account/delegated.
+func (s *SmartAccountService) DeployDelegated(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error) {
 	if err := fundTestnetAccountIfNeeded(ctx, gAddress); err != nil {
 		return "", false, fmt.Errorf("fund account: %w", err)
 	}
 
-	params, err := buildDelegatedAccountInitParams(gAddress, DeriveFreighterDelegatedSalt(gAddress))
+	params, err := buildDelegatedAccountInitParams(gAddress, DeriveDelegatedSalt(gAddress))
 	if err != nil {
 		return "", false, err
 	}
@@ -96,7 +100,7 @@ func (s *SmartAccountService) DeployFreighter(ctx context.Context, gAddress stri
 
 // fundTestnetAccountIfNeeded funds gAddress via the public testnet friendbot
 // if it doesn't already exist on-chain. Ports
-// app/api/smart-account/freighter/route.ts's fundIfNeeded().
+// the webapp G-address smart-account route's fundIfNeeded().
 func fundTestnetAccountIfNeeded(ctx context.Context, gAddress string) error {
 	client := &http.Client{Timeout: fundHTTPTimeout}
 

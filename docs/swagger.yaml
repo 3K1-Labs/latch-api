@@ -917,7 +917,7 @@ definitions:
     - signers
     - threshold
     type: object
-  internal_handler_webapp.deployFreighterSmartAccountRequest:
+  internal_handler_webapp.deployDelegatedSmartAccountRequest:
     properties:
       gAddress:
         type: string
@@ -2221,7 +2221,7 @@ paths:
       consumes:
       - application/json
       description: Returns the preimage and entry template XDR for a delegated signer
-        to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger
+        to sign externally (e.g. an external wallet), plus the auth digest and validUntilLedger
         to sign against.
       parameters:
       - description: Proposal ID
@@ -2699,7 +2699,7 @@ paths:
       summary: List a smart account's context rules
       tags:
       - smart-account
-  /api/smart-account/freighter:
+  /api/smart-account/delegated:
     get:
       description: Pure computation over a client-supplied G-address (no session,
         no persistence). Returns the deterministic smart account address and whether
@@ -2731,7 +2731,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-      summary: Derive a smart account address from a Freighter/mnemonic G-address
+      summary: Derive a smart account address from a delegated G-address
       tags:
       - smart-account
     post:
@@ -2741,12 +2741,12 @@ paths:
         idempotently returns) a smart account with gAddress as its Delegated signer.
         Testnet only — friendbot funding doesn't exist on mainnet.
       parameters:
-      - description: Freighter G-address
+      - description: Delegated G-address
         in: body
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_handler_webapp.deployFreighterSmartAccountRequest'
+          $ref: '#/definitions/internal_handler_webapp.deployDelegatedSmartAccountRequest'
       produces:
       - application/json
       responses:
@@ -2763,7 +2763,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-      summary: Deploy a smart account for a Freighter/mnemonic G-address
+      summary: Deploy a smart account for a delegated G-address
       tags:
       - smart-account
   /api/smart-account/setup-send-rules:
@@ -2928,7 +2928,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Like build, but always prepares the smart-account entry for a Freighter/mnemonic
+      description: Like build, but always prepares the smart-account entry for a delegated
         G-address signature. No production UI calls this — kept for API parity.
       parameters:
       - description: Counter increment parameters
@@ -3118,8 +3118,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Attaches a native G-address signature (Freighter or a locally-held
-        mnemonic key) to the built transaction's smart-account and delegated auth
+      description: Attaches a native G-address signature (an external wallet or a
+        locally-held mnemonic key) to the built transaction's smart-account and delegated auth
         entries and submits it to the network.
       parameters:
       - description: Signed transaction and auth entries
@@ -3140,7 +3140,7 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-      summary: Submit a Freighter/mnemonic-delegated-signed transaction
+      summary: Submit a delegated-signed transaction
       tags:
       - transaction
   /api/transaction/submit-webauthn:
@@ -4408,7 +4408,7 @@ paths:
       - application/json
       description: |-
         Deploys (or idempotently returns) the deterministic smart account whose
-        signer is a classic Stellar account — the Freighter / external-wallet path.
+        signer is a classic Stellar account — the delegated (external-wallet) path.
         Testnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.
       parameters:
       - description: Classic Stellar public key (G...)

@@ -59,7 +59,7 @@ func TestTransactionBuild_SignerTypes(t *testing.T) {
 	}{
 		{"passkey", http.StatusOK, "passkey"},
 		{"ed25519", http.StatusOK, "ed25519"},    // seed wallets share the ed25519 verifier signer
-		{"freighter", http.StatusBadRequest, ""}, // signer_g missing
+		{"delegated", http.StatusBadRequest, ""}, // signer_g missing
 		{"phantom", http.StatusBadRequest, ""},   // not a /v1 signer type
 	}
 	for _, tc := range tests {

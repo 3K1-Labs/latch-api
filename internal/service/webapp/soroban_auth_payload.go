@@ -17,7 +17,7 @@ var ErrNotAddressCredentials = errors.New("auth entry does not use address crede
 
 // hashSorobanAuthPayload computes the raw signature payload hash for a
 // Soroban authorization entry: SHA256(HashIdPreimage::SorobanAuthorization).
-// This is the digest an external signer (Ed25519/WebAuthn/Freighter) signs.
+// This is the digest an external signer (Ed25519/WebAuthn/delegated) signs.
 // Ports lib/soroban-auth-payload.ts's hashSorobanAuthPayload().
 func hashSorobanAuthPayload(entry xdr.SorobanAuthorizationEntry, networkPassphrase string) ([32]byte, error) {
 	if entry.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || entry.Credentials.Address == nil {

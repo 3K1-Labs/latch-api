@@ -133,8 +133,8 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 	})
 }
 
-// QueryFreighter godoc
-// @Summary      Derive a smart account address from a Freighter/mnemonic G-address
+// QueryDelegated godoc
+// @Summary      Derive a smart account address from a delegated G-address
 // @Description  Pure computation over a client-supplied G-address (no session, no persistence). Returns the deterministic smart account address and whether it's already deployed.
 // @Tags         smart-account
 // @Produce      json
@@ -143,8 +143,8 @@ func (h *SmartAccountHandler) Deploy(c *gin.Context) {
 // @Success      200 {object} map[string]any
 // @Failure      400 {object} webappErrorResponse
 // @Failure      500 {object} webappErrorResponse
-// @Router       /api/smart-account/freighter [get]
-func (h *SmartAccountHandler) QueryFreighter(c *gin.Context) {
+// @Router       /api/smart-account/delegated [get]
+func (h *SmartAccountHandler) QueryDelegated(c *gin.Context) {
 	gAddress := c.Query("gAddress")
 	if gAddress == "" || !isValidGAddress(gAddress) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "missing or invalid gAddress")
@@ -157,9 +157,9 @@ func (h *SmartAccountHandler) QueryFreighter(c *gin.Context) {
 		return
 	}
 
-	address, deployed, err := h.smartAccountSvc.QueryFreighter(c.Request.Context(), gAddress)
+	address, deployed, err := h.smartAccountSvc.QueryDelegated(c.Request.Context(), gAddress)
 	if err != nil {
-		slog.Error("query freighter smart account", "network", network, "err", err)
+		slog.Error("query delegated smart account", "network", network, "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}
@@ -170,24 +170,24 @@ func (h *SmartAccountHandler) QueryFreighter(c *gin.Context) {
 	})
 }
 
-type deployFreighterSmartAccountRequest struct {
+type deployDelegatedSmartAccountRequest struct {
 	Network  string `json:"network,omitempty"`
 	GAddress string `json:"gAddress" binding:"required"`
 }
 
-// DeployFreighter godoc
-// @Summary      Deploy a smart account for a Freighter/mnemonic G-address
+// DeployDelegated godoc
+// @Summary      Deploy a smart account for a delegated G-address
 // @Description  Funds gAddress via testnet friendbot if needed, then deploys (or idempotently returns) a smart account with gAddress as its Delegated signer. Testnet only — friendbot funding doesn't exist on mainnet.
 // @Tags         smart-account
 // @Accept       json
 // @Produce      json
-// @Param        body body deployFreighterSmartAccountRequest true "Freighter G-address"
+// @Param        body body deployDelegatedSmartAccountRequest true "delegated G-address"
 // @Success      200 {object} map[string]any
 // @Failure      400 {object} webappErrorResponse
 // @Failure      500 {object} webappErrorResponse
-// @Router       /api/smart-account/freighter [post]
-func (h *SmartAccountHandler) DeployFreighter(c *gin.Context) {
-	var req deployFreighterSmartAccountRequest
+// @Router       /api/smart-account/delegated [post]
+func (h *SmartAccountHandler) DeployDelegated(c *gin.Context) {
+	var req deployDelegatedSmartAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil || !isValidGAddress(req.GAddress) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid gAddress. Expected a valid Stellar G-address.")
 		return
@@ -199,16 +199,16 @@ func (h *SmartAccountHandler) DeployFreighter(c *gin.Context) {
 		return
 	}
 	if network == webapp.NetworkMainnet {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, "DeployFreighter funds via testnet friendbot, which doesn't exist on mainnet")
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, "DeployDelegated funds via testnet friendbot, which doesn't exist on mainnet")
 		return
 	}
 
-	address, alreadyDeployed, err := h.smartAccountSvc.DeployFreighter(c.Request.Context(), req.GAddress)
+	address, alreadyDeployed, err := h.smartAccountSvc.DeployDelegated(c.Request.Context(), req.GAddress)
 	if err != nil {
 		if failGasless(c, err) {
 			return
 		}
-		slog.Error("deploy freighter smart account", "err", err)
+		slog.Error("deploy delegated smart account", "err", err)
 		webappx.Fail(c, http.StatusInternalServerError, webappx.ErrInternal, "internal error")
 		return
 	}

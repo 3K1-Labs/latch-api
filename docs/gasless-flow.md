@@ -298,7 +298,7 @@ channels_busy` (nothing charged) → latch-api `ErrGaslessUnavailable` → user 
 
 ## 3. Variant: wallet creation — `SmartAccountService.Deploy` (`smartaccount_service.go:189`)
 
-Every creation path (passkey `DeployForCredential`, `DeployByKeyData`, Freighter, ed25519,
+Every creation path (passkey `DeployForCredential`, `DeployByKeyData`, delegated, ed25519,
 multisig accounts/drafts) funnels into this one function:
 
 ```go

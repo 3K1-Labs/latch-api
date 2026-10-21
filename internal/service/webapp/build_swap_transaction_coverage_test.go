@@ -53,7 +53,7 @@ func TestResolveSwapAuthMode_AmbiguousDelegatedSigners(t *testing.T) {
 		{Kind: "Delegated", GAddress: testGAddress},
 		{Kind: "Delegated", GAddress: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI"},
 	}}
-	res := resolveSwapAuthMode(rule, true, "freighter", testGAddress)
+	res := resolveSwapAuthMode(rule, true, "delegated", testGAddress)
 	assert.False(t, res.useDelegatedAuth)
 	assert.False(t, res.needsPasskeySetup)
 }
@@ -64,27 +64,27 @@ func TestAssertSwapRuleReadyForSign_NotDelegatedOnlyIsNoop(t *testing.T) {
 	require.NoError(t, assertSwapRuleReadyForSign(rule, true, 0))
 }
 
-func TestValidateContextRuleForSignerType_SignerGMatchesBundlerNonFreighter(t *testing.T) {
+func TestValidateContextRuleForSignerType_SignerGMatchesBundlerNonDelegated(t *testing.T) {
 	bundlerG := testGAddress
 	err := validateContextRuleForSignerType(ContextRuleSummary{}, true, "passkey", bundlerG, bundlerG)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSwapValidation)
 }
 
-func TestValidateContextRuleForSignerType_FreighterMissingSignerG(t *testing.T) {
+func TestValidateContextRuleForSignerType_DelegatedMissingSignerG(t *testing.T) {
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "External"}}}
-	err := validateContextRuleForSignerType(rule, true, "freighter", "", "GBUNDLER")
+	err := validateContextRuleForSignerType(rule, true, "delegated", "", "GBUNDLER")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSwapValidation)
 }
 
-func TestValidateContextRuleForSignerType_FreighterExternalButWrongDelegated(t *testing.T) {
+func TestValidateContextRuleForSignerType_DelegatedExternalButWrongDelegated(t *testing.T) {
 	otherG := "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI"
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{
 		{Kind: "External", VerifierAddress: testContractAddress(t)},
 		{Kind: "Delegated", GAddress: otherG},
 	}}
-	err := validateContextRuleForSignerType(rule, true, "freighter", testGAddress, "GBUNDLER")
+	err := validateContextRuleForSignerType(rule, true, "delegated", testGAddress, "GBUNDLER")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSwapSignerMismatch)
 	assert.Contains(t, err.Error(), "configured for passkey")

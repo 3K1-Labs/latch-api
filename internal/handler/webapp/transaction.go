@@ -120,8 +120,8 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType == "freighter" && req.SignerG == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is freighter")
+	if req.SignerType == "delegated" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is delegated")
 		return
 	}
 
@@ -275,8 +275,8 @@ type submitDelegatedRequest struct {
 }
 
 // SubmitDelegated godoc
-// @Summary      Submit a Freighter/mnemonic-delegated-signed transaction
-// @Description  Attaches a native G-address signature (Freighter or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.
+// @Summary      Submit a delegated-signed transaction
+// @Description  Attaches a native G-address signature (an external wallet or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.
 // @Tags         transaction
 // @Accept       json
 // @Produce      json
@@ -358,8 +358,8 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType == "freighter" && req.SignerG == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is freighter")
+	if req.SignerType == "delegated" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is delegated")
 		return
 	}
 
@@ -429,8 +429,8 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "freighter" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or freighter")
+	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "delegated" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or delegated")
 		return
 	}
 
@@ -653,7 +653,7 @@ type buildDelegatedCounterRequest struct {
 
 // BuildDelegatedCounter godoc
 // @Summary      Build a demo counter-increment transaction for a delegated G-address signer
-// @Description  Like build, but always prepares the smart-account entry for a Freighter/mnemonic G-address signature. No production UI calls this — kept for API parity.
+// @Description  Like build, but always prepares the smart-account entry for a delegated G-address signature. No production UI calls this — kept for API parity.
 // @Tags         transaction
 // @Accept       json
 // @Produce      json
@@ -722,12 +722,12 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "freighter" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or freighter")
+	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "delegated" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or delegated")
 		return
 	}
-	if req.SignerType == "freighter" && req.SignerG == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required for freighter")
+	if req.SignerType == "delegated" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required for delegated")
 		return
 	}
 

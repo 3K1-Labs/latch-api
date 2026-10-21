@@ -39,7 +39,7 @@ func NewTransactionBuildHandler(txSvc transactionBuildService, cfg *config.Confi
 // build service calls "ed25519", so every accepted type passes through as is.
 func mobileSignerType(t string) (string, bool) {
 	switch t {
-	case "passkey", "freighter", "ed25519":
+	case "passkey", "delegated", "ed25519":
 		return t, true
 	default:
 		return "", false
@@ -92,11 +92,11 @@ func (h *TransactionBuildHandler) BuildSend(c *gin.Context) {
 	}
 	signerType, ok := mobileSignerType(req.SignerType)
 	if !ok {
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_type must be passkey, ed25519 or freighter")
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_type must be passkey, ed25519 or delegated")
 		return
 	}
-	if signerType == "freighter" && req.SignerG == "" {
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_g is required for freighter")
+	if signerType == "delegated" && req.SignerG == "" {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_g is required for delegated")
 		return
 	}
 	if _, ok := resolveRequestNetwork(c, req.Network); !ok {
@@ -157,11 +157,11 @@ func (h *TransactionBuildHandler) BuildSwap(c *gin.Context) {
 	}
 	signerType, ok := mobileSignerType(req.SignerType)
 	if !ok {
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_type must be passkey, ed25519 or freighter")
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_type must be passkey, ed25519 or delegated")
 		return
 	}
-	if signerType == "freighter" && req.SignerG == "" {
-		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_g is required for freighter")
+	if signerType == "delegated" && req.SignerG == "" {
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "signer_g is required for delegated")
 		return
 	}
 	if _, ok := resolveRequestNetwork(c, req.Network); !ok {
