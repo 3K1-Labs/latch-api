@@ -34,15 +34,13 @@ func NewTransactionBuildHandler(txSvc transactionBuildService, cfg *config.Confi
 	return &TransactionBuildHandler{txSvc: txSvc, cfg: cfg}
 }
 
-// mobileSignerType maps /v1's signer types onto the build service's. A seed
+// mobileSignerType reports whether t is a signer type /v1 accepts. A seed
 // wallet's ed25519 key uses the same External(ed25519 verifier) signer the
-// service still calls "phantom".
+// build service calls "ed25519", so every accepted type passes through as is.
 func mobileSignerType(t string) (string, bool) {
 	switch t {
-	case "passkey", "freighter":
+	case "passkey", "freighter", "ed25519":
 		return t, true
-	case "ed25519":
-		return "phantom", true
 	default:
 		return "", false
 	}

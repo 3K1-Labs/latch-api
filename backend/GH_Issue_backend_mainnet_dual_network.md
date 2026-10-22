@@ -146,7 +146,7 @@ Resolver (name as you like: `NetworkStack`, `ChainConfig`) per request:
 | Passphrase                 | `Test SDF Network ; September 2015`                        | `Public Global Stellar Network ; September 2015`                                      |
 | Factory                    | `NEXT_PUBLIC_FACTORY_ADDRESS`                              | `NEXT_PUBLIC_FACTORY_ADDRESS_MAINNET`                                                 |
 | WebAuthn verifier          | `NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS`                    | `NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS_MAINNET`                                       |
-| Ed25519 / Phantom verifier | `NEXT_PUBLIC_VERIFIER_ADDRESS`                             | `NEXT_PUBLIC_VERIFIER_ADDRESS_MAINNET`                                                |
+| Ed25519 verifier          | `NEXT_PUBLIC_VERIFIER_ADDRESS`                             | `NEXT_PUBLIC_VERIFIER_ADDRESS_MAINNET`                                                |
 | Native XLM SAC             | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC` | `CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA`                            |
 | USDC SAC                   | testnet `CBIELTK6…`                                        | `CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75`                            |
 | Aquarius router default    | `CBCFTQSP…`                                                | `CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK`                            |
@@ -203,7 +203,6 @@ Add `network` to request bodies (or query where already used) and resolve the st
 | POST   | `/api/transaction/prepare-sign`     | Field may exist; **must** select mainnet RPC/bundler (Soroswap mainnet)                    |
 | POST   | `/api/transaction/submit-webauthn`  | Add / wire `network` (extension already sends it)                                          |
 | POST   | `/api/transaction/submit-delegated` | Same                                                                                       |
-| POST   | `/api/transaction/submit`           | Same (Phantom)                                                                             |
 | POST   | `/api/transaction/simulate`         | Already OK — keep                                                                          |
 | POST   | `/api/transaction/relay`            | Already OK — keep                                                                          |
 
@@ -216,7 +215,6 @@ Add `network` to request bodies (or query where already used) and resolve the st
 | GET      | `/api/smart-account/balances`         | `network` query; mainnet catalog + RPC                                  |
 | GET/POST | `/api/smart-account/freighter`        | Deploy/predict must use network-scoped factory. No friendbot on mainnet |
 | GET/POST | `/api/smart-account/webauthn`         | Same                                                                    |
-| POST     | `/api/smart-account` (Phantom)        | Same                                                                    |
 
 **WebAuthn deploy**
 
@@ -240,7 +238,7 @@ Submit must use the **same** passphrase/stack as the matching build (auth digest
 
 1. `ParseNetwork` + `ResolveStack`.
 2. Mainnet catalog: native + USDC.
-3. Wire `BuildSend` + `SetupSendRules` + submit-webauthn / delegated / phantom.
+3. Wire `BuildSend` + `SetupSendRules` + submit-webauthn / delegated.
 4. Extension can complete **mainnet send** (XLM + USDC).
 
 **Phase 2 — Swap / prepare-sign**

@@ -58,7 +58,7 @@ func TestTransactionBuild_SignerTypes(t *testing.T) {
 		want   string
 	}{
 		{"passkey", http.StatusOK, "passkey"},
-		{"ed25519", http.StatusOK, "phantom"},    // seed wallets share the ed25519 verifier signer
+		{"ed25519", http.StatusOK, "ed25519"},    // seed wallets share the ed25519 verifier signer
 		{"freighter", http.StatusBadRequest, ""}, // signer_g missing
 		{"phantom", http.StatusBadRequest, ""},   // not a /v1 signer type
 	}
@@ -89,6 +89,6 @@ func TestTransactionBuild_SwapPassesThrough(t *testing.T) {
 	w := post(newBuildRouter(svc), "/build-swap",
 		`{"smart_account_address":"CW","signer_type":"ed25519","swap_chain_xdr":"AAAA","token_in_contract_id":"CT","amount_in_raw":"100","amount_out_min_raw":"90"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Equal(t, "phantom", svc.swapIn.SignerType)
+	assert.Equal(t, "ed25519", svc.swapIn.SignerType)
 	assert.Equal(t, "100", svc.swapIn.AmountInRaw)
 }

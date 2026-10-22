@@ -806,15 +806,6 @@ definitions:
     - swapChainXdr
     - tokenInContractId
     type: object
-  internal_handler_webapp.connectPhantomRequest:
-    properties:
-      network:
-        type: string
-      publicKeyHex:
-        type: string
-    required:
-    - publicKeyHex
-    type: object
   internal_handler_webapp.counterResponse:
     properties:
       value:
@@ -1281,31 +1272,6 @@ definitions:
     - gAddressEntryTemplateXdr
     - signedAuthEntryBase64
     - signerAddress
-    - txXdr
-    type: object
-  internal_handler_webapp.submitPhantomRequest:
-    properties:
-      authEntriesXdr:
-        items:
-          type: string
-        type: array
-      authEntryXdr:
-        type: string
-      authSignatureHex:
-        type: string
-      contextRuleId:
-        type: integer
-      network:
-        type: string
-      prefixedMessage:
-        type: string
-      publicKeyHex:
-        type: string
-      txXdr:
-        type: string
-    required:
-    - authSignatureHex
-    - publicKeyHex
     - txXdr
     type: object
   internal_handler_webapp.submitWebAuthnRequest:
@@ -2661,65 +2627,6 @@ paths:
       summary: Consume a stored sign payload
       tags:
       - sign-payload
-  /api/smart-account:
-    get:
-      description: Returns the ed25519 verifier and counter contract addresses the
-        Phantom demo flow uses.
-      parameters:
-      - default: testnet
-        description: Network
-        in: query
-        name: network
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-      summary: Get the counter-demo contract addresses
-      tags:
-      - smart-account
-    post:
-      consumes:
-      - application/json
-      description: Derives a G-address from a Phantom Ed25519 public key and deploys
-        (or idempotently returns) the counter-demo smart account WASM with that key
-        as its External signer. No production UI calls this — kept for API parity
-        with the reference demo.
-      parameters:
-      - description: Phantom Ed25519 public key
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_webapp.connectPhantomRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-      summary: Deploy the demo counter-contract smart account for a Phantom (Solana)
-        signer
-      tags:
-      - smart-account
   /api/smart-account/balances:
     get:
       description: Fetches balances for every asset in the configured catalog. Zero
@@ -3205,34 +3112,6 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler.apiErrorResponse'
       summary: Simulate Soroban transaction
-      tags:
-      - transaction
-  /api/transaction/submit:
-    post:
-      consumes:
-      - application/json
-      description: Attaches the client's Phantom (Solana wallet) Ed25519 signature
-        to the built transaction's auth entry and submits it to the network.
-      parameters:
-      - description: Signed transaction and auth entry
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_webapp.submitPhantomRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/internal_handler_webapp.webappErrorResponse'
-      summary: Submit a Phantom-signed transaction
       tags:
       - transaction
   /api/transaction/submit-delegated:

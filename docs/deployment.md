@@ -113,12 +113,11 @@ git push -u origin master
    NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS         <mainnet WebAuthn verifier>
    NEXT_PUBLIC_VERIFIER_ADDRESS                  <mainnet Ed25519 verifier>
    NEXT_PUBLIC_USDC_SAC_ADDRESS                  <mainnet USDC SAC>
-   NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH           <mainnet account WASM hash>
    RELAYER_URL / RELAYER_API_KEY                 <the mainnet relayer>
    WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN              <passkey ceremony config>
    ```
 
-   Every variable above from `SOROBAN_RPC_URL` to `NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH` is required on mainnet; there are no mainnet defaults. Staging uses the same names with `STELLAR_NETWORK=testnet`, where the RPC, Horizon, native and USDC SACs and account WASM hash default to the public testnet values. The network passphrase and the on-ramp pool's network both follow `STELLAR_NETWORK` and are not configured.
+   Every variable above from `SOROBAN_RPC_URL` to `NEXT_PUBLIC_USDC_SAC_ADDRESS` is required on mainnet; there are no mainnet defaults. Staging uses the same names with `STELLAR_NETWORK=testnet`, where the RPC, Horizon, native and USDC SACs default to the public testnet values. The network passphrase and the on-ramp pool's network both follow `STELLAR_NETWORK` and are not configured.
 
    The server refuses to start when:
    - `STELLAR_NETWORK` is missing or not `testnet`/`mainnet`;

@@ -70,9 +70,6 @@ type stubSmartAccount struct {
 	deployFreighterAlreadyDeployed bool
 	deployFreighterErr             error
 
-	connectPhantomResult webapp.ConnectPhantomResult
-	connectPhantomErr    error
-
 	getByCredentialIDAddress  string
 	getByCredentialIDKeyData  string
 	getByCredentialIDDeployed bool
@@ -96,9 +93,6 @@ func (s *stubSmartAccount) QueryFreighter(_ context.Context, _ string) (string, 
 }
 func (s *stubSmartAccount) DeployFreighter(_ context.Context, _ string) (string, bool, error) {
 	return s.deployFreighterAddress, s.deployFreighterAlreadyDeployed, s.deployFreighterErr
-}
-func (s *stubSmartAccount) ConnectPhantom(_ context.Context, _, _, _ string) (webapp.ConnectPhantomResult, error) {
-	return s.connectPhantomResult, s.connectPhantomErr
 }
 
 type stubAccounts struct {
@@ -281,7 +275,6 @@ type stubTransaction struct {
 	submitErr               error
 	gotSubmitDelegatedInput webapp.SubmitDelegatedInput
 	submitDelegatedErr      error
-	submitPhantomErr        error
 	prepareSignResult       webapp.PrepareSignResult
 	prepareSignErr          error
 	setupSendRulesResult    webapp.SetupSendRulesResult
@@ -317,9 +310,6 @@ func (s *stubTransaction) SubmitWebAuthn(_ context.Context, _ webapp.SubmitWebAu
 func (s *stubTransaction) SubmitDelegated(_ context.Context, in webapp.SubmitDelegatedInput) (webapp.SubmitResult, error) {
 	s.gotSubmitDelegatedInput = in
 	return s.submitResult, s.submitDelegatedErr
-}
-func (s *stubTransaction) SubmitPhantom(_ context.Context, _ webapp.SubmitPhantomInput) (webapp.SubmitResult, error) {
-	return s.submitResult, s.submitPhantomErr
 }
 func (s *stubTransaction) PrepareSign(_ context.Context, _ webapp.PrepareSignInput) (webapp.PrepareSignResult, error) {
 	return s.prepareSignResult, s.prepareSignErr

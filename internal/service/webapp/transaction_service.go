@@ -97,7 +97,7 @@ func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextR
 // POST /api/transaction/build-send.
 type BuildSendInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "phantom" | "freighter"
+	SignerType          string // "passkey" | "ed25519" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
 	AssetID             string
 	ContractID          string
@@ -602,80 +602,6 @@ func (s *TransactionService) SubmitDelegated(ctx context.Context, in SubmitDeleg
 	return s.submitWithBundler(ctx, in.TxXdr, entries)
 }
 
-// ── submit (Phantom Ed25519 signer) ──────────────────────────────────────────
-
-// SubmitPhantomInput is the input to SubmitPhantom, ported from
-// POST /api/transaction/submit.
-type SubmitPhantomInput struct {
-	TxXdr            string
-	AuthEntryXdr     string // smart account's own entry; used when AuthEntriesXdr is empty
-	AuthSignatureHex string // raw 64-byte Ed25519 signature, hex, produced by Phantom over PrefixedMessage
-	PublicKeyHex     string // 32-byte raw Ed25519 public key, hex
-	// ContextRuleID: nil (omitted by the client) falls back to whatever's
-	// already embedded in the smart account entry's own signature payload;
-	// if neither is available, SubmitPhantom returns
-	// ErrContextRuleIDRequired instead of silently binding to context rule
-	// 0. See SubmitDelegatedInput.ContextRuleID for the failure mode this
-	// avoids.
-	ContextRuleID              *uint32
-	AuthEntriesXdr             []string
-	SmartAccountAuthEntryIndex int
-}
-
-// SubmitPhantom attaches a Phantom (Solana wallet) Ed25519 signature to the
-// smart account's External(ed25519VerifierAddress, publicKeyHex) auth entry
-// and submits. The signature itself is over a fixed prefixed message (see
-// ed25519-phantom-verifier's AUTH_PREFIX) — this method does not
-// independently re-verify that convention; the on-chain
-// Ed25519PhantomVerifier does, during submitWithBundler's enforcing-mode
-// re-simulation, exactly as SubmitWebAuthn relies on the WebAuthn verifier
-// contract rather than checking the assertion in Go.
-func (s *TransactionService) SubmitPhantom(ctx context.Context, in SubmitPhantomInput) (SubmitResult, error) {
-	if s.ed25519VerifierAddress == "" {
-		return SubmitResult{}, fmt.Errorf("ed25519 verifier address is not configured")
-	}
-
-	entriesB64 := in.AuthEntriesXdr
-	if len(entriesB64) == 0 {
-		entriesB64 = []string{in.AuthEntryXdr}
-	}
-	entries, err := normalizeAuthEntries(entriesB64)
-	if err != nil {
-		return SubmitResult{}, fmt.Errorf("normalize auth entries: %w", err)
-	}
-
-	idx := in.SmartAccountAuthEntryIndex
-	if idx < 0 || idx >= len(entries) {
-		return SubmitResult{}, fmt.Errorf("smart account auth entry index %d out of range", idx)
-	}
-
-	publicKey, err := hex.DecodeString(in.PublicKeyHex)
-	if err != nil {
-		return SubmitResult{}, fmt.Errorf("decode publicKeyHex: %w", err)
-	}
-	sig, err := hex.DecodeString(in.AuthSignatureHex)
-	if err != nil {
-		return SubmitResult{}, fmt.Errorf("decode authSignatureHex: %w", err)
-	}
-
-	contextRuleIDs, err := resolveContextRuleIDs(entries[idx], in.ContextRuleID)
-	if err != nil {
-		return SubmitResult{}, err
-	}
-	authPayload, err := buildEd25519AuthPayload(s.ed25519VerifierAddress, publicKey, sig, contextRuleIDs)
-	if err != nil {
-		return SubmitResult{}, fmt.Errorf("build ed25519 auth payload: %w", err)
-	}
-	if entries[idx].Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || entries[idx].Credentials.Address == nil {
-		return SubmitResult{}, ErrNotAddressCredentials
-	}
-	addrCredsCopy := *entries[idx].Credentials.Address
-	addrCredsCopy.Signature = authPayload
-	entries[idx].Credentials.Address = &addrCredsCopy
-
-	return s.submitWithBundler(ctx, in.TxXdr, entries)
-}
-
 // ── prepare-sign (generic simulate + attach auth) ────────────────────────────
 
 // PrepareSignInput is the input to PrepareSign, ported from
@@ -683,7 +609,7 @@ func (s *TransactionService) SubmitPhantom(ctx context.Context, in SubmitPhantom
 type PrepareSignInput struct {
 	SmartAccountAddress string
 	UnsignedTxXdr       string
-	SignerType          string // "passkey" | "phantom" | "freighter"
+	SignerType          string // "passkey" | "ed25519" | "freighter"
 	SignerG             string // required if SignerType == "freighter"
 	// KeyDataHex identifies which passkey is about to sign — see
 	// BuildSendInput.KeyDataHex's doc comment.
@@ -722,7 +648,7 @@ func validatePrepareSignSignerAuthorization(rule ContextRuleSummary, signerType,
 		return fmt.Errorf("%w: signerG must be the user's G-address, not the bundler fee-payer", ErrPrepareSignValidation)
 	}
 	switch signerType {
-	case "passkey", "phantom":
+	case "passkey", "ed25519":
 		if !ruleHasExternalSigner(rule) {
 			return fmt.Errorf("%w: default context rule has no External passkey signer configured; run setup-send-rules or setup-swap-rules first", ErrPrepareSignSignerMismatch)
 		}
@@ -902,7 +828,7 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 	submitMethod := "webauthn"
 	if in.SignerType == "freighter" {
 		submitMethod = "delegated"
-	} else if in.SignerType == "phantom" {
+	} else if in.SignerType == "ed25519" {
 		submitMethod = "bundler-delegated"
 	}
 
@@ -1123,17 +1049,16 @@ func buildDelegatedAuthPayload(gAddress string, contextRuleIDs []uint32) (xdr.Sc
 	), nil
 }
 
-// ── ed25519 (Phantom) auth payload ───────────────────────────────────────────
+// ── ed25519 auth payload ─────────────────────────────────────────────────────
 
 // buildEd25519AuthPayload builds the AuthPayload ScVal for an
-// External(ed25519VerifierAddress, publicKey) Phantom signer:
+// External(ed25519VerifierAddress, publicKey) signer:
 // AuthPayload { context_rule_ids, signers: Map<Signer::External(verifier,
-// publicKey), Bytes(rawSignature)> }. The 64-byte rawSignature is exactly
-// what Phantom's signMessage produced over the fixed prefixed message
+// publicKey), Bytes(rawSignature)> }. The 64-byte rawSignature is the
+// ed25519 signature over the fixed prefixed message
 // ("Stellar Smart Account Auth:\n" + lowercase_hex(auth_digest)) —
-// verification of that convention happens on-chain in the
-// Ed25519PhantomVerifier contract during the enforcing-mode re-simulation in
-// submitWithBundler, mirroring how SubmitWebAuthn defers to the WebAuthn
+// verification of that convention happens on-chain in the factory's Ed25519
+// verifier contract, mirroring how SubmitWebAuthn defers to the WebAuthn
 // verifier rather than checking the assertion here.
 func buildEd25519AuthPayload(verifierAddress string, publicKey, rawSignature []byte, contextRuleIDs []uint32) (xdr.ScVal, error) {
 	verifierVal, err := scAddress(verifierAddress)

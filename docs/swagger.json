@@ -1884,87 +1884,6 @@
                 }
             }
         },
-        "/api/smart-account": {
-            "get": {
-                "description": "Returns the ed25519 verifier and counter contract addresses the Phantom demo flow uses.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "smart-account"
-                ],
-                "summary": "Get the counter-demo contract addresses",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "default": "testnet",
-                        "description": "Network",
-                        "name": "network",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Derives a G-address from a Phantom Ed25519 public key and deploys (or idempotently returns) the counter-demo smart account WASM with that key as its External signer. No production UI calls this — kept for API parity with the reference demo.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "smart-account"
-                ],
-                "summary": "Deploy the demo counter-contract smart account for a Phantom (Solana) signer",
-                "parameters": [
-                    {
-                        "description": "Phantom Ed25519 public key",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.connectPhantomRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/smart-account/balances": {
             "get": {
                 "description": "Fetches balances for every asset in the configured catalog. Zero balances are omitted unless all=1.",
@@ -2656,47 +2575,6 @@
                         "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/internal_handler.apiErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/transaction/submit": {
-            "post": {
-                "description": "Attaches the client's Phantom (Solana wallet) Ed25519 signature to the built transaction's auth entry and submits it to the network.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transaction"
-                ],
-                "summary": "Submit a Phantom-signed transaction",
-                "parameters": [
-                    {
-                        "description": "Signed transaction and auth entry",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.submitPhantomRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
                         }
                     }
                 }
@@ -6187,20 +6065,6 @@
                 }
             }
         },
-        "internal_handler_webapp.connectPhantomRequest": {
-            "type": "object",
-            "required": [
-                "publicKeyHex"
-            ],
-            "properties": {
-                "network": {
-                    "type": "string"
-                },
-                "publicKeyHex": {
-                    "type": "string"
-                }
-            }
-        },
         "internal_handler_webapp.counterResponse": {
             "type": "object",
             "properties": {
@@ -6874,43 +6738,6 @@
                     "type": "integer"
                 },
                 "smartAccountAuthEntryXdr": {
-                    "type": "string"
-                },
-                "txXdr": {
-                    "type": "string"
-                }
-            }
-        },
-        "internal_handler_webapp.submitPhantomRequest": {
-            "type": "object",
-            "required": [
-                "authSignatureHex",
-                "publicKeyHex",
-                "txXdr"
-            ],
-            "properties": {
-                "authEntriesXdr": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "authEntryXdr": {
-                    "type": "string"
-                },
-                "authSignatureHex": {
-                    "type": "string"
-                },
-                "contextRuleId": {
-                    "type": "integer"
-                },
-                "network": {
-                    "type": "string"
-                },
-                "prefixedMessage": {
-                    "type": "string"
-                },
-                "publicKeyHex": {
                     "type": "string"
                 },
                 "txXdr": {

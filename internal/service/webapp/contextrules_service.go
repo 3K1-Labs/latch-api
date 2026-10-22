@@ -212,7 +212,7 @@ func (s *ContextRulesService) ListContextRules(ctx context.Context, smartAccount
 }
 
 // ruleHasExternalSigner reports whether rule has any External (passkey/
-// phantom) signer. Ports lib/soroban-context-rules.ts's ruleHasExternalSigner().
+// ed25519) signer. Ports lib/soroban-context-rules.ts's ruleHasExternalSigner().
 func ruleHasExternalSigner(rule ContextRuleSummary) bool {
 	for _, sg := range rule.Signers {
 		if sg.Kind == "External" {

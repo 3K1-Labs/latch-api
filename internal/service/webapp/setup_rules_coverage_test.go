@@ -12,17 +12,17 @@ import (
 func TestBuildSignersVecForSetup(t *testing.T) {
 	verifier := testContractAddress(t)
 
-	t.Run("phantom", func(t *testing.T) {
-		val, err := buildSignersVecForSetup("phantom", verifier, strings.Repeat("ab", 32), "", "")
+	t.Run("ed25519", func(t *testing.T) {
+		val, err := buildSignersVecForSetup("ed25519", verifier, strings.Repeat("ab", 32), "", "")
 		require.NoError(t, err)
 		assert.Equal(t, xdr.ScValTypeScvVec, val.Type)
 	})
-	t.Run("phantom missing publicKeyHex", func(t *testing.T) {
-		_, err := buildSignersVecForSetup("phantom", verifier, "", "", "")
+	t.Run("ed25519 missing publicKeyHex", func(t *testing.T) {
+		_, err := buildSignersVecForSetup("ed25519", verifier, "", "", "")
 		require.Error(t, err)
 	})
-	t.Run("phantom wrong length publicKeyHex", func(t *testing.T) {
-		_, err := buildSignersVecForSetup("phantom", verifier, "aabb", "", "")
+	t.Run("ed25519 wrong length publicKeyHex", func(t *testing.T) {
+		_, err := buildSignersVecForSetup("ed25519", verifier, "aabb", "", "")
 		require.Error(t, err)
 	})
 	t.Run("passkey", func(t *testing.T) {
@@ -92,10 +92,10 @@ func TestRuleHasAnyDelegatedSigner(t *testing.T) {
 	assert.False(t, ruleHasAnyDelegatedSigner(ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "External"}}}))
 }
 
-func TestValidateContextRuleForSignerType_PhantomBundlerOnlyDelegated(t *testing.T) {
+func TestValidateContextRuleForSignerType_Ed25519BundlerOnlyDelegated(t *testing.T) {
 	bundlerG := testGAddress
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "Delegated", GAddress: bundlerG}}}
-	err := validateContextRuleForSignerType(rule, true, "phantom", "", bundlerG)
+	err := validateContextRuleForSignerType(rule, true, "ed25519", "", bundlerG)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSwapSignerMismatch)
 }
