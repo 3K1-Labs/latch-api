@@ -77,6 +77,7 @@ type confirmAddBackupSignerRequest struct {
 // @Router       /v1/smart-account/backup-signer/confirm-add [post]
 func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
 	var req confirmAddBackupSignerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -115,7 +116,7 @@ func (h *BackupSignerHandler) ConfirmAddSigner(c *gin.Context) {
 		"signerId":            signerID,
 		"network":             string(network),
 	})
-	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, scope, service.NotificationRecord{
 		Type: "signer_added", Title: "Backup signer added", Body: "A backup passkey signer was added to your wallet.",
 	}); err != nil {
 		slog.Error("record backup signer added notification", "err", err)
@@ -153,6 +154,7 @@ type confirmRemoveBackupSignerRequest struct {
 // @Router       /v1/smart-account/backup-signer/confirm-remove [post]
 func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
 	var req confirmRemoveBackupSignerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -189,7 +191,7 @@ func (h *BackupSignerHandler) ConfirmRemoveSigner(c *gin.Context) {
 		"signerId":            *req.SignerID,
 		"network":             string(network),
 	})
-	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, scope, service.NotificationRecord{
 		Type: "signer_removed", Title: "Backup signer removed", Body: "A backup passkey signer was removed from your wallet.",
 	}); err != nil {
 		slog.Error("record backup signer removed notification", "err", err)

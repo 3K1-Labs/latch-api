@@ -93,6 +93,15 @@ func TestNotificationUnreadCount_ServiceError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+func TestNotificationUnreadCount_InvalidUserID(t *testing.T) {
+	r := notificationRouter(newNotificationHandler(&stubNotification{unreadErr: service.ErrValidation}))
+
+	w := httptest.NewRecorder()
+	req := withUserID(httptest.NewRequest(http.MethodGet, "/notifications/unread-count", nil), "uid")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestNotificationUnreadCount_Success(t *testing.T) {
 	r := notificationRouter(newNotificationHandler(&stubNotification{unreadCount: 4}))
 

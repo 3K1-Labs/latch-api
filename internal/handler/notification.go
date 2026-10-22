@@ -41,6 +41,7 @@ const maxNotificationPageSize = 50
 // @Router       /v1/notifications [get]
 func (h *NotificationHandler) List(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
 	limit := maxNotificationPageSize
 	if raw := c.Query("limit"); raw != "" {
@@ -49,7 +50,7 @@ func (h *NotificationHandler) List(c *gin.Context) {
 		}
 	}
 
-	notifications, nextCursor, err := h.notifSvc.List(c.Request.Context(), userID, c.Query("cursor"), limit)
+	notifications, nextCursor, err := h.notifSvc.List(c.Request.Context(), userID, scope, c.Query("cursor"), limit)
 	if err != nil {
 		if errors.Is(err, service.ErrValidation) {
 			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid cursor")
@@ -60,8 +61,12 @@ func (h *NotificationHandler) List(c *gin.Context) {
 		return
 	}
 
-	unread, err := h.notifSvc.UnreadCount(c.Request.Context(), userID)
+	unread, err := h.notifSvc.UnreadCount(c.Request.Context(), userID, scope)
 	if err != nil {
+		if errors.Is(err, service.ErrValidation) {
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid subject")
+			return
+		}
 		slog.Error("count unread notifications", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -98,9 +103,14 @@ func (h *NotificationHandler) List(c *gin.Context) {
 // @Router       /v1/notifications/unread-count [get]
 func (h *NotificationHandler) UnreadCount(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
-	unread, err := h.notifSvc.UnreadCount(c.Request.Context(), userID)
+	unread, err := h.notifSvc.UnreadCount(c.Request.Context(), userID, scope)
 	if err != nil {
+		if errors.Is(err, service.ErrValidation) {
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid subject")
+			return
+		}
 		slog.Error("count unread notifications", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -122,8 +132,9 @@ func (h *NotificationHandler) UnreadCount(c *gin.Context) {
 // @Router       /v1/notifications/{id}/read [post]
 func (h *NotificationHandler) MarkRead(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
-	if err := h.notifSvc.MarkRead(c.Request.Context(), userID, c.Param("id")); err != nil {
+	if err := h.notifSvc.MarkRead(c.Request.Context(), userID, scope, c.Param("id")); err != nil {
 		switch {
 		case errors.Is(err, service.ErrNotificationNotFound):
 			httpx.Fail(c, http.StatusNotFound, httpx.ErrNotFound, "notification not found")
@@ -150,8 +161,13 @@ func (h *NotificationHandler) MarkRead(c *gin.Context) {
 // @Router       /v1/notifications/read-all [post]
 func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
-	if err := h.notifSvc.MarkAllRead(c.Request.Context(), userID); err != nil {
+	if err := h.notifSvc.MarkAllRead(c.Request.Context(), userID, scope); err != nil {
+		if errors.Is(err, service.ErrValidation) {
+			httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid subject")
+			return
+		}
 		slog.Error("mark all notifications read", "userID", userID, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return

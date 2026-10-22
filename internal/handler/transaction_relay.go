@@ -108,6 +108,7 @@ type submitTransactionRequest struct {
 // @Router       /v1/transaction/submit [post]
 func (h *TransactionRelayHandler) Submit(c *gin.Context) {
 	userID := middleware.UserIDFromContext(c.Request.Context())
+	scope := middleware.ScopeFromContext(c.Request.Context())
 
 	var req submitTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -170,7 +171,7 @@ func (h *TransactionRelayHandler) Submit(c *gin.Context) {
 		"status":  result.Status,
 		"network": string(network),
 	})
-	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, scope, service.NotificationRecord{
 		Type: "transaction_relayed", Title: "Transaction sent", Body: "Your transaction was submitted.",
 	}); err != nil {
 		slog.Error("record transaction relayed notification", "userID", userID, "err", err)

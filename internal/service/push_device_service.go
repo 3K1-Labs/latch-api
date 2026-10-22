@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -20,19 +21,32 @@ func NewPushDeviceService(q db.Querier) *PushDeviceService {
 	return &PushDeviceService{q: q}
 }
 
-func (s *PushDeviceService) Register(ctx context.Context, userID, token, platform string) error {
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		return ErrValidation
-	}
+// scope distinguishes the two subjects a caller's JWT sub can be: a users.id
+// UUID (email-scope) or a wallet address (ScopeWallet — SEP-10-style
+// sign-in, no users row). See WalletAuthService.IssueWalletTokenPair.
+func (s *PushDeviceService) Register(ctx context.Context, userID, scope, token, platform string) error {
 	if token == "" || len(token) > 512 {
 		return ErrValidation
 	}
 	if platform == "" {
 		platform = "expo"
 	}
+	if scope == ScopeWallet {
+		if err := s.q.UpsertPushDeviceForWallet(ctx, db.UpsertPushDeviceForWalletParams{
+			WalletAddress: sql.NullString{String: userID, Valid: true},
+			PushToken:     token,
+			Platform:      platform,
+		}); err != nil {
+			return fmt.Errorf("upsert push device: %w", err)
+		}
+		return nil
+	}
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return ErrValidation
+	}
 	if err := s.q.UpsertPushDevice(ctx, db.UpsertPushDeviceParams{
-		UserID:    uid,
+		UserID:    uuid.NullUUID{UUID: uid, Valid: true},
 		PushToken: token,
 		Platform:  platform,
 	}); err != nil {
@@ -41,16 +55,25 @@ func (s *PushDeviceService) Register(ctx context.Context, userID, token, platfor
 	return nil
 }
 
-func (s *PushDeviceService) Delete(ctx context.Context, userID, token string) error {
+func (s *PushDeviceService) Delete(ctx context.Context, userID, scope, token string) error {
+	if token == "" {
+		return ErrValidation
+	}
+	if scope == ScopeWallet {
+		if err := s.q.DeletePushDeviceForWallet(ctx, db.DeletePushDeviceForWalletParams{
+			WalletAddress: sql.NullString{String: userID, Valid: true},
+			PushToken:     token,
+		}); err != nil {
+			return fmt.Errorf("delete push device: %w", err)
+		}
+		return nil
+	}
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return ErrValidation
 	}
-	if token == "" {
-		return ErrValidation
-	}
 	if err := s.q.DeletePushDevice(ctx, db.DeletePushDeviceParams{
-		UserID:    uid,
+		UserID:    uuid.NullUUID{UUID: uid, Valid: true},
 		PushToken: token,
 	}); err != nil {
 		return fmt.Errorf("delete push device: %w", err)
@@ -58,12 +81,19 @@ func (s *PushDeviceService) Delete(ctx context.Context, userID, token string) er
 	return nil
 }
 
-func (s *PushDeviceService) TokensForUser(ctx context.Context, userID string) ([]string, error) {
+func (s *PushDeviceService) TokensForUser(ctx context.Context, userID, scope string) ([]string, error) {
+	if scope == ScopeWallet {
+		tokens, err := s.q.ListPushTokensForWallet(ctx, sql.NullString{String: userID, Valid: true})
+		if err != nil {
+			return nil, fmt.Errorf("list push tokens for user: %w", err)
+		}
+		return tokens, nil
+	}
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, ErrValidation
 	}
-	tokens, err := s.q.ListPushTokensForUser(ctx, uid)
+	tokens, err := s.q.ListPushTokensForUser(ctx, uuid.NullUUID{UUID: uid, Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("list push tokens for user: %w", err)
 	}

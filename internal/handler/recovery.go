@@ -82,7 +82,9 @@ func (h *RecoveryHandler) Initiate(c *gin.Context) {
 		}
 		h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRecoveryInitiated), c.ClientIP(), c.Request.UserAgent(), nil)
 		if userID != "" {
-			if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+			// userID here is always a users.id UUID (resolved from the email
+			// above, never a JWT subject), so there is no wallet-scope case.
+			if err := h.notifSvc.Notify(c.Request.Context(), userID, "", service.NotificationRecord{
 				Type: "recovery_initiated", Title: "Wallet recovery started", Body: "A recovery was started for your wallet. If this wasn't you, secure your account.",
 			}); err != nil {
 				slog.Error("record recovery initiated notification", "err", err)
@@ -182,7 +184,9 @@ func (h *RecoveryHandler) GetBlob(c *gin.Context) {
 	}
 
 	h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionRecoveryCompleted), c.ClientIP(), c.Request.UserAgent(), nil)
-	if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+	// userID here comes from a recovery-scope token (validateRecoveryToken),
+	// always a users.id UUID — there is no wallet-scope case for recovery.
+	if err := h.notifSvc.Notify(c.Request.Context(), userID, "", service.NotificationRecord{
 		Type: "recovery_completed", Title: "Wallet recovery completed", Body: "Your wallet backup was recovered.",
 	}); err != nil {
 		slog.Error("record recovery completed notification", "err", err)

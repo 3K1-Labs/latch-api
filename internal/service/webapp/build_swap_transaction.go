@@ -282,7 +282,7 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 	}
 	var swapChainVal xdr.ScVal
 	if err := xdr.SafeUnmarshalBase64(in.SwapChainXdr, &swapChainVal); err != nil {
-		return BuildSwapResult{}, fmt.Errorf("%w: invalid swapChainXdr", ErrSwapValidation)
+		return BuildSwapResult{}, fmt.Errorf("%w: invalid swapChainXdr (len=%d): %v", ErrSwapValidation, len(in.SwapChainXdr), err)
 	}
 	smartAccountVal, err := scAddress(in.SmartAccountAddress)
 	if err != nil {
