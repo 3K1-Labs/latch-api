@@ -157,7 +157,10 @@ Implemented every route Pass A deferred except `build-sign-demo` (dev-only, no c
 `POST /api/smart-account/setup-swap-rules`, `POST /api/transaction/build` (counter demo),
 `POST /api/transaction/build-delegated` (counter demo), `POST /api/transaction/build-swap`,
 plus the two routes Phase 2 explicitly scoped out as "legacy Ed25519/delegated factories":
-`GET/POST /api/smart-account/freighter`.
+`GET/POST /api/smart-account/freighter`, since renamed `/api/smart-account/delegated`. The
+`freighter` signer type is now `delegated` too: it is a `Delegated(gAddress)` signer, whichever
+wallet holds the key. The salt value `"freighter-delegated-v1"` was kept, since it fixes every
+existing delegated account's address.
 
 Pass B also ported the Phantom wallet routes (`POST /api/smart-account` connect, `GET
 /api/smart-account` config, `POST /api/transaction/submit`). They were later removed: Phantom
@@ -189,7 +192,7 @@ from two new sentinel errors (`ErrSwapSignerMismatch`, `ErrSwapValidation`) via
 `buildSwapErrorResponse`, matching the extension's documented expectation of a `409
 SIGNER_MISMATCH` + `suggestedAction: "reconfigure_swap_rule"` shape.
 
-`GET/POST /api/smart-account/freighter` (`internal/service/webapp/freighter_service.go`) reuses
+`GET/POST /api/smart-account/delegated` (`internal/service/webapp/delegated_service.go`) reuses
 `SmartAccountService.PredictAddress`/`Deploy` generically (both already took an arbitrary
 `params xdr.ScVal`) with a new `Delegated(gAddress)`-signer init-params builder and
 `"freighter-delegated-v1"` salt derivation; also ports the reference route's testnet-friendbot

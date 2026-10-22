@@ -929,7 +929,7 @@ func (s *MultisigProposalService) ApproveDelegatedFinish(ctx context.Context, us
 		return "", ErrMultisigApprovalNotStarted
 	}
 
-	if err := verifyDelegatedFreighterSignature(templateXdr, signedAuthEntryBase64, signerAddress, s.networkPassphrase); err != nil {
+	if err := verifyDelegatedSignature(templateXdr, signedAuthEntryBase64, signerAddress, s.networkPassphrase); err != nil {
 		return "", err
 	}
 

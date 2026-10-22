@@ -79,14 +79,14 @@ func TestBuildSend_InvalidBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestBuildSend_FreighterMissingSignerG(t *testing.T) {
+func TestBuildSend_DelegatedMissingSignerG(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
 	req := httptest.NewRequest(http.MethodPost, "/transaction/build-send", postJSONBody(map[string]any{
 		"smartAccountAddress": "CADDRESS",
-		"signerType":          "freighter",
+		"signerType":          "delegated",
 		"assetId":             "native",
 		"recipient":           "GRECIPIENT",
 		"amount":              "1.5",
@@ -476,7 +476,7 @@ func TestPrepareSign_InvalidBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
+func TestPrepareSign_DelegatedMissingSignerG(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
@@ -484,7 +484,7 @@ func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
 		"smartAccountAddress": "CADDRESS",
 		"unsignedTxXdr":       "AAAAunsigned==",
-		"signerType":          "freighter",
+		"signerType":          "delegated",
 	}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

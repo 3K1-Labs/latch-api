@@ -34,13 +34,13 @@ func TestBuildSignersVecForSetup(t *testing.T) {
 		_, err := buildSignersVecForSetup("passkey", verifier, "", "", "")
 		require.Error(t, err)
 	})
-	t.Run("freighter", func(t *testing.T) {
-		val, err := buildSignersVecForSetup("freighter", "", "", "", testGAddress)
+	t.Run("delegated", func(t *testing.T) {
+		val, err := buildSignersVecForSetup("delegated", "", "", "", testGAddress)
 		require.NoError(t, err)
 		assert.Equal(t, xdr.ScValTypeScvVec, val.Type)
 	})
-	t.Run("freighter missing gAddress", func(t *testing.T) {
-		_, err := buildSignersVecForSetup("freighter", "", "", "", "")
+	t.Run("delegated missing gAddress", func(t *testing.T) {
+		_, err := buildSignersVecForSetup("delegated", "", "", "", "")
 		require.Error(t, err)
 	})
 	t.Run("unknown signer type", func(t *testing.T) {
@@ -105,10 +105,10 @@ func TestValidateContextRuleForSignerType_NoRuleIsNoop(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateContextRuleForSignerType_FreighterDelegatedMismatch(t *testing.T) {
+func TestValidateContextRuleForSignerType_DelegatedDelegatedMismatch(t *testing.T) {
 	otherG := "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI"
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "Delegated", GAddress: otherG}}}
-	err := validateContextRuleForSignerType(rule, true, "freighter", testGAddress, "GBUNDLER")
+	err := validateContextRuleForSignerType(rule, true, "delegated", testGAddress, "GBUNDLER")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSwapSignerMismatch)
 }

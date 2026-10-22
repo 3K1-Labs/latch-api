@@ -1300,7 +1300,7 @@ const docTemplate = `{
         },
         "/api/multisig/proposals/{id}/approve/delegated/begin": {
             "post": {
-                "description": "Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger to sign against.",
+                "description": "Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. an external wallet), plus the auth digest and validUntilLedger to sign against.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1994,7 +1994,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/smart-account/freighter": {
+        "/api/smart-account/delegated": {
             "get": {
                 "description": "Pure computation over a client-supplied G-address (no session, no persistence). Returns the deterministic smart account address and whether it's already deployed.",
                 "produces": [
@@ -2003,7 +2003,7 @@ const docTemplate = `{
                 "tags": [
                     "smart-account"
                 ],
-                "summary": "Derive a smart account address from a Freighter/mnemonic G-address",
+                "summary": "Derive a smart account address from a delegated G-address",
                 "parameters": [
                     {
                         "type": "string",
@@ -2053,15 +2053,15 @@ const docTemplate = `{
                 "tags": [
                     "smart-account"
                 ],
-                "summary": "Deploy a smart account for a Freighter/mnemonic G-address",
+                "summary": "Deploy a smart account for a delegated G-address",
                 "parameters": [
                     {
-                        "description": "Freighter G-address",
+                        "description": "Delegated G-address",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.deployFreighterSmartAccountRequest"
+                            "$ref": "#/definitions/internal_handler_webapp.deployDelegatedSmartAccountRequest"
                         }
                     }
                 ],
@@ -2314,7 +2314,7 @@ const docTemplate = `{
         },
         "/api/transaction/build-delegated": {
             "post": {
-                "description": "Like build, but always prepares the smart-account entry for a Freighter/mnemonic G-address signature. No production UI calls this — kept for API parity.",
+                "description": "Like build, but always prepares the smart-account entry for a delegated G-address signature. No production UI calls this — kept for API parity.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2588,7 +2588,7 @@ const docTemplate = `{
         },
         "/api/transaction/submit-delegated": {
             "post": {
-                "description": "Attaches a native G-address signature (Freighter or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.",
+                "description": "Attaches a native G-address signature (an external wallet or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2598,7 +2598,7 @@ const docTemplate = `{
                 "tags": [
                     "transaction"
                 ],
-                "summary": "Submit a Freighter/mnemonic-delegated-signed transaction",
+                "summary": "Submit a delegated-signed transaction",
                 "parameters": [
                     {
                         "description": "Signed transaction and auth entries",
@@ -4509,7 +4509,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deploys (or idempotently returns) the deterministic smart account whose\nsigner is a classic Stellar account — the Freighter / external-wallet path.\nTestnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.",
+                "description": "Deploys (or idempotently returns) the deterministic smart account whose\nsigner is a classic Stellar account — the delegated (external-wallet) path.\nTestnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6228,7 +6228,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_webapp.deployFreighterSmartAccountRequest": {
+        "internal_handler_webapp.deployDelegatedSmartAccountRequest": {
             "type": "object",
             "required": [
                 "gAddress"

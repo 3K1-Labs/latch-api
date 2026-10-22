@@ -13,18 +13,18 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
-// freighterRawSignatureLen is the length of a raw Ed25519 signature, as
-// returned by a Freighter-style extension signing a delegated-approval
+// delegatedRawSignatureLen is the length of a raw Ed25519 signature, as
+// returned by a external wallet signing a delegated-approval
 // preimage directly (as opposed to returning a full signed
 // SorobanAuthorizationEntry XDR).
-const freighterRawSignatureLen = 64
+const delegatedRawSignatureLen = 64
 
-// freighterFullEntryMinLen is a conservative lower bound on the byte length
+// delegatedFullEntryMinLen is a conservative lower bound on the byte length
 // of a fully-signed SorobanAuthorizationEntry XDR — used only to
 // distinguish "this is a raw 64-byte signature" from "this is a full signed
 // entry" in the delegated-approval finish step, mirroring
 // lib/delegated-check-auth-entry.ts's >128-byte heuristic.
-const freighterFullEntryMinLen = 128
+const delegatedFullEntryMinLen = 128
 
 var (
 	// ErrDelegatedTemplateMismatch is returned when a delegated approval's
@@ -133,24 +133,24 @@ func buildDelegatedCheckAuthTemplate(networkPassphrase, smartAccountAddress, sig
 	}, nil
 }
 
-// verifyDelegatedFreighterSignature checks that signedAuthEntryBase64 is a
+// verifyDelegatedSignature checks that signedAuthEntryBase64 is a
 // valid approval of entryTemplateXdrBase64 by signerAddress. If
-// signedAuthEntryBase64 decodes to more than freighterFullEntryMinLen
+// signedAuthEntryBase64 decodes to more than delegatedFullEntryMinLen
 // bytes, it's treated as an already-complete signed entry and trusted
 // as-is (no separate raw-signature check is possible on a fully assembled
 // entry without re-deriving what it should contain, which
-// applyDelegatedFreighterSignature does not need to do either — it simply
+// applyDelegatedSignature does not need to do either — it simply
 // returns the entry unchanged). Ports
-// lib/delegated-check-auth-entry.ts's verifyDelegatedFreighterSignature().
-func verifyDelegatedFreighterSignature(entryTemplateXdrBase64, signedAuthEntryBase64, signerAddress, networkPassphrase string) error {
+// lib/delegated-check-auth-entry.ts's verifyDelegatedSignature().
+func verifyDelegatedSignature(entryTemplateXdrBase64, signedAuthEntryBase64, signerAddress, networkPassphrase string) error {
 	signed, err := base64.StdEncoding.DecodeString(signedAuthEntryBase64)
 	if err != nil {
 		return fmt.Errorf("decode signed auth entry: %w", err)
 	}
-	if len(signed) > freighterFullEntryMinLen {
+	if len(signed) > delegatedFullEntryMinLen {
 		return nil
 	}
-	if len(signed) != freighterRawSignatureLen {
+	if len(signed) != delegatedRawSignatureLen {
 		return fmt.Errorf("%w: got %d bytes", ErrDelegatedSignatureLength, len(signed))
 	}
 
@@ -170,28 +170,28 @@ func verifyDelegatedFreighterSignature(entryTemplateXdrBase64, signedAuthEntryBa
 	return nil
 }
 
-// applyDelegatedFreighterSignature injects signedAuthEntryBase64 into
+// applyDelegatedSignature injects signedAuthEntryBase64 into
 // entryTemplateXdrBase64's signature field. If signedAuthEntryBase64 is
-// already a full signed entry (see verifyDelegatedFreighterSignature's
+// already a full signed entry (see verifyDelegatedSignature's
 // length heuristic), it's decoded and returned as-is. Otherwise it's
 // treated as a raw 64-byte Ed25519 signature and wrapped in the
 // {public_key, signature} struct the classic-account signature scheme
 // expects. Ports lib/delegated-check-auth-entry.ts's
-// applyDelegatedFreighterSignature().
-func applyDelegatedFreighterSignature(entryTemplateXdrBase64, signedAuthEntryBase64, signerAddress string) (xdr.SorobanAuthorizationEntry, error) {
+// applyDelegatedSignature().
+func applyDelegatedSignature(entryTemplateXdrBase64, signedAuthEntryBase64, signerAddress string) (xdr.SorobanAuthorizationEntry, error) {
 	signed, err := base64.StdEncoding.DecodeString(signedAuthEntryBase64)
 	if err != nil {
 		return xdr.SorobanAuthorizationEntry{}, fmt.Errorf("decode signed auth entry: %w", err)
 	}
 
-	if len(signed) > freighterFullEntryMinLen {
+	if len(signed) > delegatedFullEntryMinLen {
 		var fullEntry xdr.SorobanAuthorizationEntry
 		if err := fullEntry.UnmarshalBinary(signed); err != nil {
 			return xdr.SorobanAuthorizationEntry{}, fmt.Errorf("decode full signed entry: %w", err)
 		}
 		return fullEntry, nil
 	}
-	if len(signed) != freighterRawSignatureLen {
+	if len(signed) != delegatedRawSignatureLen {
 		return xdr.SorobanAuthorizationEntry{}, fmt.Errorf("%w: got %d bytes", ErrDelegatedSignatureLength, len(signed))
 	}
 

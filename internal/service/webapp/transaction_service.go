@@ -46,7 +46,7 @@ type BuildAuthTransactionResult struct {
 	SimulationResultXdr                   string
 	SubmitMethod                          string
 	// SmartAccountAuthEntryXdr/GAddressPreimageXdr/GAddressEntryTemplateXdr are
-	// populated only for a freighter signer (plain or bundler-delegated-auth
+	// populated only for a delegated signer (plain or bundler-delegated-auth
 	// mode): the smart account's own entry after its signature is rewritten to
 	// a Delegated(G) AuthPayload, and the unsigned native G-address
 	// __check_auth entry template (+ its raw signing preimage) that signer
@@ -97,8 +97,8 @@ func NewTransactionService(soroban sorobanRPC, bundler *BundlerService, contextR
 // POST /api/transaction/build-send.
 type BuildSendInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "ed25519" | "freighter"
-	SignerG             string // required if SignerType == "freighter"
+	SignerType          string // "passkey" | "ed25519" | "delegated"
+	SignerG             string // required if SignerType == "delegated"
 	AssetID             string
 	ContractID          string
 	Recipient           string
@@ -244,7 +244,7 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 	validUntilLedger := setAddressCredentialExpiration(entries, sim.LatestLedger, 60)
 
 	var signerGStr string
-	if in.SignerType == "freighter" {
+	if in.SignerType == "delegated" {
 		signerGStr = in.SignerG
 	}
 
@@ -357,9 +357,9 @@ func (s *TransactionService) BuildSend(ctx context.Context, in BuildSendInput, c
 
 	// Matches buildAuthTransaction()'s submitMethod ternary exactly: only the
 	// bundler-delegated-auth setup-tx path (not applicable to a plain send)
-	// or a freighter signer change this from the "webauthn" default.
+	// or a delegated signer change this from the "webauthn" default.
 	submitMethod := "webauthn"
-	if in.SignerType == "freighter" {
+	if in.SignerType == "delegated" {
 		submitMethod = "delegated"
 	}
 
@@ -492,7 +492,7 @@ func (s *TransactionService) SubmitAuthEntries(ctx context.Context, txXdrB64 str
 	return s.submitWithBundler(ctx, txXdrB64, entries)
 }
 
-// ── submit-delegated (Freighter / mnemonic G-address signer) ────────────────
+// ── submit-delegated (delegated G-address signer) ────────────────
 
 // SubmitDelegatedInput is the input to SubmitDelegated, ported from
 // POST /api/transaction/submit-delegated.
@@ -510,7 +510,7 @@ type SubmitDelegatedInput struct {
 	GAddressEntryTemplateXdr string
 	// SignedAuthEntryBase64 is either a raw 64-byte Ed25519 signature over
 	// the template's preimage hash, or a fully assembled signed entry XDR
-	// (see applyDelegatedFreighterSignature's length heuristic).
+	// (see applyDelegatedSignature's length heuristic).
 	SignedAuthEntryBase64 string
 	SignerAddress         string
 	// ContextRuleID matches submit-webauthn's own field: not part of the
@@ -529,7 +529,7 @@ type SubmitDelegatedInput struct {
 	DelegatedGAuthEntrySynthesized bool
 }
 
-// SubmitDelegated attaches a Freighter/mnemonic G-address signature to the
+// SubmitDelegated attaches a delegated G-address signature to the
 // smart account's auth entry (AuthPayload{Delegated(G): <unused>}) and to
 // the separate delegated __check_auth entry that G-address's native
 // signature actually satisfies (see do_check_auth's authenticate(): a
@@ -565,7 +565,7 @@ func (s *TransactionService) SubmitDelegated(ctx context.Context, in SubmitDeleg
 		return SubmitResult{}, err
 	}
 
-	signedDelegated, err := applyDelegatedFreighterSignature(in.GAddressEntryTemplateXdr, in.SignedAuthEntryBase64, in.SignerAddress)
+	signedDelegated, err := applyDelegatedSignature(in.GAddressEntryTemplateXdr, in.SignedAuthEntryBase64, in.SignerAddress)
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("apply delegated signature: %w", err)
 	}
@@ -609,8 +609,8 @@ func (s *TransactionService) SubmitDelegated(ctx context.Context, in SubmitDeleg
 type PrepareSignInput struct {
 	SmartAccountAddress string
 	UnsignedTxXdr       string
-	SignerType          string // "passkey" | "ed25519" | "freighter"
-	SignerG             string // required if SignerType == "freighter"
+	SignerType          string // "passkey" | "ed25519" | "delegated"
+	SignerG             string // required if SignerType == "delegated"
 	// KeyDataHex identifies which passkey is about to sign — see
 	// BuildSendInput.KeyDataHex's doc comment.
 	KeyDataHex string
@@ -652,9 +652,9 @@ func validatePrepareSignSignerAuthorization(rule ContextRuleSummary, signerType,
 		if !ruleHasExternalSigner(rule) {
 			return fmt.Errorf("%w: default context rule has no External passkey signer configured; run setup-send-rules or setup-swap-rules first", ErrPrepareSignSignerMismatch)
 		}
-	case "freighter":
+	case "delegated":
 		if !ruleHasDelegatedSignerG(rule, signerG) {
-			return fmt.Errorf("%w: default context rule does not authorize signerG %s; run setup-send-rules or setup-swap-rules with your Freighter G-address", ErrPrepareSignSignerMismatch, signerG)
+			return fmt.Errorf("%w: default context rule does not authorize signerG %s; run setup-send-rules or setup-swap-rules with your delegated G-address", ErrPrepareSignSignerMismatch, signerG)
 		}
 	}
 	return nil
@@ -666,7 +666,7 @@ func validatePrepareSignSignerAuthorization(rule ContextRuleSummary, signerType,
 // rebuild the operation or change its source account — the caller's XDR is
 // simulated as given — but extracts and classifies auth entries, sets
 // expiration, computes the signature payload/auth digest, synthesizes a
-// delegated entry for a freighter signer when needed, and returns the same
+// delegated entry for a delegated signer when needed, and returns the same
 // BuildAuthTransactionResult shape every build-* endpoint returns.
 func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInput) (PrepareSignResult, error) {
 	var envelope xdr.TransactionEnvelope
@@ -738,7 +738,7 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 	validUntilLedger := setAddressCredentialExpiration(entries, sim.LatestLedger, 60)
 
 	var signerGStr string
-	if in.SignerType == "freighter" {
+	if in.SignerType == "delegated" {
 		signerGStr = in.SignerG
 	}
 
@@ -826,7 +826,7 @@ func (s *TransactionService) PrepareSign(ctx context.Context, in PrepareSignInpu
 	}
 
 	submitMethod := "webauthn"
-	if in.SignerType == "freighter" {
+	if in.SignerType == "delegated" {
 		submitMethod = "delegated"
 	} else if in.SignerType == "ed25519" {
 		submitMethod = "bundler-delegated"

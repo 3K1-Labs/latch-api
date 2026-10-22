@@ -62,13 +62,13 @@ type stubSmartAccount struct {
 	deployByKeyAlreadyDeployed bool
 	deployByKeyErr             error
 
-	queryFreighterAddress  string
-	queryFreighterDeployed bool
-	queryFreighterErr      error
+	queryDelegatedAddress  string
+	queryDelegatedDeployed bool
+	queryDelegatedErr      error
 
-	deployFreighterAddress         string
-	deployFreighterAlreadyDeployed bool
-	deployFreighterErr             error
+	deployDelegatedAddress         string
+	deployDelegatedAlreadyDeployed bool
+	deployDelegatedErr             error
 
 	getByCredentialIDAddress  string
 	getByCredentialIDKeyData  string
@@ -88,11 +88,11 @@ func (s *stubSmartAccount) Query(_ context.Context, _ string) (string, bool, err
 func (s *stubSmartAccount) DeployByKeyData(_ context.Context, _ string) (string, bool, error) {
 	return s.deployByKeyAddress, s.deployByKeyAlreadyDeployed, s.deployByKeyErr
 }
-func (s *stubSmartAccount) QueryFreighter(_ context.Context, _ string) (string, bool, error) {
-	return s.queryFreighterAddress, s.queryFreighterDeployed, s.queryFreighterErr
+func (s *stubSmartAccount) QueryDelegated(_ context.Context, _ string) (string, bool, error) {
+	return s.queryDelegatedAddress, s.queryDelegatedDeployed, s.queryDelegatedErr
 }
-func (s *stubSmartAccount) DeployFreighter(_ context.Context, _ string) (string, bool, error) {
-	return s.deployFreighterAddress, s.deployFreighterAlreadyDeployed, s.deployFreighterErr
+func (s *stubSmartAccount) DeployDelegated(_ context.Context, _ string) (string, bool, error) {
+	return s.deployDelegatedAddress, s.deployDelegatedAlreadyDeployed, s.deployDelegatedErr
 }
 
 type stubAccounts struct {

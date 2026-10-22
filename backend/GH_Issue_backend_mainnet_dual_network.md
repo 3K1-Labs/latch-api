@@ -213,7 +213,7 @@ Add `network` to request bodies (or query where already used) and resolve the st
 | POST     | `/api/smart-account/setup-send-rules` | Add `network`; catalog + simulate on that network                       |
 | POST     | `/api/smart-account/setup-swap-rules` | Wire RPC/passphrase; mainnet Soroswap sends `providerId: "soroswap"`    |
 | GET      | `/api/smart-account/balances`         | `network` query; mainnet catalog + RPC                                  |
-| GET/POST | `/api/smart-account/freighter`        | Deploy/predict must use network-scoped factory. No friendbot on mainnet |
+| GET/POST | `/api/smart-account/delegated`        | Deploy/predict must use network-scoped factory. No friendbot on mainnet |
 | GET/POST | `/api/smart-account/webauthn`         | Same                                                                    |
 
 **WebAuthn deploy**

@@ -371,14 +371,14 @@ func TestBuildSwap_InvalidSignerType(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestBuildSwap_FreighterMissingSignerG(t *testing.T) {
+func TestBuildSwap_DelegatedMissingSignerG(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-swap", h.BuildSwap)
 
 	req := httptest.NewRequest(http.MethodPost, "/transaction/build-swap", postJSONBody(map[string]any{
 		"smartAccountAddress": "CADDRESS",
-		"signerType":          "freighter",
+		"signerType":          "delegated",
 		"swapChainXdr":        "AAAAswap==",
 		"tokenInContractId":   "CTOKEN",
 		"amountInRaw":         "100",

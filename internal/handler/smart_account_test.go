@@ -62,7 +62,7 @@ func (s *stubSmartAccountDeploy) DeployByKeyData(_ context.Context, keyDataHex s
 	return s.address, s.alreadyDeployed, s.err
 }
 
-func (s *stubSmartAccountDeploy) DeployFreighter(_ context.Context, gAddress string) (string, bool, error) {
+func (s *stubSmartAccountDeploy) DeployDelegated(_ context.Context, gAddress string) (string, bool, error) {
 	s.gotGAddress = gAddress
 	return s.address, s.alreadyDeployed, s.err
 }

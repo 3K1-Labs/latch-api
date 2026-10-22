@@ -375,7 +375,7 @@ func (s *TransactionService) resolveSignerRule(ctx context.Context, wallet, sign
 		return 0, false, err
 	}
 	switch signerType {
-	case "freighter":
+	case "delegated":
 		return id, signerG != "" && ruleAuthorizesSigner(rule, signerType, "", signerG), nil
 	case "ed25519":
 		return id, ruleAuthorizesSigner(rule, signerType, s.ed25519VerifierAddress, ""), nil

@@ -17,7 +17,7 @@ import (
 // UI calls it.
 type BuildCounterInput struct {
 	SmartAccountAddress string
-	SignerG             string // optional; presence alone (not a signerType field) opts into the freighter delegated-entry path
+	SignerG             string // optional; presence alone (not a signerType field) opts into the delegated-entry path
 }
 
 // BuildCounterResult is the outcome of BuildCounter.
@@ -71,7 +71,7 @@ func (s *TransactionService) BuildCounter(ctx context.Context, in BuildCounterIn
 
 	signerType := ""
 	if in.SignerG != "" {
-		signerType = "freighter"
+		signerType = "delegated"
 	}
 	coreResult, err := s.buildAuthTransactionCore(ctx, authTransactionCoreInput{
 		smartAccountAddress: in.SmartAccountAddress,
@@ -83,7 +83,7 @@ func (s *TransactionService) BuildCounter(ctx context.Context, in BuildCounterIn
 		return BuildCounterResult{}, err
 	}
 	// This endpoint never rewrites the smart-account entry's signature (no
-	// bundlerDelegatedAuthMode, and its freighter path only synthesizes the
+	// bundlerDelegatedAuthMode, and its delegated path only synthesizes the
 	// delegated entry — it doesn't return the build-delegated-style signing
 	// templates), so submitMethod carries no meaning here; the reference
 	// route doesn't return one either.
@@ -121,7 +121,7 @@ type BuildDelegatedCounterResult struct {
 // transaction, rewrites the smart-account entry's signature to a
 // Delegated(gAddress) AuthPayload, and returns the entry template + preimage
 // gAddress must sign. Unlike BuildCounter, this always treats the request as
-// a freighter/mnemonic G-address signer (gAddress is required) and does not
+// a delegated G-address signer (gAddress is required) and does not
 // classify or index auth entries — it operates on simResult.auth[0]
 // directly, matching the reference route exactly. Ports
 // app/api/transaction/build-delegated/route.ts.
