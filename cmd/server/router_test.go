@@ -42,7 +42,6 @@ func routeConfig(t *testing.T, network string) *config.Config {
 		WebAppEd25519VerifierAddress:  contract,
 		WebAppNetworkPassphrase:       deploynet.Passphrase(network),
 		WebAppUSDCSACAddress:          contract,
-		WebAppSmartAccountWasmHash:    "fd59a72482bb2e9f619c374556b7865f0eaac396b7663e8067f2ffefb3938894",
 		WebAppWebAuthnRPID:            "uselatch.app",
 		WebAppWebAuthnOrigin:          "https://uselatch.app",
 	}
@@ -74,7 +73,7 @@ var gatedRoutes = []string{
 	"POST /v1/passkey-credentials/lookup",
 	"POST /api/webauthn/registration/begin",
 	"GET /api/smart-account/webauthn",
-	"POST /api/smart-account/freighter",
+	"POST /api/smart-account/delegated",
 	"POST /api/transaction/build-send",
 	"POST /api/smart-account/setup-send-rules",
 	"POST /api/smart-account/add-signer",

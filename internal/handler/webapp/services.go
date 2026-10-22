@@ -22,9 +22,8 @@ type smartAccountService interface {
 	GetByCredentialID(ctx context.Context, credentialID string) (address, keyDataHex string, deployed bool, err error)
 	Query(ctx context.Context, keyDataHex string) (address string, deployed bool, err error)
 	DeployByKeyData(ctx context.Context, keyDataHex string) (address string, alreadyDeployed bool, err error)
-	QueryFreighter(ctx context.Context, gAddress string) (address string, deployed bool, err error)
-	DeployFreighter(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error)
-	ConnectPhantom(ctx context.Context, publicKeyHex, verifierAddress, wasmHashHex string) (webapp.ConnectPhantomResult, error)
+	QueryDelegated(ctx context.Context, gAddress string) (address string, deployed bool, err error)
+	DeployDelegated(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error)
 }
 
 type accountsService interface {
@@ -65,7 +64,6 @@ type transactionService interface {
 	BuildSend(ctx context.Context, in webapp.BuildSendInput, catalog []webapp.CatalogAsset) (webapp.BuildSendResult, error)
 	SubmitWebAuthn(ctx context.Context, in webapp.SubmitWebAuthnInput) (webapp.SubmitResult, error)
 	SubmitDelegated(ctx context.Context, in webapp.SubmitDelegatedInput) (webapp.SubmitResult, error)
-	SubmitPhantom(ctx context.Context, in webapp.SubmitPhantomInput) (webapp.SubmitResult, error)
 	PrepareSign(ctx context.Context, in webapp.PrepareSignInput) (webapp.PrepareSignResult, error)
 	SetupSendRules(ctx context.Context, in webapp.SetupSendRulesInput, catalog []webapp.CatalogAsset) (webapp.SetupSendRulesResult, error)
 	SetupSwapRules(ctx context.Context, in webapp.SetupSwapRulesInput) (webapp.SetupSwapRulesResult, error)

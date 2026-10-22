@@ -36,4 +36,20 @@ const (
 	// than the one this deployment serves (HTTP 400). See
 	// docs/network-per-deployment.md.
 	ErrNetworkMismatch ErrorCode = "NETWORK_MISMATCH"
+
+	// ErrInsufficientFeeBalance: the wallet holds too little XLM or USDC to
+	// pay a user-paid transaction's network fee.
+	ErrInsufficientFeeBalance ErrorCode = "INSUFFICIENT_FEE_BALANCE"
+
+	// ErrFeeQuoteStale: the signed maximum fee no longer covers the network
+	// fee, or the wallet changed since the build — rebuild and sign again.
+	ErrFeeQuoteStale ErrorCode = "FEE_QUOTE_STALE"
+
+	// ErrFeeRuleNotFound: no context rule lets this signer authorize paying
+	// the network fee.
+	ErrFeeRuleNotFound ErrorCode = "FEE_RULE_NOT_FOUND"
+
+	// ErrTooManyFailedTransactions: too many of the wallet's user-paid
+	// transactions failed on-chain recently.
+	ErrTooManyFailedTransactions ErrorCode = "TOO_MANY_FAILED_TRANSACTIONS"
 )

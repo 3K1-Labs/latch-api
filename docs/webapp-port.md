@@ -152,12 +152,20 @@ path+method).
 ## Phase 3 Pass B — remaining transaction/smart-account routes — ✅ DONE
 
 Implemented every route Pass A deferred except `build-sign-demo` (dev-only, no client caller):
-`POST /api/transaction/submit-delegated`, `POST /api/transaction/submit` (Phantom),
+`POST /api/transaction/submit-delegated`,
 `POST /api/transaction/prepare-sign`, `POST /api/smart-account/setup-send-rules`,
 `POST /api/smart-account/setup-swap-rules`, `POST /api/transaction/build` (counter demo),
 `POST /api/transaction/build-delegated` (counter demo), `POST /api/transaction/build-swap`,
 plus the two routes Phase 2 explicitly scoped out as "legacy Ed25519/delegated factories":
-`GET/POST /api/smart-account/freighter` and `POST /api/smart-account` (Phantom connect).
+`GET/POST /api/smart-account/freighter`, since renamed `/api/smart-account/delegated`. The
+`freighter` signer type is now `delegated` too: it is a `Delegated(gAddress)` signer, whichever
+wallet holds the key. The salt value `"freighter-delegated-v1"` was kept, since it fixes every
+existing delegated account's address.
+
+Pass B also ported the Phantom wallet routes (`POST /api/smart-account` connect, `GET
+/api/smart-account` config, `POST /api/transaction/submit`). They were later removed: Phantom
+support was a speculative proposal, not a product. The ed25519 signer type they introduced stays,
+renamed from `phantom` to `ed25519`, because seed wallets sign with the same factory verifier.
 
 **Shared engine** (`internal/service/webapp/build_auth_transaction.go`): a new
 `TransactionService.buildAuthTransactionCore` + `resolveAdminBundlerDelegatedAuth`, porting
@@ -184,20 +192,12 @@ from two new sentinel errors (`ErrSwapSignerMismatch`, `ErrSwapValidation`) via
 `buildSwapErrorResponse`, matching the extension's documented expectation of a `409
 SIGNER_MISMATCH` + `suggestedAction: "reconfigure_swap_rule"` shape.
 
-`GET/POST /api/smart-account/freighter` (`internal/service/webapp/freighter_service.go`) reuses
+`GET/POST /api/smart-account/delegated` (`internal/service/webapp/delegated_service.go`) reuses
 `SmartAccountService.PredictAddress`/`Deploy` generically (both already took an arbitrary
 `params xdr.ScVal`) with a new `Delegated(gAddress)`-signer init-params builder and
 `"freighter-delegated-v1"` salt derivation; also ports the reference route's testnet-friendbot
 auto-funding (`fundTestnetAccountIfNeeded`), gated to testnet since that's this service's only
 configured network.
-
-`POST /api/smart-account` (Phantom connect, `internal/service/webapp/phantom_service.go`) is a
-second, independent deployment mechanism — not the production factory pattern. It builds a raw
-`HostFunctionTypeCreateContractV2` host function against a fixed WASM hash
-(`WebAppSmartAccountWasmHash`, new config field, `NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH`) with a
-constructor, and computes the deterministic contract address locally (no RPC round trip, unlike
-the factory's `get_account_address` simulation) via the same `HashIdPreimageContractId` derivation
-Stellar Core uses.
 
 **Verified:** full test suite (`-race`) passes with zero regressions; `golangci-lint`, `gofmt`,
 `go vet` all clean; new files average 75–90% coverage (a few branch-heavy validation functions in

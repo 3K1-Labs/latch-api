@@ -212,6 +212,9 @@ func (h *SmartAccountHandler) DeployEd25519(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.deploySvc.DeployByPublicKey(c.Request.Context(), req.PublicKeyHex)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy ed25519 smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -432,6 +435,9 @@ func (h *SmartAccountHandler) DeployMultisig(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.deploySvc.DeployMultisig(c.Request.Context(), signers, req.Threshold, salt)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy multisig smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -449,7 +455,7 @@ type deployGAddressRequest struct {
 // DeployGAddress godoc
 // @Summary      Deploy a delegated (G-address) smart account
 // @Description  Deploys (or idempotently returns) the deterministic smart account whose
-// @Description  signer is a classic Stellar account — the Freighter / external-wallet path.
+// @Description  signer is a classic Stellar account — the delegated (external-wallet) path.
 // @Description  Testnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.
 // @Tags         smart-account
 // @Accept       json
@@ -488,7 +494,7 @@ func (h *SmartAccountHandler) DeployGAddress(c *gin.Context) {
 		return
 	}
 
-	address, alreadyDeployed, err := h.deploySvc.DeployFreighter(c.Request.Context(), req.GAddress)
+	address, alreadyDeployed, err := h.deploySvc.DeployDelegated(c.Request.Context(), req.GAddress)
 	if err != nil {
 		if failGasless(c, err) {
 			return

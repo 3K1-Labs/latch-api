@@ -86,11 +86,11 @@ type Config struct {
 
 	WebAppFactoryAddress          string
 	WebAppWebAuthnVerifierAddress string
-	// WebAppEd25519VerifierAddress is the Ed25519PhantomVerifier contract
-	// address configured as the factory's ed25519_verifier — verifies a
-	// Phantom-produced signature over "Stellar Smart Account Auth:\n" +
-	// lowercase_hex(auth_payload_hash) (see latch-smart-account
-	// ed25519-phantom-verifier). Required only for Phantom-signer routes.
+	// WebAppEd25519VerifierAddress is the contract the factory returns for
+	// get_verifier(Ed25519) — the verifier every seed-wallet smart account is
+	// created with. It checks an ed25519 signature over
+	// "Stellar Smart Account Auth:\n" + lowercase_hex(auth_payload_hash), and
+	// backs the "ed25519" signer type in the setup-rules and build routes.
 	WebAppEd25519VerifierAddress string
 	// WebAppNetworkPassphrase is derived from Network, never configured.
 	WebAppNetworkPassphrase string
@@ -111,11 +111,6 @@ type Config struct {
 	// Demo counter contract used by GET /api/counter and the multisig demo
 	// proposal flow (operationKind "counter_increment").
 	WebAppCounterContractAddress string
-	// WebAppSmartAccountWasmHash is the constructor-based smart account WASM
-	// (hex-encoded) POST /api/smart-account (Phantom connect) deploys via a
-	// direct createContractV2 host function — the legacy, pre-factory
-	// deployment path, distinct from WebAppFactoryAddress's create_account.
-	WebAppSmartAccountWasmHash string
 
 	// MoonPay on-ramp — dev-only, /api/on-ramp/* returns 403 in production
 	// regardless of whether these are configured.
@@ -262,7 +257,6 @@ func Load() (*Config, error) {
 		WebAppAssetAllowlistJSON: getEnv("NEXT_PUBLIC_ASSET_ALLOWLIST_JSON", ""),
 
 		WebAppCounterContractAddress: getEnv("NEXT_PUBLIC_COUNTER_ADDRESS", ""),
-		WebAppSmartAccountWasmHash:   getEnv("NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH", testnetDefault("c00f972cb8ed5eba151f4cd6e97519db679a7a31cc657838449b405fb9cf53c4")),
 
 		WebAppMoonPaySecretKey:         getEnv("MOONPAY_SECRET_KEY", ""),
 		WebAppMoonPayPublishableKey:    getEnv("MOONPAY_PUBLISHABLE_KEY", ""),
@@ -338,7 +332,6 @@ var requiredMainnetVars = []string{
 	"NEXT_PUBLIC_WEBAUTHN_VERIFIER_ADDRESS",
 	"NEXT_PUBLIC_VERIFIER_ADDRESS",
 	"NEXT_PUBLIC_USDC_SAC_ADDRESS",
-	"NEXT_PUBLIC_SMART_ACCOUNT_WASM_HASH",
 }
 
 func validateNetwork(cfg *Config) error {

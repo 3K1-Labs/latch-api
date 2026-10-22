@@ -3,7 +3,6 @@ package webapp
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"testing"
 
 	"github.com/latch/backend/internal/service"
@@ -23,7 +22,7 @@ func newTestTransactionService(t *testing.T, rpc sorobanRPC, contextRules *Conte
 
 	verifierAddr := testContractAddress(t)
 	ed25519VerifierAddr := testContractAddress(t)
-	svc := NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), nil)
+	svc := NewTransactionService(withForwardRPC(t, rpc), bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), &fakeGasless{})
 	return svc, bundlerKp
 }
 
@@ -174,7 +173,7 @@ func TestBuildSend_UnknownSignerKeyRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
-func TestBuildSend_FreighterSynthesizesDelegatedEntry(t *testing.T) {
+func TestBuildSend_DelegatedSynthesizesDelegatedEntry(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
 	recipientKp, err := keypair.Random()
@@ -203,7 +202,7 @@ func TestBuildSend_FreighterSynthesizesDelegatedEntry(t *testing.T) {
 
 	result, err := svc.BuildSend(context.Background(), BuildSendInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             signerKp.Address(),
 		AssetID:             "USDC",
 		Recipient:           recipientKp.Address(),
@@ -605,71 +604,6 @@ func TestSubmitDelegated_IndexOutOfRange(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ── SubmitPhantom ────────────────────────────────────────────────────────────
-
-func TestSubmitPhantom_Success(t *testing.T) {
-	smartAccountAddr := testContractAddress(t)
-	authEntry := sampleAuthEntry(t, smartAccountAddr, 7, 1060, "transfer")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	rpc := &fakeSorobanRPC{
-		sequenceFn: func(ctx context.Context, rpcURL, address string) (int64, error) { return 100, nil },
-		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
-			return &service.SimulateResult{TransactionData: minimalSorobanTransactionDataXDR(t)}, nil
-		},
-		sendFn: func(ctx context.Context, rpcURL, txXDR string) (*service.SendTxResult, error) {
-			return &service.SendTxResult{Status: service.RPCStatusPending, Hash: "hp1"}, nil
-		},
-		getTxFn: func(ctx context.Context, rpcURL, hash string) (*service.GetTxResult, error) {
-			return &service.GetTxResult{Status: service.RPCStatusSuccess}, nil
-		},
-	}
-	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
-	txXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
-
-	result, err := svc.SubmitPhantom(context.Background(), SubmitPhantomInput{
-		TxXdr:            txXdr,
-		AuthEntryXdr:     authEntryB64,
-		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
-		PublicKeyHex:     hex.EncodeToString(make([]byte, 32)),
-		ContextRuleID:    uint32Ptr(0),
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "hp1", result.Hash)
-}
-
-func TestSubmitPhantom_MissingVerifierAddress(t *testing.T) {
-	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, defaultContextRulesService(t))
-	svc.ed25519VerifierAddress = ""
-	authEntry := sampleAuthEntry(t, testContractAddress(t), 1, 1060, "transfer")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	_, err = svc.SubmitPhantom(context.Background(), SubmitPhantomInput{
-		TxXdr:            buildSubmitTestEnvelope(t, bundlerKp.Address()),
-		AuthEntryXdr:     authEntryB64,
-		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
-		PublicKeyHex:     hex.EncodeToString(make([]byte, 32)),
-	})
-	require.Error(t, err)
-}
-
-func TestSubmitPhantom_InvalidPublicKeyHex(t *testing.T) {
-	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, defaultContextRulesService(t))
-	authEntry := sampleAuthEntry(t, testContractAddress(t), 1, 1060, "transfer")
-	authEntryB64, err := xdr.MarshalBase64(authEntry)
-	require.NoError(t, err)
-
-	_, err = svc.SubmitPhantom(context.Background(), SubmitPhantomInput{
-		TxXdr:            buildSubmitTestEnvelope(t, bundlerKp.Address()),
-		AuthEntryXdr:     authEntryB64,
-		AuthSignatureHex: hex.EncodeToString(make([]byte, 64)),
-		PublicKeyHex:     "not-hex!!",
-	})
-	require.Error(t, err)
-}
-
 // ── PrepareSign ──────────────────────────────────────────────────────────────
 
 func TestPrepareSign_PasskeySuccess(t *testing.T) {
@@ -762,7 +696,7 @@ func TestPrepareSign_UnknownSignerKeyRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
-func TestPrepareSign_FreighterSynthesizesDelegatedEntry(t *testing.T) {
+func TestPrepareSign_DelegatedSynthesizesDelegatedEntry(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	signerKp, err := keypair.Random()
 	require.NoError(t, err)
@@ -786,7 +720,7 @@ func TestPrepareSign_FreighterSynthesizesDelegatedEntry(t *testing.T) {
 	result, err := svc.PrepareSign(context.Background(), PrepareSignInput{
 		SmartAccountAddress: smartAccountAddr,
 		UnsignedTxXdr:       unsignedTxXdr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             signerKp.Address(),
 	})
 	require.NoError(t, err)
@@ -837,14 +771,14 @@ func TestPrepareSign_SignerMismatch_NoExternalSigner(t *testing.T) {
 	assert.ErrorIs(t, err, ErrPrepareSignSignerMismatch)
 }
 
-func TestPrepareSign_SignerMismatch_FreighterWrongG(t *testing.T) {
+func TestPrepareSign_SignerMismatch_DelegatedWrongG(t *testing.T) {
 	adminKp, err := keypair.Random()
 	require.NoError(t, err)
 	otherKp, err := keypair.Random()
 	require.NoError(t, err)
 
 	// Default rule authorizes only Delegated(adminKp) — a different
-	// Freighter G-address than the one the caller supplies.
+	// delegated G-address than the one the caller supplies.
 	contextRules := contextRulesServiceWithDefaultSigners(t, delegatedSignerScVal(t, adminKp.Address()))
 	svc, bundlerKp := newTestTransactionService(t, &fakeSorobanRPC{}, contextRules)
 	unsignedTxXdr := buildSubmitTestEnvelope(t, bundlerKp.Address())
@@ -852,7 +786,7 @@ func TestPrepareSign_SignerMismatch_FreighterWrongG(t *testing.T) {
 	_, err = svc.PrepareSign(context.Background(), PrepareSignInput{
 		SmartAccountAddress: testContractAddress(t),
 		UnsignedTxXdr:       unsignedTxXdr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             otherKp.Address(),
 	})
 	require.Error(t, err)

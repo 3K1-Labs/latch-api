@@ -70,9 +70,9 @@ func buildDelegatedSignerScVal(gAddress string) (xdr.ScVal, error) {
 // lib/soroban-setup-signers.ts's buildSignersVecForSetup().
 func buildSignersVecForSetup(signerType, verifierAddress, publicKeyHex, keyDataHex, gAddress string) (xdr.ScVal, error) {
 	switch signerType {
-	case "phantom":
+	case "ed25519":
 		if verifierAddress == "" || publicKeyHex == "" {
-			return xdr.ScVal{}, fmt.Errorf("verifierAddress and publicKeyHex required for phantom setup")
+			return xdr.ScVal{}, fmt.Errorf("verifierAddress and publicKeyHex required for ed25519 setup")
 		}
 		if len(publicKeyHex) != 64 {
 			return xdr.ScVal{}, fmt.Errorf("publicKeyHex must be 64 hex chars")
@@ -101,9 +101,9 @@ func buildSignersVecForSetup(signerType, verifierAddress, publicKeyHex, keyDataH
 		}
 		return scVec(signer), nil
 
-	case "freighter":
+	case "delegated":
 		if gAddress == "" {
-			return xdr.ScVal{}, fmt.Errorf("gAddress required for freighter setup")
+			return xdr.ScVal{}, fmt.Errorf("gAddress required for delegated setup")
 		}
 		signer, err := buildDelegatedSignerScVal(gAddress)
 		if err != nil {
@@ -122,12 +122,12 @@ func buildSignersVecForSetup(signerType, verifierAddress, publicKeyHex, keyDataH
 // POST /api/smart-account/setup-send-rules.
 type SetupSendRulesInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "phantom" | "freighter"
+	SignerType          string // "passkey" | "ed25519" | "delegated"
 	AssetID             string
 	AssetIDs            []string
-	PublicKeyHex        string // phantom
+	PublicKeyHex        string // ed25519
 	KeyDataHex          string // passkey
-	GAddress            string // freighter
+	GAddress            string // delegated
 }
 
 // SetupSendRulesResult is the outcome of SetupSendRules. When
@@ -156,7 +156,7 @@ func (s *TransactionService) SetupSendRules(ctx context.Context, in SetupSendRul
 	if in.SignerType == "passkey" {
 		verifierAddress = s.webauthnVerifierAddress
 	}
-	if verifierAddress == "" && in.SignerType != "freighter" {
+	if verifierAddress == "" && in.SignerType != "delegated" {
 		return SetupSendRulesResult{}, fmt.Errorf("verifier address not configured for this signer type")
 	}
 
@@ -323,11 +323,11 @@ func (s *TransactionService) buildSetupAuthTransaction(ctx context.Context, fn x
 // POST /api/smart-account/setup-swap-rules.
 type SetupSwapRulesInput struct {
 	SmartAccountAddress string
-	SignerType          string // "passkey" | "phantom" | "freighter"; defaults to "passkey"
+	SignerType          string // "passkey" | "ed25519" | "delegated"; defaults to "passkey"
 	RouterContractID    string // defaults to the well-known testnet Aquarius router
-	PublicKeyHex        string // phantom
+	PublicKeyHex        string // ed25519
 	KeyDataHex          string // passkey
-	GAddress            string // freighter
+	GAddress            string // delegated
 }
 
 // SetupSwapRulesResult is the outcome of SetupSwapRules.
@@ -350,15 +350,15 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 	}
 	routerID := resolveRouterContractID(in.RouterContractID)
 
-	if signerType == "freighter" && in.GAddress == "" {
-		return SetupSwapRulesResult{}, fmt.Errorf("gAddress is required for freighter setup")
+	if signerType == "delegated" && in.GAddress == "" {
+		return SetupSwapRulesResult{}, fmt.Errorf("gAddress is required for delegated setup")
 	}
 	bundlerG := s.bundler.PublicKey()
-	if signerType == "freighter" && in.GAddress == bundlerG {
-		return SetupSwapRulesResult{}, fmt.Errorf("gAddress must be your Freighter G-address, not the bundler fee-payer")
+	if signerType == "delegated" && in.GAddress == bundlerG {
+		return SetupSwapRulesResult{}, fmt.Errorf("gAddress must be your delegated G-address, not the bundler fee-payer")
 	}
-	if signerType == "phantom" && in.PublicKeyHex == "" {
-		return SetupSwapRulesResult{}, fmt.Errorf("publicKeyHex is required for phantom setup")
+	if signerType == "ed25519" && in.PublicKeyHex == "" {
+		return SetupSwapRulesResult{}, fmt.Errorf("publicKeyHex is required for ed25519 setup")
 	}
 	if signerType == "passkey" && in.KeyDataHex == "" {
 		return SetupSwapRulesResult{}, fmt.Errorf("keyDataHex is required for passkey setup")
@@ -368,7 +368,7 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 	if signerType == "passkey" {
 		verifierAddress = s.webauthnVerifierAddress
 	}
-	if verifierAddress == "" && signerType != "freighter" {
+	if verifierAddress == "" && signerType != "delegated" {
 		return SetupSwapRulesResult{}, fmt.Errorf("verifier address not configured for this signer type")
 	}
 
@@ -422,9 +422,9 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 
 	var signerScVal xdr.ScVal
 	switch signerType {
-	case "passkey", "phantom":
+	case "passkey", "ed25519":
 		keyHex := in.KeyDataHex
-		if signerType == "phantom" {
+		if signerType == "ed25519" {
 			keyHex = in.PublicKeyHex
 		}
 		keyBytes, err := hex.DecodeString(keyHex)
@@ -435,7 +435,7 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 		if err != nil {
 			return SetupSwapRulesResult{}, err
 		}
-	case "freighter":
+	case "delegated":
 		signerScVal, err = buildDelegatedSignerScVal(in.GAddress)
 		if err != nil {
 			return SetupSwapRulesResult{}, err
@@ -480,15 +480,15 @@ func (s *TransactionService) SetupSwapRules(ctx context.Context, in SetupSwapRul
 }
 
 // ruleAuthorizesSigner reports whether rule already authorizes signerType's
-// signer: a matching Delegated(gAddress) for freighter, or any External
-// signer (optionally matching verifierAddress) for passkey/phantom. Used by
+// signer: a matching Delegated(gAddress) for delegated, or any External
+// signer (optionally matching verifierAddress) for passkey/ed25519. Used by
 // both setup-send-rules and setup-swap-rules to detect "this signer is
 // already configured" before creating a duplicate rule/signer entry. Ports
 // the combined effect of setup-swap-rules/route.ts's
 // ruleHasDelegatedSigner/ruleHasExternalPasskey/contextRuleSignersMatchSetup
 // pre-checks.
 func ruleAuthorizesSigner(rule ContextRuleSummary, signerType, verifierAddress, gAddress string) bool {
-	if signerType == "freighter" {
+	if signerType == "delegated" {
 		for _, sg := range rule.Signers {
 			if sg.Kind == "Delegated" && sg.GAddress == gAddress {
 				return true

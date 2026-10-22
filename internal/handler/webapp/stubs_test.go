@@ -62,16 +62,13 @@ type stubSmartAccount struct {
 	deployByKeyAlreadyDeployed bool
 	deployByKeyErr             error
 
-	queryFreighterAddress  string
-	queryFreighterDeployed bool
-	queryFreighterErr      error
+	queryDelegatedAddress  string
+	queryDelegatedDeployed bool
+	queryDelegatedErr      error
 
-	deployFreighterAddress         string
-	deployFreighterAlreadyDeployed bool
-	deployFreighterErr             error
-
-	connectPhantomResult webapp.ConnectPhantomResult
-	connectPhantomErr    error
+	deployDelegatedAddress         string
+	deployDelegatedAlreadyDeployed bool
+	deployDelegatedErr             error
 
 	getByCredentialIDAddress  string
 	getByCredentialIDKeyData  string
@@ -91,14 +88,11 @@ func (s *stubSmartAccount) Query(_ context.Context, _ string) (string, bool, err
 func (s *stubSmartAccount) DeployByKeyData(_ context.Context, _ string) (string, bool, error) {
 	return s.deployByKeyAddress, s.deployByKeyAlreadyDeployed, s.deployByKeyErr
 }
-func (s *stubSmartAccount) QueryFreighter(_ context.Context, _ string) (string, bool, error) {
-	return s.queryFreighterAddress, s.queryFreighterDeployed, s.queryFreighterErr
+func (s *stubSmartAccount) QueryDelegated(_ context.Context, _ string) (string, bool, error) {
+	return s.queryDelegatedAddress, s.queryDelegatedDeployed, s.queryDelegatedErr
 }
-func (s *stubSmartAccount) DeployFreighter(_ context.Context, _ string) (string, bool, error) {
-	return s.deployFreighterAddress, s.deployFreighterAlreadyDeployed, s.deployFreighterErr
-}
-func (s *stubSmartAccount) ConnectPhantom(_ context.Context, _, _, _ string) (webapp.ConnectPhantomResult, error) {
-	return s.connectPhantomResult, s.connectPhantomErr
+func (s *stubSmartAccount) DeployDelegated(_ context.Context, _ string) (string, bool, error) {
+	return s.deployDelegatedAddress, s.deployDelegatedAlreadyDeployed, s.deployDelegatedErr
 }
 
 type stubAccounts struct {
@@ -281,7 +275,6 @@ type stubTransaction struct {
 	submitErr               error
 	gotSubmitDelegatedInput webapp.SubmitDelegatedInput
 	submitDelegatedErr      error
-	submitPhantomErr        error
 	prepareSignResult       webapp.PrepareSignResult
 	prepareSignErr          error
 	setupSendRulesResult    webapp.SetupSendRulesResult
@@ -317,9 +310,6 @@ func (s *stubTransaction) SubmitWebAuthn(_ context.Context, _ webapp.SubmitWebAu
 func (s *stubTransaction) SubmitDelegated(_ context.Context, in webapp.SubmitDelegatedInput) (webapp.SubmitResult, error) {
 	s.gotSubmitDelegatedInput = in
 	return s.submitResult, s.submitDelegatedErr
-}
-func (s *stubTransaction) SubmitPhantom(_ context.Context, _ webapp.SubmitPhantomInput) (webapp.SubmitResult, error) {
-	return s.submitResult, s.submitPhantomErr
 }
 func (s *stubTransaction) PrepareSign(_ context.Context, _ webapp.PrepareSignInput) (webapp.PrepareSignResult, error) {
 	return s.prepareSignResult, s.prepareSignErr

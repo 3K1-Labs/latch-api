@@ -120,8 +120,8 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType == "freighter" && req.SignerG == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is freighter")
+	if req.SignerType == "delegated" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is delegated")
 		return
 	}
 
@@ -148,6 +148,9 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 		KeyDataHex:          req.KeyDataHex,
 	}, catalog)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		if errors.Is(err, webapp.ErrAssetNotFound) {
 			slog.Error("build send transaction", "smartAccountAddress", req.SmartAccountAddress, "network", req.Network, "err", err)
 			webappx.Fail(c, http.StatusBadRequest, webappx.ErrAssetNotFound, "asset not found in catalog")
@@ -184,9 +187,10 @@ func (h *TransactionHandler) BuildSend(c *gin.Context) {
 			"contractId": result.Asset.ContractID,
 			"decimals":   result.Asset.Decimals,
 		},
-		"recipient": result.Recipient,
-		"amount":    result.Amount,
-		"amountRaw": result.AmountRaw,
+		"recipient":  result.Recipient,
+		"amount":     result.Amount,
+		"amountRaw":  result.AmountRaw,
+		"networkFee": result.NetworkFee,
 	})
 }
 
@@ -271,8 +275,8 @@ type submitDelegatedRequest struct {
 }
 
 // SubmitDelegated godoc
-// @Summary      Submit a Freighter/mnemonic-delegated-signed transaction
-// @Description  Attaches a native G-address signature (Freighter or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.
+// @Summary      Submit a delegated-signed transaction
+// @Description  Attaches a native G-address signature (an external wallet or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.
 // @Tags         transaction
 // @Accept       json
 // @Produce      json
@@ -326,72 +330,6 @@ func (h *TransactionHandler) SubmitDelegated(c *gin.Context) {
 	})
 }
 
-type submitPhantomRequest struct {
-	Network          string          `json:"network,omitempty"`
-	TxXdr            string          `json:"txXdr" binding:"required"`
-	AuthEntryXdr     string          `json:"authEntryXdr,omitempty"`
-	AuthSignatureHex string          `json:"authSignatureHex" binding:"required"`
-	PrefixedMessage  string          `json:"prefixedMessage,omitempty"`
-	PublicKeyHex     string          `json:"publicKeyHex" binding:"required"`
-	ContextRuleID    *flexibleUint32 `json:"contextRuleId"`
-	AuthEntriesXdr   []string        `json:"authEntriesXdr,omitempty"`
-}
-
-// SubmitPhantom godoc
-// @Summary      Submit a Phantom-signed transaction
-// @Description  Attaches the client's Phantom (Solana wallet) Ed25519 signature to the built transaction's auth entry and submits it to the network.
-// @Tags         transaction
-// @Accept       json
-// @Produce      json
-// @Param        body body submitPhantomRequest true "Signed transaction and auth entry"
-// @Success      200 {object} map[string]any
-// @Failure      400 {object} webappErrorResponse
-// @Router       /api/transaction/submit [post]
-func (h *TransactionHandler) SubmitPhantom(c *gin.Context) {
-	var req submitPhantomRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
-		return
-	}
-	if len(req.AuthEntriesXdr) == 0 && req.AuthEntryXdr == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "authEntryXdr or authEntriesXdr is required")
-		return
-	}
-
-	if _, err := webapp.ParseNetwork(req.Network); err != nil {
-		failNetworkResolution(c, err)
-		return
-	}
-
-	// prefixedMessage isn't used server-side: on-chain enforcement (the
-	// Ed25519PhantomVerifier contract) reconstructs and checks it during the
-	// enforcing-mode re-simulation in submitWithBundler — the same pattern
-	// SubmitWebAuthn already follows for the WebAuthn assertion.
-	result, err := h.txSvc.SubmitPhantom(c.Request.Context(), webapp.SubmitPhantomInput{
-		TxXdr:                      req.TxXdr,
-		AuthEntryXdr:               req.AuthEntryXdr,
-		AuthSignatureHex:           req.AuthSignatureHex,
-		PublicKeyHex:               req.PublicKeyHex,
-		ContextRuleID:              contextRuleIDPtr(req.ContextRuleID),
-		AuthEntriesXdr:             req.AuthEntriesXdr,
-		SmartAccountAuthEntryIndex: 0,
-	})
-	if err != nil {
-		if errors.Is(err, webapp.ErrContextRuleIDRequired) {
-			webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
-			return
-		}
-		slog.Error("submit phantom transaction", "network", req.Network, "err", err)
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "failed to submit transaction")
-		return
-	}
-
-	webappx.Success(c, http.StatusOK, gin.H{
-		"hash":   result.Hash,
-		"status": result.Status,
-	})
-}
-
 type prepareSignRequest struct {
 	Network             string `json:"network"`
 	SmartAccountAddress string `json:"smartAccountAddress" binding:"required"`
@@ -420,8 +358,8 @@ func (h *TransactionHandler) PrepareSign(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType == "freighter" && req.SignerG == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is freighter")
+	if req.SignerType == "delegated" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required when signerType is delegated")
 		return
 	}
 
@@ -491,8 +429,8 @@ func (h *TransactionHandler) SetupSendRules(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType != "passkey" && req.SignerType != "phantom" && req.SignerType != "freighter" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, phantom, or freighter")
+	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "delegated" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or delegated")
 		return
 	}
 
@@ -715,7 +653,7 @@ type buildDelegatedCounterRequest struct {
 
 // BuildDelegatedCounter godoc
 // @Summary      Build a demo counter-increment transaction for a delegated G-address signer
-// @Description  Like build, but always prepares the smart-account entry for a Freighter/mnemonic G-address signature. No production UI calls this — kept for API parity.
+// @Description  Like build, but always prepares the smart-account entry for a delegated G-address signature. No production UI calls this — kept for API parity.
 // @Tags         transaction
 // @Accept       json
 // @Produce      json
@@ -784,12 +722,12 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "invalid request body")
 		return
 	}
-	if req.SignerType != "passkey" && req.SignerType != "phantom" && req.SignerType != "freighter" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, phantom, or freighter")
+	if req.SignerType != "passkey" && req.SignerType != "ed25519" && req.SignerType != "delegated" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerType must be passkey, ed25519, or delegated")
 		return
 	}
-	if req.SignerType == "freighter" && req.SignerG == "" {
-		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required for freighter")
+	if req.SignerType == "delegated" && req.SignerG == "" {
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrInternal, "signerG is required for delegated")
 		return
 	}
 
@@ -842,6 +780,7 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 		"tokenInContractId":                     result.TokenInContractID,
 		"amountInRaw":                           result.AmountInRaw,
 		"amountOutMinRaw":                       result.AmountOutMinRaw,
+		"networkFee":                            result.NetworkFee,
 		"providerId":                            providerID,
 	})
 }
@@ -854,6 +793,9 @@ func (h *TransactionHandler) BuildSwap(c *gin.Context) {
 // via err.Error() — that's their purpose; anything unrecognized falls back
 // to a generic 500 with no internal detail leaked, per security.md.
 func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err error) {
+	if failGasless(c, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, webapp.ErrSignerRuleNotFound):
 		webappx.Fail(c, http.StatusConflict, webappx.ErrSignerRuleNotFound, err.Error())

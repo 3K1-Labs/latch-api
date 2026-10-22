@@ -24,14 +24,14 @@ func TestBuildCallContractContextType_InvalidAddress(t *testing.T) {
 	assert.Contains(t, err.Error(), "resolve contract address")
 }
 
-func TestBuildSignersVecForSetup_PhantomBadHex(t *testing.T) {
-	_, err := buildSignersVecForSetup("phantom", testContractAddress(t), strings.Repeat("zz", 32), "", "")
+func TestBuildSignersVecForSetup_Ed25519BadHex(t *testing.T) {
+	_, err := buildSignersVecForSetup("ed25519", testContractAddress(t), strings.Repeat("zz", 32), "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode publicKeyHex")
 }
 
-func TestBuildSignersVecForSetup_PhantomBadVerifier(t *testing.T) {
-	_, err := buildSignersVecForSetup("phantom", "not-a-valid-address", strings.Repeat("ab", 32), "", "")
+func TestBuildSignersVecForSetup_Ed25519BadVerifier(t *testing.T) {
+	_, err := buildSignersVecForSetup("ed25519", "not-a-valid-address", strings.Repeat("ab", 32), "", "")
 	require.Error(t, err)
 }
 
@@ -46,17 +46,17 @@ func TestBuildSignersVecForSetup_PasskeyBadVerifier(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBuildSignersVecForSetup_FreighterBadGAddress(t *testing.T) {
-	_, err := buildSignersVecForSetup("freighter", "", "", "", "not-a-valid-address")
+func TestBuildSignersVecForSetup_DelegatedBadGAddress(t *testing.T) {
+	_, err := buildSignersVecForSetup("delegated", "", "", "", "not-a-valid-address")
 	require.Error(t, err)
 }
 
 // ── SetupSendRules ───────────────────────────────────────────────────────────
 
 func TestSetupSendRules_DiscoverContextRuleErr(t *testing.T) {
-	// freighter (not passkey): a passkey with a non-empty keyDataHex now
+	// delegated (not passkey): a passkey with a non-empty keyDataHex now
 	// resolves via FindRuleForSigner instead of DiscoverContextRule (see
-	// LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R5) — freighter still exercises
+	// LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R5) — delegated still exercises
 	// DiscoverContextRule's own error propagation unchanged.
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
@@ -68,7 +68,7 @@ func TestSetupSendRules_DiscoverContextRuleErr(t *testing.T) {
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: testContractAddress(t)}})
@@ -109,7 +109,7 @@ func TestSetupSendRules_BuildSignersVecErr(t *testing.T) {
 }
 
 func TestSetupSendRules_ContextRuleNameTooLong(t *testing.T) {
-	// freighter (not passkey): a passkey with a non-empty keyDataHex now
+	// delegated (not passkey): a passkey with a non-empty keyDataHex now
 	// resolves "missing" via FindRuleForSigner, which never reaches the
 	// build phase this test targets — see
 	// TestSetupSendRules_DiscoverContextRuleErr.
@@ -120,7 +120,7 @@ func TestSetupSendRules_ContextRuleNameTooLong(t *testing.T) {
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "a-very-long-asset-identifier",
 		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "a-very-long-asset-identifier", ContractID: assetContractAddr}})
@@ -128,14 +128,14 @@ func TestSetupSendRules_ContextRuleNameTooLong(t *testing.T) {
 }
 
 func TestSetupSendRules_InvalidAssetContractID(t *testing.T) {
-	// freighter (not passkey — see TestSetupSendRules_ContextRuleNameTooLong).
+	// delegated (not passkey — see TestSetupSendRules_ContextRuleNameTooLong).
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t, scU32(1), buildTestRuleScVal("default", true, ""))
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: "not-a-valid-contract"}})
@@ -149,7 +149,7 @@ func TestSetupSendRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 	_, err := xdr.MarshalBase64(authEntry)
 	require.NoError(t, err)
 
-	// freighter (not passkey — see TestSetupSendRules_DiscoverContextRuleErr):
+	// delegated (not passkey — see TestSetupSendRules_DiscoverContextRuleErr):
 	// DiscoverContextRule(asset) succeeds (count+getRule=default, no match),
 	// but the next call (rulesCount inside DiscoverDefaultContextRule) fails.
 	rpc := &errAfterNFakeRPC{
@@ -164,7 +164,7 @@ func TestSetupSendRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 
 	_, err = svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr}})
@@ -176,7 +176,7 @@ func TestSetupSendRules_ResolveAdminBundlerDelegatedAuthErr(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	assetContractAddr := testContractAddress(t)
 
-	// freighter (not passkey — see TestSetupSendRules_DiscoverContextRuleErr):
+	// delegated (not passkey — see TestSetupSendRules_DiscoverContextRuleErr):
 	// DiscoverContextRule(asset): count+getRule (2 calls). DiscoverDefaultContextRule:
 	// count+getRule (2 more calls). resolveAdminBundlerDelegatedAuth's RuleAtID
 	// (5th call) then fails.
@@ -193,7 +193,7 @@ func TestSetupSendRules_ResolveAdminBundlerDelegatedAuthErr(t *testing.T) {
 
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr}})
@@ -214,10 +214,10 @@ func TestSetupSendRules_BuildSetupAuthTransactionErr(t *testing.T) {
 	}
 	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
 
-	// freighter (not passkey — see TestSetupSendRules_DiscoverContextRuleErr).
+	// delegated (not passkey — see TestSetupSendRules_DiscoverContextRuleErr).
 	_, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            testGAddress,
 	}, []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr}})
@@ -255,33 +255,33 @@ func TestSetupSwapRules_DefaultsToPasskeyWhenEmpty(t *testing.T) {
 	assert.Contains(t, err.Error(), "keyDataHex is required")
 }
 
-func TestSetupSwapRules_FreighterGAddressIsBundler(t *testing.T) {
+func TestSetupSwapRules_DelegatedGAddressIsBundler(t *testing.T) {
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, newContextRulesService(t), nil)
 	bundlerG := svc.bundler.PublicKey()
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		GAddress:            bundlerG,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not the bundler fee-payer")
 }
 
-func TestSetupSwapRules_PhantomMissingPublicKeyHex(t *testing.T) {
+func TestSetupSwapRules_Ed25519MissingPublicKeyHex(t *testing.T) {
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, newContextRulesService(t), nil)
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "phantom",
+		SignerType:          "ed25519",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "publicKeyHex is required")
 }
 
 func TestSetupSwapRules_DiscoverDefaultContextRuleErr(t *testing.T) {
-	// freighter (not passkey): a passkey with a non-empty keyDataHex now
+	// delegated (not passkey): a passkey with a non-empty keyDataHex now
 	// resolves via FindRuleForSigner instead of DiscoverDefaultContextRule
-	// (see LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6) — freighter still
+	// (see LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6) — delegated still
 	// exercises DiscoverDefaultContextRule's own error propagation unchanged.
 	rpc := &fakeSorobanRPC{
 		simulateFn: func(ctx context.Context, rpcURL, txXDR string, rc service.RPCResourceConfig) (*service.SimulateResult, error) {
@@ -293,7 +293,7 @@ func TestSetupSwapRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		GAddress:            testGAddress,
 	})
 	require.Error(t, err)
@@ -301,7 +301,7 @@ func TestSetupSwapRules_DiscoverDefaultContextRuleErr(t *testing.T) {
 }
 
 func TestSetupSwapRules_RuleAtIDErr(t *testing.T) {
-	// freighter (not passkey — see TestSetupSwapRules_DiscoverDefaultContextRuleErr).
+	// delegated (not passkey — see TestSetupSwapRules_DiscoverDefaultContextRuleErr).
 	rpc := &errAfterNFakeRPC{
 		t:         t,
 		responses: []*xdr.ScVal{scValPtr(scU32(1)), scValPtr(buildTestRuleScVal("default", true, ""))},
@@ -312,14 +312,14 @@ func TestSetupSwapRules_RuleAtIDErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		GAddress:            testGAddress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fetch default context rule")
 }
 
-func TestSetupSwapRules_FreighterAlreadyConfigured(t *testing.T) {
+func TestSetupSwapRules_DelegatedAlreadyConfigured(t *testing.T) {
 	signerKp, err := keypair.Random()
 	require.NoError(t, err)
 	contextRules := newContextRulesService(t,
@@ -330,7 +330,7 @@ func TestSetupSwapRules_FreighterAlreadyConfigured(t *testing.T) {
 
 	result, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		GAddress:            signerKp.Address(),
 	})
 	require.NoError(t, err)
@@ -356,11 +356,11 @@ func TestSetupSwapRules_VerifierNotConfigured(t *testing.T) {
 }
 
 func TestSetupSwapRules_DecodeKeyDataErr(t *testing.T) {
-	// phantom (not passkey): a passkey with a non-empty keyDataHex now
+	// ed25519 (not passkey): a passkey with a non-empty keyDataHex now
 	// resolves via FindRuleForSigner *before* ever hex-decoding it (see
 	// LATCH_BACKEND_BACKUP_SIGNER_SUBMIT.md R6), so a garbage passkey
 	// keyDataHex now surfaces as ErrSignerRuleNotFound, not a decode error —
-	// phantom's PublicKeyHex still exercises the same hex.DecodeString call.
+	// ed25519's PublicKeyHex still exercises the same hex.DecodeString call.
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t,
 		scU32(1), buildTestRuleScVal("default", true, ""),
@@ -370,7 +370,7 @@ func TestSetupSwapRules_DecodeKeyDataErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "phantom",
+		SignerType:          "ed25519",
 		PublicKeyHex:        "not-hex!!",
 	})
 	require.Error(t, err)
@@ -419,7 +419,7 @@ func TestSetupSwapRules_ExternalSignerBadVerifier(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestSetupSwapRules_FreighterBadGAddressScVal(t *testing.T) {
+func TestSetupSwapRules_DelegatedBadGAddressScVal(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	contextRules := newContextRulesService(t,
 		scU32(1), buildTestRuleScVal("default", true, ""),
@@ -432,7 +432,7 @@ func TestSetupSwapRules_FreighterBadGAddressScVal(t *testing.T) {
 	// buildDelegatedSignerScVal fails.
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		GAddress:            "not-a-valid-g-address",
 	})
 	require.Error(t, err)
@@ -455,7 +455,7 @@ func TestSetupSwapRules_UnsupportedSignerType(t *testing.T) {
 }
 
 func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
-	// phantom (not passkey — see TestSetupSwapRules_DecodeKeyDataErr): a
+	// ed25519 (not passkey — see TestSetupSwapRules_DecodeKeyDataErr): a
 	// passkey now short-circuits to alreadyConfigured/ErrSignerRuleNotFound
 	// before ever reaching buildSetupAuthTransaction.
 	smartAccountAddr := testContractAddress(t)
@@ -470,7 +470,7 @@ func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "phantom",
+		SignerType:          "ed25519",
 		PublicKeyHex:        strings.Repeat("ab", 32),
 	})
 	require.Error(t, err)
@@ -479,9 +479,9 @@ func TestSetupSwapRules_BuildSetupAuthTransactionErr(t *testing.T) {
 
 // ── ruleAuthorizesSigner ─────────────────────────────────────────────────────
 
-func TestRuleAuthorizesSigner_FreighterNoMatch(t *testing.T) {
+func TestRuleAuthorizesSigner_DelegatedNoMatch(t *testing.T) {
 	rule := ContextRuleSummary{Signers: []ContextRuleSigner{{Kind: "Delegated", GAddress: "GOTHER"}}}
-	assert.False(t, ruleAuthorizesSigner(rule, "freighter", "", testGAddress))
+	assert.False(t, ruleAuthorizesSigner(rule, "delegated", "", testGAddress))
 }
 
 func TestRuleAuthorizesSigner_ExternalVerifierMismatch(t *testing.T) {

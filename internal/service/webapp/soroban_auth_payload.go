@@ -17,7 +17,7 @@ var ErrNotAddressCredentials = errors.New("auth entry does not use address crede
 
 // hashSorobanAuthPayload computes the raw signature payload hash for a
 // Soroban authorization entry: SHA256(HashIdPreimage::SorobanAuthorization).
-// This is the digest an external signer (Ed25519/WebAuthn/Freighter) signs.
+// This is the digest an external signer (Ed25519/WebAuthn/delegated) signs.
 // Ports lib/soroban-auth-payload.ts's hashSorobanAuthPayload().
 func hashSorobanAuthPayload(entry xdr.SorobanAuthorizationEntry, networkPassphrase string) ([32]byte, error) {
 	if entry.Credentials.Type != xdr.SorobanCredentialsTypeSorobanCredentialsAddress || entry.Credentials.Address == nil {
@@ -148,7 +148,7 @@ func contextRuleIDsFromSmartAccountAuthEntry(entry xdr.SorobanAuthorizationEntry
 }
 
 // resolveContextRuleIDs determines which context rule ids a submit-*
-// handler should bind into the delegated/WebAuthn/Phantom AuthPayload it's
+// handler should bind into the delegated/WebAuthn/ed25519 AuthPayload it's
 // about to build for entry. It prefers ids already embedded in entry's own
 // signature payload, falls back to the caller-supplied bodyContextRuleID,
 // and returns ErrContextRuleIDRequired rather than silently defaulting to

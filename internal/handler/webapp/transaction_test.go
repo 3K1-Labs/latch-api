@@ -79,14 +79,14 @@ func TestBuildSend_InvalidBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestBuildSend_FreighterMissingSignerG(t *testing.T) {
+func TestBuildSend_DelegatedMissingSignerG(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/build-send", h.BuildSend)
 
 	req := httptest.NewRequest(http.MethodPost, "/transaction/build-send", postJSONBody(map[string]any{
 		"smartAccountAddress": "CADDRESS",
-		"signerType":          "freighter",
+		"signerType":          "delegated",
 		"assetId":             "native",
 		"recipient":           "GRECIPIENT",
 		"amount":              "1.5",
@@ -416,93 +416,6 @@ func TestSubmitDelegated_NetworkInvalid(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
 }
 
-// ── SubmitPhantom ────────────────────────────────────────────────────────────
-
-func TestSubmitPhantom_Success(t *testing.T) {
-	stub := &stubTransaction{submitResult: webapp.SubmitResult{Hash: "cafebabe", Status: "SUCCESS"}}
-	h := NewTransactionHandler(stub, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"txXdr":            "AAAAtx==",
-		"authEntryXdr":     "AAAAauth==",
-		"authSignatureHex": "aabbcc",
-		"publicKeyHex":     "ddeeff",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), `"hash":"cafebabe"`)
-}
-
-func TestSubmitPhantom_InvalidBody(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"txXdr": "AAAAtx==",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSubmitPhantom_MissingAuthEntry(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"txXdr":            "AAAAtx==",
-		"authSignatureHex": "aabbcc",
-		"publicKeyHex":     "ddeeff",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSubmitPhantom_ServiceError(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{submitPhantomErr: assertErr}, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"txXdr":            "AAAAtx==",
-		"authEntryXdr":     "AAAAauth==",
-		"authSignatureHex": "aabbcc",
-		"publicKeyHex":     "ddeeff",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSubmitPhantom_NetworkInvalid(t *testing.T) {
-	h := NewTransactionHandler(&stubTransaction{}, testCfg())
-	r := gin.New()
-	r.POST("/transaction/submit", h.SubmitPhantom)
-
-	req := httptest.NewRequest(http.MethodPost, "/transaction/submit", postJSONBody(map[string]any{
-		"network":          "devnet",
-		"txXdr":            "AAAAtx==",
-		"authEntryXdr":     "AAAAauth==",
-		"authSignatureHex": "aabbcc",
-		"publicKeyHex":     "ddeeff",
-	}))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"invalid_network"`)
-}
-
 // ── PrepareSign ──────────────────────────────────────────────────────────────
 
 func TestPrepareSign_Success(t *testing.T) {
@@ -563,7 +476,7 @@ func TestPrepareSign_InvalidBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
+func TestPrepareSign_DelegatedMissingSignerG(t *testing.T) {
 	h := NewTransactionHandler(&stubTransaction{}, testCfg())
 	r := gin.New()
 	r.POST("/transaction/prepare-sign", h.PrepareSign)
@@ -571,7 +484,7 @@ func TestPrepareSign_FreighterMissingSignerG(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/transaction/prepare-sign", postJSONBody(map[string]any{
 		"smartAccountAddress": "CADDRESS",
 		"unsignedTxXdr":       "AAAAunsigned==",
-		"signerType":          "freighter",
+		"signerType":          "delegated",
 	}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -152,7 +152,7 @@ func TestBuildSwap_UnknownSignerKeyRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSignerRuleNotFound)
 }
 
-func TestBuildSwap_FreighterDelegatedAdminRequiresExternalSign(t *testing.T) {
+func TestBuildSwap_DelegatedDelegatedAdminRequiresExternalSign(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	tokenInAddr := testContractAddress(t)
 	adminKp, err := keypair.Random()
@@ -163,7 +163,7 @@ func TestBuildSwap_FreighterDelegatedAdminRequiresExternalSign(t *testing.T) {
 	require.NoError(t, err)
 
 	// Default rule authorizes only Delegated(adminKp) — a self-custodial
-	// Freighter-linked account (see /api/smart-account/freighter) whose sole
+	// Delegated account (see /api/smart-account/delegated) whose sole
 	// admin signer is the user's own G, not the bundler's. The caller signs
 	// with that same G, so the smart-account entry can claim
 	// Delegated(adminKp) directly, but adminKp still must sign the delegated
@@ -192,7 +192,7 @@ func TestBuildSwap_FreighterDelegatedAdminRequiresExternalSign(t *testing.T) {
 
 	result, err := svc.BuildSwap(context.Background(), BuildSwapInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             adminKp.Address(),
 		SwapChainXdr:        sampleSwapChainXdr(t),
 		TokenInContractID:   tokenInAddr,
@@ -259,7 +259,7 @@ func TestBuildSwap_SignerGIsBundler(t *testing.T) {
 
 	_, err := svc.BuildSwap(context.Background(), BuildSwapInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             bundlerG,
 		SwapChainXdr:        sampleSwapChainXdr(t),
 		TokenInContractID:   testContractAddress(t),
@@ -312,7 +312,7 @@ func TestBuildSwap_InsufficientBalance(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSwapValidation))
 }
 
-func TestBuildSwap_FreighterWithoutPasskeyOnRule(t *testing.T) {
+func TestBuildSwap_DelegatedWithoutPasskeyOnRule(t *testing.T) {
 	smartAccountAddr := testContractAddress(t)
 	signerKp, err := keypair.Random()
 	require.NoError(t, err)
@@ -331,7 +331,7 @@ func TestBuildSwap_FreighterWithoutPasskeyOnRule(t *testing.T) {
 
 	_, err = svc.BuildSwap(context.Background(), BuildSwapInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		SignerG:             signerKp.Address(),
 		SwapChainXdr:        sampleSwapChainXdr(t),
 		TokenInContractID:   testContractAddress(t),
@@ -340,4 +340,37 @@ func TestBuildSwap_FreighterWithoutPasskeyOnRule(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSwapSignerMismatch))
+}
+
+// #124 review: a swap signs every call against one rule, so an account with
+// no Default rule (discovery falls back to a token-only rule 0) is refused
+// upfront rather than handed a forward() it can't authorize.
+func TestBuildSwap_NoDefaultRuleIsRefused(t *testing.T) {
+	smartAccountAddr := testContractAddress(t)
+	verifierAddr := testContractAddress(t)
+	tokenOnly := buildTestRuleScVal("xlm-only", false, testContractAddress(t), externalSignerScVal(t, verifierAddr, []byte{0xaa}))
+	contextRules := newContextRulesService(t, scU32(1), tokenOnly, tokenOnly)
+
+	rpc := &balanceThenAuthFakeRPC{
+		t: t, balHi: 0, balLo: 1_000_000_000,
+		fakeSorobanRPC: fakeSorobanRPC{
+			sequenceFn: func(context.Context, string, string) (int64, error) { return 100, nil },
+			simulateFn: func(context.Context, string, string, service.RPCResourceConfig) (*service.SimulateResult, error) {
+				t.Fatal("refused before anything is simulated")
+				return nil, nil
+			},
+		},
+	}
+	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
+	svc.webauthnVerifierAddress = verifierAddr
+
+	_, err := svc.BuildSwap(context.Background(), BuildSwapInput{
+		SmartAccountAddress: smartAccountAddr,
+		SignerType:          "passkey",
+		SwapChainXdr:        sampleSwapChainXdr(t),
+		TokenInContractID:   testContractAddress(t),
+		AmountInRaw:         "100",
+		AmountOutMinRaw:     "90",
+	})
+	assert.True(t, errors.Is(err, ErrFeeRuleNotFound), "err = %v", err)
 }

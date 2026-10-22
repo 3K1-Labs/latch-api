@@ -85,6 +85,12 @@ func (s *TransactionService) SubmitBatchAuthEntries(ctx context.Context, txXdrB6
 	var wallet string
 	sponsored := false
 	if len(hostFunctions) == 1 {
+		if payer, ok, err := s.userPaidWallet(ctx, hostFunctions[0]); err != nil || ok {
+			if err != nil {
+				return SubmitResult{}, err
+			}
+			return s.submitForward(ctx, payer, hostFunctions[0], entries)
+		}
 		wallet, sponsored = sponsoredWallet(hostFunctions[0])
 	}
 	bundlerG := s.bundler.PublicKey()

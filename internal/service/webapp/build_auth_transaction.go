@@ -22,10 +22,10 @@ import (
 type authTransactionCoreInput struct {
 	smartAccountAddress string
 	contextRuleID       uint32
-	signerType          string // "passkey" | "phantom" | "freighter"
-	signerG             string // required if signerType == "freighter"
+	signerType          string // "passkey" | "ed25519" | "delegated"
+	signerG             string // required if signerType == "delegated"
 	// feePayerG is the bundler G the tx envelope pays fees from. For a
-	// freighter signer whose feePayerG differs from signerG (e.g. a swap
+	// delegated signer whose feePayerG differs from signerG (e.g. a swap
 	// where the bundler is also a distinct on-chain party), a second
 	// delegated __check_auth entry is synthesized for it too.
 	feePayerG string
@@ -35,11 +35,14 @@ type authTransactionCoreInput struct {
 	// external signer needed if the bundler itself can sign delegatedAuthG).
 	bundlerDelegatedAuthMode bool
 	delegatedAuthG           string
+	// dropAuthAddress, when set, removes that address's recorded entries:
+	// the gasless executor's, which the relayer signs itself.
+	dropAuthAddress string
 }
 
 // buildAuthTransactionCore simulates buildTx(nil, nil), extracts and
 // classifies its auth entries, synthesizes any needed delegated native
-// __check_auth entries, and — for a freighter or bundler-delegated signer —
+// __check_auth entries, and — for a delegated or bundler-delegated signer —
 // rewrites the smart account entry's signature to the appropriate
 // Delegated(G) AuthPayload and builds the external-signing templates. Ports
 // lib/transaction/simulateAndExtractAuth.ts.
@@ -72,13 +75,16 @@ func (s *TransactionService) buildAuthTransactionCore(
 	if err != nil {
 		return BuildAuthTransactionResult{}, fmt.Errorf("normalize auth entries: %w", err)
 	}
+	if in.dropAuthAddress != "" {
+		entries = dropAuthFor(entries, in.dropAuthAddress)
+	}
 	if len(entries) == 0 {
 		return BuildAuthTransactionResult{}, fmt.Errorf("no auth entries in simulation result")
 	}
 	validUntilLedger := setAddressCredentialExpiration(entries, sim.LatestLedger, 60)
 
 	var signerGStr string
-	if in.signerType == "freighter" {
+	if in.signerType == "delegated" {
 		signerGStr = in.signerG
 	}
 
@@ -133,8 +139,8 @@ func (s *TransactionService) buildAuthTransactionCore(
 			return BuildAuthTransactionResult{}, err
 		}
 	}
-	// Freighter swaps: bundler fee-payer may also need a separate __check_auth entry.
-	if in.signerType == "freighter" && in.feePayerG != "" && in.feePayerG != signerGStr {
+	// delegated swaps: bundler fee-payer may also need a separate __check_auth entry.
+	if in.signerType == "delegated" && in.feePayerG != "" && in.feePayerG != signerGStr {
 		if err := synthesizeDelegatedGEntry(in.feePayerG); err != nil {
 			return BuildAuthTransactionResult{}, err
 		}
@@ -205,7 +211,7 @@ func (s *TransactionService) buildAuthTransactionCore(
 		SimulationResultXdr:                   string(simResultJSON),
 	}
 
-	// bundlerDelegatedAuthMode and the plain-freighter path both rewrite the
+	// bundlerDelegatedAuthMode and the plain-delegated path both rewrite the
 	// smart account entry's signature to a Delegated(G) AuthPayload — note
 	// this does NOT rebuild result.TxXdr (the envelope's own embedded auth is
 	// discarded and replaced at submit time by submitWithBundler, which takes
@@ -250,7 +256,7 @@ func (s *TransactionService) buildAuthTransactionCore(
 			result.SubmitMethod = "delegated"
 		}
 
-	case in.signerType == "freighter" && signerGStr != "":
+	case in.signerType == "delegated" && signerGStr != "":
 		if err := rewriteSmartAccountEntrySignature(entries, smartAccountAuthEntryIndex, signerGStr, contextRuleIDs); err != nil {
 			return BuildAuthTransactionResult{}, err
 		}
@@ -271,7 +277,7 @@ func (s *TransactionService) buildAuthTransactionCore(
 		result.GAddressEntryTemplateXdr = templateXdr
 		result.SubmitMethod = "delegated"
 
-	case in.signerType == "phantom":
+	case in.signerType == "ed25519":
 		result.SubmitMethod = "bundler-delegated"
 	default:
 		result.SubmitMethod = "webauthn"

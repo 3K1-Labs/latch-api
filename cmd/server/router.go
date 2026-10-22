@@ -361,6 +361,11 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 			{
 				transaction.GET("/bundler", transactionRelayHandler.Bundler)
 				transaction.POST("/submit", transactionRelayLimiter, transactionRelayHandler.Submit)
+				// Phase B (#110): mobile builds sends and swaps here, wrapped
+				// in FeeForwarder.forward(), and only signs them on the phone.
+				transactionBuildHandler := handler.NewTransactionBuildHandler(webappTransactionSvc, cfg)
+				transaction.POST("/build-send", transactionBuildHandler.BuildSend)
+				transaction.POST("/build-swap", transactionBuildHandler.BuildSwap)
 			}
 
 			// Solo backup signers (LATCH_MOBILE_BACKUP_SIGNERS.md): the client
@@ -477,10 +482,8 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 
 		smartAccountGroup.GET("/webauthn", webappSmartAccountHandler.Query)
 		smartAccountGroup.POST("/webauthn", webappSmartAccountHandler.Deploy)
-		smartAccountGroup.GET("/freighter", webappSmartAccountHandler.QueryFreighter)
-		smartAccountGroup.POST("/freighter", webappSmartAccountHandler.DeployFreighter)
-		smartAccountGroup.GET("", webappSmartAccountHandler.PhantomConfig)
-		smartAccountGroup.POST("", webappSmartAccountHandler.ConnectPhantom)
+		smartAccountGroup.GET("/delegated", webappSmartAccountHandler.QueryDelegated)
+		smartAccountGroup.POST("/delegated", webappSmartAccountHandler.DeployDelegated)
 	}
 
 	if webappTransactionSvc != nil {
@@ -490,7 +493,6 @@ func newRouter(cfg *config.Config, pool pinger, sqlDB *sql.DB, redisClient *redi
 			transactionGroup.POST("/build-send", webappTransactionHandler.BuildSend)
 			transactionGroup.POST("/submit-webauthn", webappTransactionHandler.SubmitWebAuthn)
 			transactionGroup.POST("/submit-delegated", webappTransactionHandler.SubmitDelegated)
-			transactionGroup.POST("/submit", webappTransactionHandler.SubmitPhantom)
 			transactionGroup.POST("/prepare-sign", webappTransactionHandler.PrepareSign)
 			transactionGroup.POST("/build", webappTransactionHandler.BuildCounter)
 			transactionGroup.POST("/build-delegated", webappTransactionHandler.BuildDelegatedCounter)

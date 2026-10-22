@@ -57,7 +57,7 @@ func signedDelegatedEntryFromApproval(approval MultisigApproval) (xdr.SorobanAut
 	if approval.DelegatedEntryTemplateXdr == "" || approval.DelegatedSignedAuthEntryBase64 == "" || approval.DelegatedSignerAddress == "" {
 		return xdr.SorobanAuthorizationEntry{}, fmt.Errorf("delegated approval for member %s is missing signature material", approval.MemberID)
 	}
-	return applyDelegatedFreighterSignature(approval.DelegatedEntryTemplateXdr, approval.DelegatedSignedAuthEntryBase64, approval.DelegatedSignerAddress)
+	return applyDelegatedSignature(approval.DelegatedEntryTemplateXdr, approval.DelegatedSignedAuthEntryBase64, approval.DelegatedSignerAddress)
 }
 
 // buildMultisigExecuteAuthEntries assembles the final, fully-signed auth

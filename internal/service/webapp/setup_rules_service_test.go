@@ -27,7 +27,7 @@ func newTestTransactionServiceWithContextRules(t *testing.T, rpc sorobanRPC, con
 	require.NoError(t, err)
 	verifierAddr := testContractAddress(t)
 	ed25519VerifierAddr := testContractAddress(t)
-	return NewTransactionService(rpc, bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), nil)
+	return NewTransactionService(withForwardRPC(t, rpc), bundlerSvc, contextRules, "https://rpc.example.com", testPassphrase, verifierAddr, ed25519VerifierAddr, testContractAddress(t), &fakeGasless{})
 }
 
 // ── SetupSendRules ───────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ func TestSetupSendRules_AlreadyConfigured(t *testing.T) {
 
 	result, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            testGAddress,
 	}, catalog)
@@ -69,7 +69,7 @@ func TestSetupSendRules_MatchedRuleWrongSignerStillMissing(t *testing.T) {
 	require.NoError(t, err)
 
 	// DiscoverContextRule(asset): count=1, getRule(0)=send-usdc (matches by
-	// contract, but its only signer is a *different* freighter G-address) →
+	// contract, but its only signer is a *different* delegated G-address) →
 	// RuleAtID(0) re-fetch shows the same rule → signer not authorized →
 	// still missing, a new rule must be created for our signer.
 	// DiscoverDefaultContextRule: count=1, getRule(0)=send-usdc (not
@@ -97,13 +97,13 @@ func TestSetupSendRules_MatchedRuleWrongSignerStillMissing(t *testing.T) {
 	svc := newTestTransactionServiceWithContextRules(t, rpc, contextRules, nil)
 	catalog := []CatalogAsset{{AssetID: "USDC", ContractID: assetContractAddr, Decimals: 7}}
 
-	// A different freighter G-address than the rule's existing signer.
+	// A different delegated G-address than the rule's existing signer.
 	newSignerKp, err := keypair.Random()
 	require.NoError(t, err)
 	newGAddress := newSignerKp.Address()
 	result, err := svc.SetupSendRules(context.Background(), SetupSendRulesInput{
 		SmartAccountAddress: smartAccountAddr,
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 		AssetID:             "USDC",
 		GAddress:            newGAddress,
 	}, catalog)
@@ -287,13 +287,13 @@ func TestSetupSwapRules_BundlerDelegatedAdmin(t *testing.T) {
 	assert.True(t, result.DelegatedGAuthEntrySynthesized)
 }
 
-func TestSetupSwapRules_MissingGAddressForFreighter(t *testing.T) {
+func TestSetupSwapRules_MissingGAddressForDelegated(t *testing.T) {
 	contextRules := newContextRulesService(t)
 	svc := newTestTransactionServiceWithContextRules(t, &fakeSorobanRPC{}, contextRules, nil)
 
 	_, err := svc.SetupSwapRules(context.Background(), SetupSwapRulesInput{
 		SmartAccountAddress: testContractAddress(t),
-		SignerType:          "freighter",
+		SignerType:          "delegated",
 	})
 	require.Error(t, err)
 }

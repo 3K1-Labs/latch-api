@@ -13,22 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeGasless records submissions and answers with rec/err.
-type fakeGasless struct {
-	calls []service.GaslessSubmission
-	rec   service.GaslessRecord
-	err   error
-}
-
-func (f *fakeGasless) Submit(_ context.Context, sub service.GaslessSubmission) (service.GaslessRecord, error) {
-	f.calls = append(f.calls, sub)
-	return f.rec, f.err
-}
-
-func gaslessSuccess(hash string) *fakeGasless {
-	return &fakeGasless{rec: service.GaslessRecord{Status: service.GaslessStatusSuccess, TxHash: hash}}
-}
-
 // noBundlerRPC fails the test if anything reads the bundler's sequence or
 // sends a transaction itself: sponsored calls must go through gasless only.
 func noBundlerRPC(t *testing.T, rpc *fakeSorobanRPC) *fakeSorobanRPC {
@@ -172,7 +156,7 @@ func TestSubmitSponsored(t *testing.T) {
 	})
 }
 
-func newGaslessTransactionService(t *testing.T, rpc sorobanRPC, g gaslessSubmitter) (*TransactionService, string) {
+func newGaslessTransactionService(t *testing.T, rpc sorobanRPC, g gaslessClient) (*TransactionService, string) {
 	t.Helper()
 	svc, bundlerKp := newTestTransactionService(t, rpc, defaultContextRulesService(t))
 	svc.gasless = g

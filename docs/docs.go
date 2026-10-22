@@ -1300,7 +1300,7 @@ const docTemplate = `{
         },
         "/api/multisig/proposals/{id}/approve/delegated/begin": {
             "post": {
-                "description": "Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. Freighter), plus the auth digest and validUntilLedger to sign against.",
+                "description": "Returns the preimage and entry template XDR for a delegated signer to sign externally (e.g. an external wallet), plus the auth digest and validUntilLedger to sign against.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1890,87 +1890,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/smart-account": {
-            "get": {
-                "description": "Returns the ed25519 verifier and counter contract addresses the Phantom demo flow uses.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "smart-account"
-                ],
-                "summary": "Get the counter-demo contract addresses",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "default": "testnet",
-                        "description": "Network",
-                        "name": "network",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Derives a G-address from a Phantom Ed25519 public key and deploys (or idempotently returns) the counter-demo smart account WASM with that key as its External signer. No production UI calls this — kept for API parity with the reference demo.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "smart-account"
-                ],
-                "summary": "Deploy the demo counter-contract smart account for a Phantom (Solana) signer",
-                "parameters": [
-                    {
-                        "description": "Phantom Ed25519 public key",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.connectPhantomRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/smart-account/balances": {
             "get": {
                 "description": "Fetches balances for every asset in the configured catalog. Zero balances are omitted unless all=1.",
@@ -2075,7 +1994,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/smart-account/freighter": {
+        "/api/smart-account/delegated": {
             "get": {
                 "description": "Pure computation over a client-supplied G-address (no session, no persistence). Returns the deterministic smart account address and whether it's already deployed.",
                 "produces": [
@@ -2084,7 +2003,7 @@ const docTemplate = `{
                 "tags": [
                     "smart-account"
                 ],
-                "summary": "Derive a smart account address from a Freighter/mnemonic G-address",
+                "summary": "Derive a smart account address from a delegated G-address",
                 "parameters": [
                     {
                         "type": "string",
@@ -2134,15 +2053,15 @@ const docTemplate = `{
                 "tags": [
                     "smart-account"
                 ],
-                "summary": "Deploy a smart account for a Freighter/mnemonic G-address",
+                "summary": "Deploy a smart account for a delegated G-address",
                 "parameters": [
                     {
-                        "description": "Freighter G-address",
+                        "description": "Delegated G-address",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.deployFreighterSmartAccountRequest"
+                            "$ref": "#/definitions/internal_handler_webapp.deployDelegatedSmartAccountRequest"
                         }
                     }
                 ],
@@ -2395,7 +2314,7 @@ const docTemplate = `{
         },
         "/api/transaction/build-delegated": {
             "post": {
-                "description": "Like build, but always prepares the smart-account entry for a Freighter/mnemonic G-address signature. No production UI calls this — kept for API parity.",
+                "description": "Like build, but always prepares the smart-account entry for a delegated G-address signature. No production UI calls this — kept for API parity.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2667,50 +2586,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/transaction/submit": {
-            "post": {
-                "description": "Attaches the client's Phantom (Solana wallet) Ed25519 signature to the built transaction's auth entry and submits it to the network.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transaction"
-                ],
-                "summary": "Submit a Phantom-signed transaction",
-                "parameters": [
-                    {
-                        "description": "Signed transaction and auth entry",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.submitPhantomRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_webapp.webappErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/transaction/submit-delegated": {
             "post": {
-                "description": "Attaches a native G-address signature (Freighter or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.",
+                "description": "Attaches a native G-address signature (an external wallet or a locally-held mnemonic key) to the built transaction's smart-account and delegated auth entries and submits it to the network.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2720,7 +2598,7 @@ const docTemplate = `{
                 "tags": [
                     "transaction"
                 ],
-                "summary": "Submit a Freighter/mnemonic-delegated-signed transaction",
+                "summary": "Submit a delegated-signed transaction",
                 "parameters": [
                     {
                         "description": "Signed transaction and auth entries",
@@ -4631,7 +4509,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deploys (or idempotently returns) the deterministic smart account whose\nsigner is a classic Stellar account — the Freighter / external-wallet path.\nTestnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.",
+                "description": "Deploys (or idempotently returns) the deterministic smart account whose\nsigner is a classic Stellar account — the delegated (external-wallet) path.\nTestnet only: this flow funds the signer via friendbot, which has no mainnet equivalent.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6193,20 +6071,6 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_webapp.connectPhantomRequest": {
-            "type": "object",
-            "required": [
-                "publicKeyHex"
-            ],
-            "properties": {
-                "network": {
-                    "type": "string"
-                },
-                "publicKeyHex": {
-                    "type": "string"
-                }
-            }
-        },
         "internal_handler_webapp.counterResponse": {
             "type": "object",
             "properties": {
@@ -6364,7 +6228,7 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handler_webapp.deployFreighterSmartAccountRequest": {
+        "internal_handler_webapp.deployDelegatedSmartAccountRequest": {
             "type": "object",
             "required": [
                 "gAddress"
@@ -6880,43 +6744,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "smartAccountAuthEntryXdr": {
-                    "type": "string"
-                },
-                "txXdr": {
-                    "type": "string"
-                }
-            }
-        },
-        "internal_handler_webapp.submitPhantomRequest": {
-            "type": "object",
-            "required": [
-                "authSignatureHex",
-                "publicKeyHex",
-                "txXdr"
-            ],
-            "properties": {
-                "authEntriesXdr": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "authEntryXdr": {
-                    "type": "string"
-                },
-                "authSignatureHex": {
-                    "type": "string"
-                },
-                "contextRuleId": {
-                    "type": "integer"
-                },
-                "network": {
-                    "type": "string"
-                },
-                "prefixedMessage": {
-                    "type": "string"
-                },
-                "publicKeyHex": {
                     "type": "string"
                 },
                 "txXdr": {

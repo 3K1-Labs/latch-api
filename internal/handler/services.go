@@ -61,7 +61,7 @@ type accountService interface {
 type smartAccountDeployService interface {
 	DeployByPublicKey(ctx context.Context, publicKeyHex string) (address string, alreadyDeployed bool, err error)
 	DeployByKeyData(ctx context.Context, keyDataHex string) (address string, alreadyDeployed bool, err error)
-	DeployFreighter(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error)
+	DeployDelegated(ctx context.Context, gAddress string) (address string, alreadyDeployed bool, err error)
 	DeployMultisig(ctx context.Context, signers []webapp.MultisigSignerInit, threshold uint32, salt []byte) (address string, alreadyDeployed bool, err error)
 }
 
