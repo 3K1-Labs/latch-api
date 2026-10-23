@@ -100,7 +100,7 @@ func TestPlanForward_FeeToken(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantToken, w.fee.Token)
 			assert.Equal(t, testExecutor, w.executor)
-			assert.Equal(t, int64(4*50_000), g.quoted[0], "quote asks for 4x the plain action's resource fee")
+			assert.Equal(t, int64(2*50_000), g.quoted[0], "quote asks for 2x the plain action's resource fee")
 		})
 	}
 }

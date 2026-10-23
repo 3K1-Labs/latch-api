@@ -47,15 +47,7 @@ const (
 	// what forward() adds (the fee token's approve and transfer_from) when
 	// asking for a quote. Over-estimating only raises the cap the user
 	// signs; the relayer charges the real cost.
-	//
-	// 2 measured short on a wallet's first forward() call: approve()
-	// writes a brand-new allowance entry rather than updating one, which
-	// costs substantially more than the steady-state case this factor was
-	// sized from. Observed shortfall: actual resource fee ~1.48x the
-	// already-doubled-plus-margin quote (~3.7x the bare action, against an
-	// intended ~2.5x with the gasless service's 25% default margin) — see
-	// the max_fee_too_low fee_quote_stale report this fixes.
-	forwardResourceFactor = 4
+	forwardResourceFactor = 2
 	// forwardExpiryLedgers is how long the signed fee terms stay valid
 	// (~10 min): past signing and submission.
 	forwardExpiryLedgers = 120
