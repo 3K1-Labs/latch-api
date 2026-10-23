@@ -212,6 +212,9 @@ func (h *SmartAccountHandler) DeployEd25519(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.deploySvc.DeployByPublicKey(c.Request.Context(), req.PublicKeyHex)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy ed25519 smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return
@@ -432,6 +435,9 @@ func (h *SmartAccountHandler) DeployMultisig(c *gin.Context) {
 
 	address, alreadyDeployed, err := h.deploySvc.DeployMultisig(c.Request.Context(), signers, req.Threshold, salt)
 	if err != nil {
+		if failGasless(c, err) {
+			return
+		}
 		slog.Error("deploy multisig smart account", "network", network, "err", err)
 		httpx.Fail(c, http.StatusInternalServerError, httpx.ErrInternal, "internal error")
 		return

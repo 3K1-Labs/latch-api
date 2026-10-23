@@ -221,10 +221,16 @@ func failBuild(c *gin.Context, op, smartAccountAddress string, err error) {
 	}
 	switch {
 	case errors.Is(err, webapp.ErrAssetNotFound):
+		slog.Warn(op, "smartAccountAddress", smartAccountAddress, "err", err)
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "asset not found in catalog")
 	case errors.Is(err, webapp.ErrSignerRuleNotFound), errors.Is(err, webapp.ErrSwapSignerMismatch):
+		slog.Warn(op, "smartAccountAddress", smartAccountAddress, "err", err)
 		httpx.Fail(c, http.StatusConflict, httpx.ErrConflict, err.Error())
+	case errors.Is(err, webapp.ErrInvalidSwapChainXdr):
+		slog.Warn(op, "smartAccountAddress", smartAccountAddress, "err", err)
+		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, "invalid swapChainXdr")
 	case errors.Is(err, webapp.ErrSwapValidation):
+		slog.Warn(op, "smartAccountAddress", smartAccountAddress, "err", err)
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrValidation, err.Error())
 	default:
 		slog.Error(op, "smartAccountAddress", smartAccountAddress, "err", err)

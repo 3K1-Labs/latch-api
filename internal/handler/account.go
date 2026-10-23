@@ -249,7 +249,7 @@ func (h *AccountHandler) DepositStatus(c *gin.Context) {
 		h.auditSvc.Log(c.Request.Context(), userID, string(service.ActionFundingCompleted), c.ClientIP(), c.Request.UserAgent(), map[string]any{
 			"memo_id": memoID,
 		})
-		if err := h.notifSvc.Notify(c.Request.Context(), userID, service.NotificationRecord{
+		if err := h.notifSvc.Notify(c.Request.Context(), userID, scope, service.NotificationRecord{
 			Type: "funding_completed", Title: "Deposit received", Body: "Your deposit has been credited.",
 			DedupeKey: memoID,
 		}); err != nil {

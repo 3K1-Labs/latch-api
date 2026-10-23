@@ -21,10 +21,13 @@ import (
 func failGasless(c *gin.Context, err error) bool {
 	switch {
 	case errors.Is(err, webapp.ErrInsufficientFeeBalance):
+		slog.Warn("gasless forward: insufficient fee balance", "path", c.FullPath(), "err", err)
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrInsufficientFeeBalance, webapp.ErrInsufficientFeeBalance.Error())
 	case errors.Is(err, webapp.ErrFeeQuoteStale):
+		slog.Warn("gasless forward: fee quote stale", "path", c.FullPath(), "err", err)
 		httpx.Fail(c, http.StatusConflict, httpx.ErrFeeQuoteStale, webapp.ErrFeeQuoteStale.Error())
 	case errors.Is(err, webapp.ErrFeeRuleNotFound):
+		slog.Warn("gasless forward: fee rule not found", "path", c.FullPath(), "err", err)
 		httpx.Fail(c, http.StatusBadRequest, httpx.ErrFeeRuleNotFound, webapp.ErrFeeRuleNotFound.Error())
 	case errors.Is(err, service.ErrGaslessTooManyFailures):
 		slog.Warn("gasless forward failure limit", "path", c.FullPath(), "err", err)

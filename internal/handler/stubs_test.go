@@ -274,23 +274,23 @@ type stubNotification struct {
 	markAllErr  error
 }
 
-func (s *stubNotification) Notify(_ context.Context, userID string, rec service.NotificationRecord) error {
+func (s *stubNotification) Notify(_ context.Context, userID, _ string, rec service.NotificationRecord) error {
 	s.gotUserID = userID
 	s.gotRecord = rec
 	s.notifyN++
 	return s.notifyErr
 }
 
-func (s *stubNotification) List(_ context.Context, _, _ string, _ int) ([]service.Notification, string, error) {
+func (s *stubNotification) List(_ context.Context, _, _, _ string, _ int) ([]service.Notification, string, error) {
 	return s.listOut, s.listCursorOut, s.listErr
 }
 
-func (s *stubNotification) UnreadCount(_ context.Context, _ string) (int, error) {
+func (s *stubNotification) UnreadCount(_ context.Context, _, _ string) (int, error) {
 	return s.unreadCount, s.unreadErr
 }
 
-func (s *stubNotification) MarkRead(_ context.Context, _, _ string) error { return s.markReadErr }
-func (s *stubNotification) MarkAllRead(_ context.Context, _ string) error { return s.markAllErr }
+func (s *stubNotification) MarkRead(_ context.Context, _, _, _ string) error { return s.markReadErr }
+func (s *stubNotification) MarkAllRead(_ context.Context, _, _ string) error { return s.markAllErr }
 
 type stubPushDevice struct {
 	registerErr error
@@ -301,12 +301,12 @@ type stubPushDevice struct {
 	gotPlatform string
 }
 
-func (s *stubPushDevice) Register(_ context.Context, userID, token, platform string) error {
+func (s *stubPushDevice) Register(_ context.Context, userID, _, token, platform string) error {
 	s.gotUserID, s.gotToken, s.gotPlatform = userID, token, platform
 	return s.registerErr
 }
 
-func (s *stubPushDevice) Delete(_ context.Context, userID, token string) error {
+func (s *stubPushDevice) Delete(_ context.Context, userID, _, token string) error {
 	s.gotUserID, s.gotToken = userID, token
 	return s.deleteErr
 }
