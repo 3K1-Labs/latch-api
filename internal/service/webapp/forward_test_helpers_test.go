@@ -11,7 +11,7 @@ import (
 
 // Forward-mode fixtures. Sends and swaps are always wrapped in forward(), so
 // every TransactionService test gets a fake gasless service and an RPC that
-// answers the fee-token balance read and the plain-action fee simulation;
+// answers the fee-token balance read and the forward() fee simulation;
 // everything else reaches the test's own fake unchanged.
 
 var (
@@ -69,12 +69,17 @@ func gaslessSuccess(hash string) *fakeGasless {
 }
 
 // forwardRPC answers balance() on the fee tokens from balances (default
-// 1,000 XLM / 1,000 USDC) and the plain-action fee simulation, delegating
-// everything else.
+// 1,000 XLM / 1,000 USDC), the latest ledger and the forward() fee
+// simulation, delegating everything else.
 type forwardRPC struct {
 	sorobanRPC
-	t        *testing.T
-	balances map[string]int64
+	t         *testing.T
+	balances  map[string]int64
+	simTokens []string // fee token of each forward() fee simulation
+}
+
+func (f *forwardRPC) GetLatestLedger(context.Context, string) (int64, error) {
+	return 1000, nil
 }
 
 func withForwardRPC(t *testing.T, rpc sorobanRPC) *forwardRPC {
@@ -96,7 +101,9 @@ func (f *forwardRPC) SimulateTransaction(ctx context.Context, rpcURL, txXDR stri
 				require.NoError(f.t, err)
 				return &service.SimulateResult{Results: []service.SimResultEntry{{XDR: b64}}}, nil
 			}
-			if inv.FunctionName != forwardFn && inv.FunctionName != "balance" && len(op.Auth) == 0 && isFeeSimulation(env) {
+			if inv.FunctionName == forwardFn && len(op.Auth) == 0 && isFeeSimulation(env) {
+				token, _ := scValToAddressString(inv.Args[0])
+				f.simTokens = append(f.simTokens, token)
 				return &service.SimulateResult{MinResourceFee: "50000", LatestLedger: 1000}, nil
 			}
 		}
@@ -104,7 +111,7 @@ func (f *forwardRPC) SimulateTransaction(ctx context.Context, rpcURL, txXDR stri
 	return f.sorobanRPC.SimulateTransaction(ctx, rpcURL, txXDR, rc)
 }
 
-// isFeeSimulation recognises planForward's plain-action simulation by its
+// isFeeSimulation recognises planForward's forward() fee simulation by its
 // dummy source account.
 func isFeeSimulation(env xdr.TransactionEnvelope) bool {
 	src := env.V1.Tx.SourceAccount.ToAccountId()

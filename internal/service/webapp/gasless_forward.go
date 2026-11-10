@@ -43,19 +43,17 @@ const (
 	// forwardArgCount is forward()'s argument count; argument 7 is the user.
 	forwardArgCount = 9
 	forwardUserArg  = 7
-	// forwardResourceFactor scales the plain action's resource fee to cover
-	// what forward() adds (the fee token's approve and transfer_from) when
-	// asking for a quote. Over-estimating only raises the cap the user
-	// signs; the relayer charges the real cost.
+	// forwardResourceFactor is headroom on forward()'s simulated resource
+	// fee when asking for a quote: the simulation records auth, so it skips
+	// the wallet's signature check, and rent can change before submission.
+	// Over-estimating only raises the cap the user signs; the relayer
+	// charges the real cost.
 	//
-	// 2 measured short on a wallet's first forward() call: approve()
-	// writes a brand-new allowance entry rather than updating one, which
-	// costs substantially more than the steady-state case this factor was
-	// sized from. Observed shortfall: actual resource fee ~1.48x the
-	// already-doubled-plus-margin quote (~3.7x the bare action, against an
-	// intended ~2.5x with the gasless service's 25% default margin) — see
-	// the max_fee_too_low fee_quote_stale report this fixes.
-	forwardResourceFactor = 4
+	// The quote used to price the plain action alone, which missed what
+	// forward() itself costs. On testnet a USDC transfer simulated at
+	// 116,104 stroops and its forward() at 11,992,816, so even 4x the plain
+	// action fell ~13x short (max_fee_too_low on every submit).
+	forwardResourceFactor = 2
 	// forwardExpiryLedgers is how long the signed fee terms stay valid
 	// (~10 min): past signing and submission.
 	forwardExpiryLedgers = 120
@@ -107,10 +105,11 @@ func (s *TransactionService) planForward(ctx context.Context, wallet string, tar
 	if err != nil {
 		return forwardWrap{}, fmt.Errorf("fee token config: %w", err)
 	}
-	resourceFee, latest, err := s.simulateResourceFee(ctx, target)
+	latest, err := s.soroban.GetLatestLedger(ctx, s.rpcURL)
 	if err != nil {
-		return forwardWrap{}, err
+		return forwardWrap{}, fmt.Errorf("latest ledger: %w", err)
 	}
+	expiration := uint32(latest) + forwardExpiryLedgers //nolint:gosec // ledger sequence numbers fit in u32
 
 	tokens := append([]service.GaslessFeeToken(nil), cfg.FeeTokens...)
 	for i, t := range tokens {
@@ -121,21 +120,30 @@ func (s *TransactionService) planForward(ctx context.Context, wallet string, tar
 	var chosen *service.GaslessQuote
 	var quoteErr error
 	for _, t := range tokens {
+		hi, lo, err := s.balanceOf(ctx, t.Contract, wallet)
+		if err != nil {
+			return forwardWrap{}, fmt.Errorf("fee token balance: %w", err)
+		}
+		spare := i128ToBigInt(hi, lo)
+		if spendToken == t.Contract && spendAmount != nil {
+			spare.Sub(spare, spendAmount)
+		}
+		// forward() moves at least one unit of the fee token, so a wallet
+		// that can't spare one can't pay in it, and simulating would fail.
+		if spare.Sign() <= 0 {
+			continue
+		}
+		resourceFee, err := s.simulateForwardFee(ctx, cfg, t.Contract, expiration, target, wallet)
+		if err != nil {
+			return forwardWrap{}, err
+		}
 		q, err := s.gasless.Quote(ctx, t.Contract, forwardResourceFactor*resourceFee)
 		if err != nil {
 			quoteErr = err // e.g. no XLM/USD price for USDC: try the next token
 			slog.Warn("gasless forward: fee token quote failed", "token", t.Symbol, "err", err)
 			continue
 		}
-		hi, lo, err := s.balanceOf(ctx, t.Contract, wallet)
-		if err != nil {
-			return forwardWrap{}, fmt.Errorf("fee token balance: %w", err)
-		}
-		need := big.NewInt(q.MaxFeeAmount)
-		if spendToken == t.Contract && spendAmount != nil {
-			need.Add(need, spendAmount)
-		}
-		if i128ToBigInt(hi, lo).Cmp(need) >= 0 {
+		if spare.Cmp(big.NewInt(q.MaxFeeAmount)) >= 0 {
 			chosen = &q
 			break
 		}
@@ -148,7 +156,7 @@ func (s *TransactionService) planForward(ctx context.Context, wallet string, tar
 	}
 
 	hf, err := forwardHostFunction(cfg.FeeForwarder, chosen.FeeToken, chosen.MaxFeeAmount,
-		uint32(latest)+forwardExpiryLedgers, target, wallet, cfg.Relayer) //nolint:gosec // ledger sequence numbers fit in u32
+		expiration, target, wallet, cfg.Relayer)
 	if err != nil {
 		return forwardWrap{}, err
 	}
@@ -165,10 +173,15 @@ func (s *TransactionService) planForward(ctx context.Context, wallet string, tar
 	}, nil
 }
 
-// simulateResourceFee simulates target alone, auth recorded, for its
-// resource fee and the latest ledger.
-func (s *TransactionService) simulateResourceFee(ctx context.Context, target xdr.InvokeContractArgs) (int64, int64, error) {
-	fn := xdr.HostFunction{Type: xdr.HostFunctionTypeHostFunctionTypeInvokeContract, InvokeContract: &target}
+// simulateForwardFee simulates target wrapped in forward() paid in
+// feeToken, auth recorded, for its resource fee. Pricing target alone misses
+// the fee payment and what the FeeForwarder writes, which dominate the cost.
+func (s *TransactionService) simulateForwardFee(ctx context.Context, cfg service.GaslessFeeConfig, feeToken string, expiration uint32, target xdr.InvokeContractArgs, wallet string) (int64, error) {
+	// max_fee_amount only bounds the fee; its value doesn't change the cost.
+	fn, err := forwardHostFunction(cfg.FeeForwarder, feeToken, 1, expiration, target, wallet, cfg.Relayer)
+	if err != nil {
+		return 0, err
+	}
 	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
 		SourceAccount:        &txnbuild.SimpleAccount{AccountID: simDummySourceAccount, Sequence: 0},
 		Operations:           []txnbuild.Operation{&txnbuild.InvokeHostFunction{HostFunction: fn, SourceAccount: simDummySourceAccount}},
@@ -177,24 +190,24 @@ func (s *TransactionService) simulateResourceFee(ctx context.Context, target xdr
 		IncrementSequenceNum: true,
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("build fee simulation: %w", err)
+		return 0, fmt.Errorf("build fee simulation: %w", err)
 	}
 	b64, err := tx.Base64()
 	if err != nil {
-		return 0, 0, fmt.Errorf("encode fee simulation: %w", err)
+		return 0, fmt.Errorf("encode fee simulation: %w", err)
 	}
 	sim, err := s.soroban.SimulateTransaction(ctx, s.rpcURL, b64, service.RPCResourceConfig{})
 	if err != nil {
-		return 0, 0, fmt.Errorf("simulate for network fee: %w", err)
+		return 0, fmt.Errorf("simulate for network fee: %w", err)
 	}
 	if sim.Error != "" {
-		return 0, 0, fmt.Errorf("simulation failed: %s", sim.Error)
+		return 0, fmt.Errorf("simulation failed: %s", sim.Error)
 	}
 	fee, err := strconv.ParseInt(sim.MinResourceFee, 10, 64)
 	if err != nil {
-		return 0, 0, fmt.Errorf("parse resource fee %q: %w", sim.MinResourceFee, err)
+		return 0, fmt.Errorf("parse resource fee %q: %w", sim.MinResourceFee, err)
 	}
-	return fee, sim.LatestLedger, nil
+	return fee, nil
 }
 
 // forwardHostFunction builds forward(token, 1, maxFee, expiration, target…,
