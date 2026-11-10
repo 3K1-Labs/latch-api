@@ -22,6 +22,13 @@ var ErrSwapSignerMismatch = errors.New("swap context rule does not match the req
 // balance, signerG equal to the bundler fee-payer).
 var ErrSwapValidation = errors.New("swap validation error")
 
+// ErrInvalidSwapChainXdr is returned when swapChainXdr fails to decode. Kept
+// distinct from ErrSwapValidation so the handler can log the decoder's error
+// (which may echo back attacker-controlled input) without putting it in the
+// client-facing message — see security.md's "internal error details must
+// never reach the client".
+var ErrInvalidSwapChainXdr = errors.New("invalid swapChainXdr")
+
 var u128Pattern = regexp.MustCompile(`^\d+$`)
 
 // parseU128Raw parses a raw non-negative integer string (minimal-unit
@@ -282,7 +289,7 @@ func (s *TransactionService) BuildSwap(ctx context.Context, in BuildSwapInput) (
 	}
 	var swapChainVal xdr.ScVal
 	if err := xdr.SafeUnmarshalBase64(in.SwapChainXdr, &swapChainVal); err != nil {
-		return BuildSwapResult{}, fmt.Errorf("%w: invalid swapChainXdr (len=%d): %v", ErrSwapValidation, len(in.SwapChainXdr), err)
+		return BuildSwapResult{}, fmt.Errorf("%w (len=%d): %v", ErrInvalidSwapChainXdr, len(in.SwapChainXdr), err)
 	}
 	smartAccountVal, err := scAddress(in.SmartAccountAddress)
 	if err != nil {

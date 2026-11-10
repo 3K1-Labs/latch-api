@@ -220,7 +220,7 @@ func TestBuildSwap_InvalidSwapChainXdr(t *testing.T) {
 		AmountOutMinRaw:     "1",
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrSwapValidation)
+	assert.ErrorIs(t, err, ErrInvalidSwapChainXdr)
 }
 
 func TestBuildSwap_CoreEngineErrPropagates(t *testing.T) {

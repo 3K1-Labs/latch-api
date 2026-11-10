@@ -805,6 +805,9 @@ func buildSwapErrorResponse(c *gin.Context, smartAccountAddress string, err erro
 			"code":            webappx.ErrSignerMismatch,
 			"suggestedAction": "reconfigure_swap_rule",
 		})
+	case errors.Is(err, webapp.ErrInvalidSwapChainXdr):
+		slog.Warn("build swap transaction", "smartAccountAddress", smartAccountAddress, "err", err)
+		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, "invalid swapChainXdr")
 	case errors.Is(err, webapp.ErrSwapValidation):
 		webappx.Fail(c, http.StatusBadRequest, webappx.ErrValidation, err.Error())
 	default:

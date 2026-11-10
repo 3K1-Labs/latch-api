@@ -1,6 +1,8 @@
 package webapp
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -441,6 +443,29 @@ func TestBuildSwap_ValidationError(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), `"code":"validation_error"`)
+}
+
+func TestBuildSwap_InvalidSwapChainXdr(t *testing.T) {
+	decodeErr := fmt.Errorf("%w (len=10): %v", webapp.ErrInvalidSwapChainXdr, errors.New("xdr: decoder internals"))
+	h := NewTransactionHandler(&stubTransaction{buildSwapErr: decodeErr}, testCfg())
+	r := gin.New()
+	r.POST("/transaction/build-swap", h.BuildSwap)
+
+	req := httptest.NewRequest(http.MethodPost, "/transaction/build-swap", postJSONBody(map[string]any{
+		"smartAccountAddress": "CADDRESS",
+		"signerType":          "passkey",
+		"swapChainXdr":        "AAAAswap==",
+		"tokenInContractId":   "CTOKEN",
+		"amountInRaw":         "100",
+		"amountOutMinRaw":     "90",
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"validation_error"`)
+	assert.Contains(t, w.Body.String(), "invalid swapChainXdr")
+	assert.NotContains(t, w.Body.String(), "decoder internals")
 }
 
 func TestBuildSwap_InternalError(t *testing.T) {
