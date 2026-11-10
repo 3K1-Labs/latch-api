@@ -73,13 +73,17 @@ func TestPlanForward_FeeToken(t *testing.T) {
 		spend      int64
 		wantToken  string
 		wantErr    error
+		wantSims   []string // fee token of each forward() simulation
 	}{
-		{"XLM first", map[string]int64{fwdXLMSAC: 1_000_000, fwdUSDCSAC: 1_000_000}, nil, "", 0, fwdXLMSAC, nil},
-		{"USDC when XLM can't cover the fee", map[string]int64{fwdXLMSAC: 100_000, fwdUSDCSAC: 1_000_000}, nil, "", 0, fwdUSDCSAC, nil},
-		{"sending XLM counts toward the XLM check", map[string]int64{fwdXLMSAC: 5_100_000, fwdUSDCSAC: 1_000_000}, nil, fwdXLMSAC, 5_000_000, fwdUSDCSAC, nil},
-		{"XLM covers spend plus fee", map[string]int64{fwdXLMSAC: 5_200_000, fwdUSDCSAC: 0}, nil, fwdXLMSAC, 5_000_000, fwdXLMSAC, nil},
-		{"neither covers it", map[string]int64{fwdXLMSAC: 10, fwdUSDCSAC: 10}, nil, "", 0, "", ErrInsufficientFeeBalance},
-		{"unpriced USDC is skipped", map[string]int64{fwdXLMSAC: 10, fwdUSDCSAC: 1_000_000}, map[string]int64{fwdXLMSAC: 140_000}, "", 0, "", service.ErrGaslessUnavailable},
+		{"XLM first", map[string]int64{fwdXLMSAC: 1_000_000, fwdUSDCSAC: 1_000_000}, nil, "", 0, fwdXLMSAC, nil, []string{fwdXLMSAC}},
+		{"USDC when XLM can't cover the fee", map[string]int64{fwdXLMSAC: 100_000, fwdUSDCSAC: 1_000_000}, nil, "", 0, fwdUSDCSAC, nil, []string{fwdXLMSAC, fwdUSDCSAC}},
+		{"no XLM: priced and paid in USDC only", map[string]int64{fwdXLMSAC: 0, fwdUSDCSAC: 1_000_000}, nil, "", 0, fwdUSDCSAC, nil, []string{fwdUSDCSAC}},
+		{"sending all XLM leaves none for the fee", map[string]int64{fwdXLMSAC: 5_000_000, fwdUSDCSAC: 1_000_000}, nil, fwdXLMSAC, 5_000_000, fwdUSDCSAC, nil, []string{fwdUSDCSAC}},
+		{"sending XLM counts toward the XLM check", map[string]int64{fwdXLMSAC: 5_100_000, fwdUSDCSAC: 1_000_000}, nil, fwdXLMSAC, 5_000_000, fwdUSDCSAC, nil, []string{fwdXLMSAC, fwdUSDCSAC}},
+		{"XLM covers spend plus fee", map[string]int64{fwdXLMSAC: 5_200_000, fwdUSDCSAC: 0}, nil, fwdXLMSAC, 5_000_000, fwdXLMSAC, nil, []string{fwdXLMSAC}},
+		{"neither covers it", map[string]int64{fwdXLMSAC: 10, fwdUSDCSAC: 10}, nil, "", 0, "", ErrInsufficientFeeBalance, nil},
+		{"neither has any", map[string]int64{fwdXLMSAC: 0, fwdUSDCSAC: 0}, nil, "", 0, "", ErrInsufficientFeeBalance, nil},
+		{"unpriced USDC is skipped", map[string]int64{fwdXLMSAC: 10, fwdUSDCSAC: 1_000_000}, map[string]int64{fwdXLMSAC: 140_000}, "", 0, "", service.ErrGaslessUnavailable, nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,7 +104,8 @@ func TestPlanForward_FeeToken(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantToken, w.fee.Token)
 			assert.Equal(t, testExecutor, w.executor)
-			assert.Equal(t, int64(4*50_000), g.quoted[0], "quote asks for 4x the plain action's resource fee")
+			assert.Equal(t, int64(2*50_000), g.quoted[0], "quote asks for 2x forward()'s simulated resource fee")
+			assert.Equal(t, tc.wantSims, rpc.simTokens, "forward() is simulated only in tokens the wallet can spare")
 		})
 	}
 }
