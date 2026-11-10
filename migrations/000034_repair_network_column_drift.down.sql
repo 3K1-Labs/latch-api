@@ -1,0 +1,3 @@
+-- No-op. The up migration only brings a drifted database back to the schema
+-- that migrations 000001-000033 already describe; there is no prior state
+-- worth restoring.
